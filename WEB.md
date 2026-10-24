@@ -109,7 +109,7 @@ the game.
 | World | single player, `--in-frame` only; generation, lighting and meshing run as inline jobs each frame (`Streaming::pump_inline`, 40 ms budget); world loading runs inline (`world_loading::Handle`) |
 | Files | `horizon_core::fs`: an in-memory store on wasm (the data archive is mounted read-write; saves live until the tab closes) |
 | Time | `web-time` everywhere `Instant`/`SystemTime` were used |
-| Threads | none: `thread::Builder::spawn` fails on wasm, and every caller that matters now falls back (region writer, occlusion worker, prefetches) or runs inline (HUD sprite decode, mod-content tables) |
+| Threads | none: `thread::Builder::spawn` returns an error on wasm, which callers that already handled a failed spawn (`.ok()`) absorb; the places that panicked (`thread::spawn`/`thread::scope`) run inline on wasm: streaming workers, world loading, HUD sprite decode, mod-content tables. Other spawn sites (region writer, LOD, saving) are not audited for the web yet |
 | Off | audio, controllers, mods (wasmtime), networking (multiplayer, LAN, friends/relay, HTTPS), clipboard, telemetry upload, LOD/distant terrain, persistence |
 
 ## Known issues
@@ -118,6 +118,9 @@ the game.
   SwiftShader.
 - `thread::sleep`, `recv_timeout` and blocking `device.poll(Wait)` paths (screenshots, F2, LOD) are not
   reworked yet. Avoid them on the web.
+- Clicking into the game asks for pointer lock; Chrome refuses it without a user gesture (a
+  harmless `NotAllowedError` in automated runs).
+- About 8 frames a second under SwiftShader at render distance 4 (546 frames in ~65 s).
 - The page is ~140–160 MB to download before the game starts. Nothing is cached yet.
 
 ## Next steps
