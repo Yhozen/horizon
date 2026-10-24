@@ -77,7 +77,7 @@ pub struct UiState {
     pub chat: Chat,
     pub chat_screen: Option<ChatScreen>,
     /// When the chat screen opened (its input took the focus: the cursor blink).
-    pub chat_opened: Option<std::time::Instant>,
+    pub chat_opened: Option<web_time::Instant>,
     pub registries: Registries,
     pub rules: GameRules,
     pub clock: WorldClock,
@@ -98,7 +98,7 @@ pub struct UiState {
     pub vanilla_root: std::path::PathBuf,
     /// Death screen cause and when the player died (buttons wait 20 ticks).
     pub death_text: Option<Text>,
-    pub died_at: Option<std::time::Instant>,
+    pub died_at: Option<web_time::Instant>,
 }
 
 impl Game<'_> {
@@ -426,7 +426,7 @@ impl Game<'_> {
         );
         screen.auto_suggestions = self.settings.auto_suggestions;
         self.ui.chat_screen = Some(screen);
-        self.ui.chat_opened = Some(std::time::Instant::now());
+        self.ui.chat_opened = Some(web_time::Instant::now());
         self.screen = Screen::Chat;
         self.keys.clear();
         self.left = false;
@@ -823,7 +823,7 @@ impl Game<'_> {
     /// cause is known to the client).
     pub(super) fn death_message(&mut self) {
         let cause = self.ui.death_cause.take();
-        self.ui.died_at = Some(std::time::Instant::now());
+        self.ui.died_at = Some(web_time::Instant::now());
         self.ui.death_text = None;
         if !self.ui.rules.bool("show_death_messages") {
             return;
@@ -894,8 +894,8 @@ impl Game<'_> {
 /// `yyyy-MM-dd_HH.mm.ss[_n].png` (Util.getFilenameFormattedDateTime, local time
 /// approximated as UTC).
 pub fn screenshot_name(dir: &std::path::Path) -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let secs = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     let days = (secs / 86400) as i64;
     let (h, m, s) = ((secs % 86400) / 3600, (secs % 3600) / 60, secs % 60);

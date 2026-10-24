@@ -804,7 +804,8 @@ mod tests {
     #[test]
     #[ignore = "requires prepared resources and real pack paths in environment"]
     fn benchmark_real_resource_root() {
-        use std::{hint::black_box, time::Instant};
+        use std::hint::black_box;
+        use web_time::Instant;
         let vanilla = PathBuf::from(std::env::var("HORIZON_OVERLAY_BENCH_VANILLA").unwrap());
         assert!(vanilla.join("horizon-resources.json").is_file());
         let paths: Vec<PathBuf> =

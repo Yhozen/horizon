@@ -128,7 +128,7 @@ pub struct Title {
     /// Direct Connection's address, synchronized with `options.txt`'s `lastServer`.
     pub last_server: String,
     pub saves: PathBuf,
-    pub started: std::time::Instant,
+    pub started: web_time::Instant,
     search: String,
     search_focused: bool,
     /// The focused text field's cursor, selection and scroll.
@@ -143,7 +143,7 @@ pub struct Title {
     icons: RefCell<std::collections::HashMap<PathBuf, (std::time::SystemTime, Option<Vec<u8>>)>>,
     splash: Option<String>,
     /// The saves listed for Home, re-read every couple of seconds.
-    recent: std::cell::RefCell<Option<(std::time::Instant, Vec<WorldEntry>)>>,
+    recent: std::cell::RefCell<Option<(web_time::Instant, Vec<WorldEntry>)>>,
 }
 pub(crate) struct Button {
     x: f32,
@@ -226,7 +226,7 @@ impl Title {
         use chrono::Datelike;
         let today = chrono::Local::now();
         let mode = Mode::Main;
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         Self {
             mode,
             last_server: String::new(),
@@ -245,8 +245,8 @@ impl Title {
             splash: choose_splash(
                 &std::fs::read_to_string(resources.join("assets/minecraft/texts/splashes.txt"))
                     .unwrap_or_default(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
+                web_time::SystemTime::now()
+                    .duration_since(web_time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .subsec_nanos() as usize,
                 (today.month(), today.day()),
@@ -514,7 +514,7 @@ impl Title {
             Some((at, worlds)) if at.elapsed().as_secs() < 2 => worlds.clone(),
             _ => {
                 let worlds = list_worlds(&self.saves);
-                *recent = Some((std::time::Instant::now(), worlds.clone()));
+                *recent = Some((web_time::Instant::now(), worlds.clone()));
                 worlds
             }
         }

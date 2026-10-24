@@ -8,6 +8,8 @@ rust-version = "1.90"
 description = "Horizon native development client"
 
 [dependencies]
+# std::time on native; the page clock in the browser build (docs/web.md), where std's panics.
+web-time = "1.1"
 horizon-assets = { path = "../horizon-assets" }
 horizon-core = { path = "../horizon-core" }
 # The server thread ahead of the workers (MinecraftServer.spin's Thread.setPriority).

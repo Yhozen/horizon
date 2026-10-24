@@ -26,8 +26,9 @@ use horizon_world::nbt::{JavaString, Tag};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock, mpsc},
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 mod status;
 

@@ -16,7 +16,6 @@ use std::{
         OnceLock,
         atomic::{AtomicU64, Ordering},
     },
-    time::UNIX_EPOCH,
 };
 
 const MAGIC: &[u8; 8] = b"HZBEHAV\0";
@@ -146,7 +145,7 @@ fn fingerprint(registry: &BlockRegistry, root: &Path) -> io::Result<[u8; 32]> {
     hasher.update(built.len().to_le_bytes());
     let modified = built
         .modified()?
-        .duration_since(UNIX_EPOCH)
+        .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| invalid(e.to_string()))?;
     hasher.update(modified.as_nanos().to_le_bytes());
     for relative in [

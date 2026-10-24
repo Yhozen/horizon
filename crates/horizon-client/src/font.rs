@@ -598,8 +598,8 @@ impl Font {
                     pending: Vec::new(),
                 },
                 random: horizon_core::random::LegacyRandom::new(
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
+                    web_time::SystemTime::now()
+                        .duration_since(web_time::UNIX_EPOCH)
                         .map_or(0, |d| d.as_nanos() as i64),
                 ),
             }),

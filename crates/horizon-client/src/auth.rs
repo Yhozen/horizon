@@ -6,7 +6,7 @@
 use std::{
     path::Path,
     sync::{Arc, Mutex, OnceLock},
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
 /// MinecraftServicesEnvironment.PROD.
@@ -92,7 +92,7 @@ impl AuthSession {
         let age = meta
             .modified()
             .ok()
-            .and_then(|m| SystemTime::now().duration_since(m).ok())
+            .and_then(|m| std::time::SystemTime::now().duration_since(m).ok())
             .unwrap_or_default();
         if age > MAX_SESSION_FILE_AGE {
             return refuse("it is too old (start the game from the launcher)");

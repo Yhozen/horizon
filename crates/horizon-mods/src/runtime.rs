@@ -3,12 +3,13 @@ use crate::manifest::{Manifest, Package, Side};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant, SystemTime},
+    time::Duration,
 };
 use wasmtime::{
     Config, Engine, Store, StoreLimits, StoreLimitsBuilder, Trap,
     component::{Component, HasSelf, Linker},
 };
+use web_time::{Instant, SystemTime};
 
 mod bindings {
     wasmtime::component::bindgen!({

@@ -7,7 +7,8 @@ use super::{
 };
 use horizon_client::gamepad::{self, Button, GlyphStyle, PadState, Rumble, TriggerFeel};
 use serde_json::{Value, json};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// The controllers gilrs sees and the DualSense's output.
 #[derive(Default)]

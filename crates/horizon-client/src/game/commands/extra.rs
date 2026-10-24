@@ -8,7 +8,8 @@ use horizon_client::{
     command::CommandError,
     text::{self, Style, Text},
 };
-use std::{collections::HashMap, time::Instant};
+use std::collections::HashMap;
+use web_time::Instant;
 
 /// Waypoint.Icon: the locator bar style and colour of a transmitter.
 #[derive(Clone, Debug, PartialEq)]
@@ -73,8 +74,8 @@ fn two_places(v: f64) -> String {
 }
 /// `Util.getFilenameFormattedDateTime` (`yyyy-MM-dd_HH.mm.ss`, local time).
 fn filename_date_time() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let secs = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64);
     let (y, mo, d, h, mi, s) = civil(secs);
     format!("{y:04}-{mo:02}-{d:02}_{h:02}.{mi:02}.{s:02}")

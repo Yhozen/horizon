@@ -10,8 +10,9 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 use horizon_client::control::Stream;
 use serde_json::{Value, json};

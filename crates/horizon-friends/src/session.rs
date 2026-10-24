@@ -16,8 +16,9 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc::{Sender, channel},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 pub(crate) type Secure = (SecureReader<TcpStream>, SecureWriter<TcpStream>);
 

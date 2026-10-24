@@ -1047,7 +1047,7 @@ where
             self.settings.noise_height,
             self.settings.sea_level,
         );
-        let mut clock = std::time::Instant::now();
+        let mut clock = web_time::Instant::now();
         let mut neighbors = Vec::with_capacity(9);
         let mut possible = BTreeSet::new();
         for dz in -1..=1 {
@@ -1582,8 +1582,8 @@ impl<R: RandomSource> MaterialSurfaceQueries for SurfaceQueries<'_, '_, R> {
     }
 }
 
-fn lap(clock: &mut std::time::Instant) -> std::time::Duration {
-    let now = std::time::Instant::now();
+fn lap(clock: &mut web_time::Instant) -> std::time::Duration {
+    let now = web_time::Instant::now();
     let elapsed = now - *clock;
     *clock = now;
     elapsed
@@ -2758,7 +2758,7 @@ mod tests {
             sample.water.is_some(),
             "fixture includes underwater terrain"
         );
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         let mut exact = Vec::new();
         for z in 0..8 {
             for x in 0..8 {
@@ -2766,7 +2766,7 @@ mod tests {
             }
         }
         let dense_time = started.elapsed();
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         let direct = worker.lod_grid(-1024, 0, 32, 8).unwrap();
         for z in 0..8 {
             for x in 0..8 {

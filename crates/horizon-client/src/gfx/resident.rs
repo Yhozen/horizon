@@ -408,7 +408,8 @@ mod tests {
     #[test]
     #[ignore = "timing, not a check"]
     fn column_walk_speed() {
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use web_time::Instant;
         let mut r = Resident::default();
         let mut map = HashMap::new();
         for x in -33i32..=33 {

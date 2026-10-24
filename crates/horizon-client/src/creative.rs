@@ -38,7 +38,7 @@ pub struct Creative {
     pub search: String,
     /// When the search box took the focus (`EditBox.setFocused`): its
     /// cursor blinks from then.
-    pub search_focused: std::time::Instant,
+    pub search_focused: web_time::Instant,
     /// The search tab's stacks, in its display order.
     search_items: Vec<ItemStack>,
     search_index: Vec<SearchEntry>,
@@ -243,7 +243,7 @@ impl Creative {
             scroll: 0.0,
             scrolling: false,
             search: String::new(),
-            search_focused: std::time::Instant::now(),
+            search_focused: web_time::Instant::now(),
             search_items,
             search_index,
         }
@@ -269,7 +269,7 @@ impl Creative {
         self.selected = tab;
         self.scroll = 0.0;
         if self.tab().search {
-            self.search_focused = std::time::Instant::now();
+            self.search_focused = web_time::Instant::now();
         }
     }
     /// The search tab's stacks.

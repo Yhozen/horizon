@@ -15,7 +15,8 @@ use horizon_client::{
 };
 use horizon_friends::{Host, HostConfig, HostEvent, PathMode, host::DEFAULT_PORT, reach, stun};
 use horizon_protocol::{GAME_VERSION, PROTOCOL_VERSION};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 pub(super) struct Sharing {
     host: Host,

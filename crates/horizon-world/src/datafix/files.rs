@@ -569,8 +569,8 @@ fn fix_4899(base: &Path) -> io::Result<()> {
 /// `FileFixerUpper.addVersionsToLevelData`.
 fn add_versions(data: &mut Tag) {
     set(data, "DataVersion", Tag::Int(CURRENT));
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let now = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64);
     set(data, "LastPlayed", Tag::Long(now));
     set(

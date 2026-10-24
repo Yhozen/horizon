@@ -15,8 +15,9 @@ use std::{
     net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream},
     sync::mpsc::channel,
     thread::JoinHandle,
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 pub struct GuestConfig {
     /// The code as pasted: a full invite, or a relay's short code.
@@ -269,13 +270,13 @@ impl Tunnel {
         let thread = std::thread::Builder::new()
             .name("horizon-friends-guest".into())
             .spawn(move || {
-                let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                let deadline = web_time::Instant::now() + Duration::from_secs(30);
                 let plain = loop {
                     match listener.accept() {
                         Ok((s, from)) if from.ip().is_loopback() => break Some(s),
                         Ok(_) => {}
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                            if std::time::Instant::now() > deadline {
+                            if web_time::Instant::now() > deadline {
                                 break None;
                             }
                             std::thread::sleep(Duration::from_millis(10));

@@ -12,8 +12,9 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc::Sender,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 /// How long the ends try to reach each other directly.
 pub const RACE: Duration = Duration::from_millis(3000);
@@ -38,6 +39,7 @@ fn socket_for(addr: &SocketAddr) -> io::Result<Socket> {
     Ok(s)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unspecified(v6: bool, port: u16) -> SocketAddr {
     if v6 {
         SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port)

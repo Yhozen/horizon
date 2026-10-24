@@ -465,8 +465,8 @@ mod tests {
         let root = std::env::temp_dir().join(format!(
             "horizon-sprite-detail-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            web_time::SystemTime::now()
+                .duration_since(web_time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));

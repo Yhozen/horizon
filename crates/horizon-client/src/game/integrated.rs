@@ -33,8 +33,9 @@ use std::{
         mpsc::{Receiver, Sender, channel, sync_channel},
     },
     thread::JoinHandle,
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 /// What the window tells its server thread.
 #[derive(Default)]

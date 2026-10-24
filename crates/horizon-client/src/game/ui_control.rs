@@ -9,10 +9,8 @@ use horizon_client::{
     widgets::{self, Kind, Node},
 };
 use serde_json::{Value, json};
-use std::{
-    sync::mpsc::Sender,
-    time::{Duration, Instant},
-};
+use std::{sync::mpsc::Sender, time::Duration};
+use web_time::Instant;
 use winit::{event::MouseButton, event_loop::ActiveEventLoop};
 
 pub(super) const HELP: &[&str] = &[

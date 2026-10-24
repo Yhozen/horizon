@@ -48,8 +48,9 @@ use horizon_world::{
 use std::{
     collections::{HashMap, VecDeque},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 use winit::{event::MouseButton, keyboard::KeyCode};
 
 /// A text component the server sent, for the HUD.
@@ -4393,8 +4394,8 @@ impl Game<'_> {
                 command: command.to_owned(),
             }));
         } else {
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            let timestamp = web_time::SystemTime::now()
+                .duration_since(web_time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_millis() as i64);
             self.send(S::Chat(play::Chat {
                 message: message.chars().take(256).collect(),

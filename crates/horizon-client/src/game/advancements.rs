@@ -13,8 +13,8 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
-    time::Instant,
 };
+use web_time::Instant;
 
 pub(super) struct Toast {
     icon: String,
@@ -185,8 +185,8 @@ impl adv::World for View<'_, '_> {
     }
 }
 fn now_text() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let secs = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs()) as i64;
     adv::date_text(secs)
 }

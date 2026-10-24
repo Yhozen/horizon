@@ -10,7 +10,8 @@ use crate::{
     sprites::SpriteAnimation,
 };
 use glam::{DVec3, Mat4, Vec3, Vec4};
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use web_time::Instant;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 

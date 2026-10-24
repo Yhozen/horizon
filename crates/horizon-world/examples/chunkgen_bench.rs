@@ -24,8 +24,8 @@ use std::{
         Mutex,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Instant,
 };
+use web_time::Instant;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 

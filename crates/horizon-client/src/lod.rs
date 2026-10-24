@@ -538,13 +538,13 @@ pub struct Lod {
     sample_nearby: bool,
     detail_masks: FxHashMap<TileKey, [u64; 4]>,
     detail_request_pending: bool,
-    detail_request_at: std::time::Instant,
+    detail_request_at: web_time::Instant,
     /// Four threads or fewer: far work waits for the near terrain (`hold`).
     small: bool,
     /// The near terrain is loading (`set_near_loading`).
     near_loading: bool,
     /// When `request_samples` last started a job while held.
-    held_sample_at: std::time::Instant,
+    held_sample_at: web_time::Instant,
     /// Each tile's samples, shared with mesh jobs in flight.
     ready: FxHashMap<TileKey, Arc<Vec<Column>>>,
     active: FxHashSet<TileKey>,
@@ -735,10 +735,10 @@ impl Lod {
             sample_nearby: true,
             detail_masks: FxHashMap::default(),
             detail_request_pending: false,
-            detail_request_at: std::time::Instant::now(),
+            detail_request_at: web_time::Instant::now(),
             small: thread::available_parallelism().map_or(1, |n| n.get()) <= 4,
             near_loading: false,
-            held_sample_at: std::time::Instant::now(),
+            held_sample_at: web_time::Instant::now(),
             ready: FxHashMap::default(),
             active: FxHashSet::default(),
             dirty: FxHashSet::default(),
@@ -961,7 +961,7 @@ impl Lod {
         {
             return;
         }
-        self.detail_request_at = std::time::Instant::now();
+        self.detail_request_at = web_time::Instant::now();
         let mut keys: Vec<_> = self
             .active
             .iter()
@@ -1220,7 +1220,7 @@ impl Lod {
             return;
         }
         if self.held() {
-            self.held_sample_at = std::time::Instant::now();
+            self.held_sample_at = web_time::Instant::now();
         }
         // Load desired nearby leaves directly, alongside broad fallback coverage.
         // Waiting for every ancestor/sibling made full detail take minutes to appear.
@@ -1868,13 +1868,13 @@ mod tests {
         // As a replan does (`update` only selects after a change).
         lod.reselect = true;
         let await_meshes = |lod: &mut Lod| {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let deadline = web_time::Instant::now() + std::time::Duration::from_secs(5);
             loop {
                 let meshes = lod.update(camera, 0.0, 2, 64, None);
                 if !meshes.is_empty() {
                     return meshes;
                 }
-                assert!(std::time::Instant::now() < deadline, "mesh worker stalled");
+                assert!(web_time::Instant::now() < deadline, "mesh worker stalled");
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
         };
@@ -1916,14 +1916,14 @@ mod tests {
         lod.covered.insert((-1, -2));
         lod.reselect = true;
         lod.replanned = true;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = web_time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             lod.update(camera, 0., 2, 64, None);
             if !lod.meshing && lod.active.is_empty() {
                 break;
             }
             assert!(
-                std::time::Instant::now() < deadline,
+                web_time::Instant::now() < deadline,
                 "covered normal chunk remained an active LOD mask"
             );
             std::thread::sleep(std::time::Duration::from_millis(1));
@@ -2028,7 +2028,7 @@ mod tests {
         lod.detail_masks.clear();
         lod.covered = [(0, 0)].into_iter().collect();
         lod.detail_request_pending = false;
-        lod.detail_request_at = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        lod.detail_request_at = web_time::Instant::now() - std::time::Duration::from_secs(1);
         lod.request_detail([0, 0]);
         let Some(Job::RequestDetail { chunks, .. }) = lod.shared.jobs.lock().unwrap().pop_front()
         else {

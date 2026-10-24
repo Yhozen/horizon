@@ -8,8 +8,9 @@
 use std::{
     cell::RefCell,
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 thread_local! {
@@ -144,7 +145,7 @@ mod tests {
         // Busy until the clock shows 10 ms of work (a loaded machine gives
         // the thread less than its wall time).
         let mut x = 0u64;
-        let busy = std::time::Instant::now();
+        let busy = web_time::Instant::now();
         let worked = loop {
             x = std::hint::black_box(x.wrapping_mul(31).wrapping_add(7));
             let worked = super::thread_cpu().unwrap() - start - slept;

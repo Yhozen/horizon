@@ -54,8 +54,8 @@ impl WorldRequest {
             name: name.unwrap_or(&folder).to_owned(),
             // WorldOptions.randomSeed when no seed was given.
             seed: seed.unwrap_or_else(|| {
-                let t = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
+                let t = web_time::SystemTime::now()
+                    .duration_since(web_time::UNIX_EPOCH)
                     .map_or(0, |d| d.as_nanos() as u64);
                 (t ^ (t >> 29)).wrapping_mul(0x9E37_79B9_7F4A_7C15) as i64
             }),

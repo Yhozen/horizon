@@ -5,7 +5,8 @@ use crate::{
     hud::{HudAtlas, HudBatch, Rect, rgba},
     text::Text,
 };
-use std::{collections::HashMap, path::Path, sync::RwLock, time::Instant};
+use std::{collections::HashMap, path::Path, sync::RwLock};
+use web_time::Instant;
 
 /// `GuiSpriteScaling.NineSlice`: the sprite's size in GUI pixels, whatever
 /// its texture's resolution, its borders (left, top, right, bottom) in the

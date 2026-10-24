@@ -1254,6 +1254,7 @@ dependencies = [
  "horizon-telemetry",
  "serde",
  "serde_json",
+ "web-time",
 ]
 
 [[package]]
@@ -1308,6 +1309,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "web-time",
  "wgpu",
  "winit",
  "winresource",
@@ -1319,6 +1321,7 @@ name = "horizon-core"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "web-time",
 ]
 
 [[package]]
@@ -1343,6 +1346,7 @@ dependencies = [
  "sha2",
  "socket2",
  "spake2",
+ "web-time",
 ]
 
 [[package]]
@@ -1361,6 +1365,7 @@ dependencies = [
  "serde_json",
  "toml",
  "wasmtime",
+ "web-time",
  "wit-component 0.239.0",
  "wit-parser 0.239.0",
  "zip",
@@ -1407,6 +1412,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "web-time",
 ]
 
 [[package]]
@@ -1455,6 +1461,7 @@ dependencies = [
  "horizon-world",
  "log",
  "ureq",
+ "web-time",
 ]
 
 [[package]]
@@ -1466,6 +1473,7 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
+ "web-time",
 ]
 
 [[package]]
@@ -1492,6 +1500,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "web-time",
  "xxhash-rust",
 ]
 

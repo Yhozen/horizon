@@ -216,8 +216,8 @@ impl Game<'_> {
             .state_transforms()
             .ok_or_else(|| err("commands.place.template.invalid", &[&id]))?;
         let mut random = LegacyRandom::new(if seed == 0 {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            web_time::SystemTime::now()
+                .duration_since(web_time::UNIX_EPOCH)
                 .map_or(1, |d| d.as_millis() as i64)
         } else {
             seed

@@ -82,7 +82,8 @@ impl EntityBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{hint::black_box, time::Instant};
+    use std::hint::black_box;
+    use web_time::Instant;
 
     // Retain the original implementation as the equivalence/benchmark oracle.
     fn baseline(

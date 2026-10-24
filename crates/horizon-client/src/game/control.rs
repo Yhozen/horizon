@@ -3,10 +3,8 @@ use super::{Game, Screen};
 use horizon_client::{Result, items::ItemStack};
 use horizon_core::geometry::Vec3;
 use serde_json::{Value, json};
-use std::{
-    sync::mpsc::Sender,
-    time::{Duration, Instant},
-};
+use std::{sync::mpsc::Sender, time::Duration};
+use web_time::Instant;
 use winit::{event::MouseButton, event_loop::ActiveEventLoop, keyboard::KeyCode};
 
 const HELP: &[&str] = &[

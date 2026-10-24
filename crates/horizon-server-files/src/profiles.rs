@@ -52,13 +52,13 @@ pub fn find_by_name(discovery: &str, name: &str) -> Option<NameAndId> {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(15))
-        .user_agent(&format!("Horizon/{}", horizon_core::release::VERSION))
-        .build();
-    let doc = json::parse(&agent.get(discovery).call().ok()?.into_string().ok()?, true).ok()?;
-    let url = endpoint(&doc, "profiles", "getByName")?.replace("{name}", &name.to_lowercase());
-    found(&agent.get(&url).call().ok()?.into_string().ok()?, name)
+        let agent = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(15))
+            .user_agent(&format!("Horizon/{}", horizon_core::release::VERSION))
+            .build();
+        let doc = json::parse(&agent.get(discovery).call().ok()?.into_string().ok()?, true).ok()?;
+        let url = endpoint(&doc, "profiles", "getByName")?.replace("{name}", &name.to_lowercase());
+        found(&agent.get(&url).call().ok()?.into_string().ok()?, name)
     }
 }
 
@@ -76,16 +76,16 @@ pub fn fetch_profile_key_keys(discovery: &str) -> Result<Vec<RsaPublicKey>, &'st
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(15))
-        .user_agent(&format!("Horizon/{}", horizon_core::release::VERSION))
-        .build();
-    let get = |url: &str| agent.get(url).call().ok()?.into_string().ok();
-    let doc = get(discovery)
-        .and_then(|d| json::parse(&d, true).ok())
-        .ok_or(FAILED)?;
-    let url = endpoint(&doc, "authentication", "getPublicKeys").ok_or(FAILED)?;
-    profile_key_keys(&get(&url).ok_or(FAILED)?)
+        let agent = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(15))
+            .user_agent(&format!("Horizon/{}", horizon_core::release::VERSION))
+            .build();
+        let get = |url: &str| agent.get(url).call().ok()?.into_string().ok();
+        let doc = get(discovery)
+            .and_then(|d| json::parse(&d, true).ok())
+            .ok_or(FAILED)?;
+        let url = endpoint(&doc, "authentication", "getPublicKeys").ok_or(FAILED)?;
+        profile_key_keys(&get(&url).ok_or(FAILED)?)
     }
 }
 

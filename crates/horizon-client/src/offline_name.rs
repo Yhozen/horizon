@@ -48,8 +48,8 @@ fn parse(text: &str) -> Option<String> {
 }
 
 fn seed() -> u64 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let nanos = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos() as u64);
     // Two players starting the game in the same millisecond still differ.
     let mut x = nanos ^ u64::from(std::process::id()).rotate_left(32);

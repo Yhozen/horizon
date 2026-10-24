@@ -651,8 +651,8 @@ impl Screen {
                 let icons = icons.lock().unwrap();
                 // The row under the pointer (`isHovered`).
                 let hovered = row_at(servers.len(), games.len(), cursor, (w, h), scroll.amount);
-                let millis = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
+                let millis = web_time::SystemTime::now()
+                    .duration_since(web_time::UNIX_EPOCH)
                     .map_or(0, |d| d.as_millis());
                 let gray = rgba(128, 128, 128, 255);
                 for (i, row) in rows(servers.len(), games.len()).enumerate() {
@@ -955,7 +955,7 @@ impl Screen {
                     centered(batch, line, h / 2.0 - 16.0 + i as f32 * 9.0, u32::MAX);
                 }
                 if let Some(r) = retry {
-                    let text = r.text(std::time::Instant::now());
+                    let text = r.text(web_time::Instant::now());
                     centered(batch, &text, h / 2.0 + 16.0, rgba(170, 170, 170, 255));
                 }
             }
@@ -1250,7 +1250,7 @@ impl Screen {
         let Self::Disconnected { retry, .. } = self else {
             return None;
         };
-        if !retry.as_ref()?.due(std::time::Instant::now()) {
+        if !retry.as_ref()?.due(web_time::Instant::now()) {
             return None;
         }
         retry.take()

@@ -1416,8 +1416,8 @@ fn write_region_records(
     folder: &str,
     records: &[((i32, i32), &Record)],
 ) -> Result<()> {
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let timestamp = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as u32);
     let compressed = compress_records(records, timestamp);
     let mut by_region: BTreeMap<(i32, i32), Vec<(ChunkPos, Option<ChunkRecord>)>> = BTreeMap::new();
@@ -1970,8 +1970,8 @@ pub fn uuid_from_text(s: &str) -> Option<[i32; 4]> {
 }
 /// A random (version 4) UUID as vanilla's four-int form.
 pub fn random_uuid() -> [i32; 4] {
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let t = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos() as u64);
     let mut s = t ^ (std::process::id() as u64).rotate_left(32) ^ 0x9E37_79B9_7F4A_7C15;
     let mut next = || {
@@ -2848,8 +2848,8 @@ impl Level {
             "locked",
             Tag::Byte(i8::from(self.difficulty_locked)),
         );
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let now = web_time::SystemTime::now()
+            .duration_since(web_time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as i64);
         for (key, value) in [
             ("DataVersion", Tag::Int(DATA_VERSION)),

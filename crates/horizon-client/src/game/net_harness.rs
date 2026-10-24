@@ -7,10 +7,8 @@
 use super::Game;
 use horizon_client::Result;
 use serde_json::json;
-use std::{
-    path::Path,
-    time::{Duration, Instant},
-};
+use std::{path::Path, time::Duration};
+use web_time::Instant;
 
 impl Game<'_> {
     pub(super) fn run_net_harness(&mut self, report: &Path) -> Result<()> {

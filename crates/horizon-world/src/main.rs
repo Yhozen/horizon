@@ -170,8 +170,8 @@ fn run(args: &[String]) -> Result<(), Box<dyn Error>> {
                     properties,
                 },
             )?;
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
+            let timestamp = web_time::SystemTime::now()
+                .duration_since(web_time::UNIX_EPOCH)?
                 .as_secs() as u32;
             let next = ChunkRecord::from_nbt(
                 &chunk.into_nbt(),

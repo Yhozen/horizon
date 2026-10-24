@@ -583,7 +583,7 @@ pub fn ping(address: &str, timeout: Duration) -> Result<(serde_json::Value, u128
         }
         _ => return Err("unexpected status reply".into()),
     };
-    let start = std::time::Instant::now();
+    let start = web_time::Instant::now();
     c.send(&status::Serverbound::PingRequest(status::Ping { time: 1 }).encode())
         .map_err(e)?;
     let _ = c.recv().map_err(e)?;

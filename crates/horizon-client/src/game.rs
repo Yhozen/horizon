@@ -231,8 +231,9 @@ use std::{
         mpsc::{Receiver, TryRecvError},
     },
     thread::JoinHandle,
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
@@ -1166,7 +1167,7 @@ struct Game<'a> {
     /// The Mouse Tweaks extra's drag and wheel (`tweaks`).
     tweaks: tweaks::Tweaks,
     /// The last inventory click, for the double click that gathers a stack.
-    last_inv_click: Option<(std::time::Instant, usize, bool)>,
+    last_inv_click: Option<(web_time::Instant, usize, bool)>,
     /// `lastQuickMoved`: what the last Shift click moved, which a Shift
     /// double click moves every stack of.
     last_quick_moved: Option<ItemStack>,
@@ -6117,7 +6118,7 @@ impl Game<'_> {
             && shift
             && slot != 200
         {
-            let now = std::time::Instant::now();
+            let now = web_time::Instant::now();
             let double = self.last_inv_click.is_some_and(|(at, last, was_right)| {
                 last == slot && was_right == right && now.duration_since(at).as_millis() < 250
             });
@@ -6158,7 +6159,7 @@ impl Game<'_> {
         {
             // An item tab's display slots take no drags or PICKUP_ALL.
             let display = slot >= Creative::DISPLAY;
-            let now = std::time::Instant::now();
+            let now = web_time::Instant::now();
             let double = !right
                 && !display
                 && self.carried.is_some()

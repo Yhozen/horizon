@@ -24,11 +24,8 @@ use horizon_client::{
     ticket_levels::ChunkTickets, world::World,
 };
 use horizon_world::level::{LevelEvent, Ticks};
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
+use web_time::Instant;
 
 /// Server ticks a level other than the Overworld stays loaded with no player
 /// in it, before it is saved and closed (vanilla unloads a level's chunks

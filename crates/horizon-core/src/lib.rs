@@ -7,6 +7,7 @@
 pub mod biome;
 pub mod carving;
 pub mod density;
+pub mod fs;
 pub mod geometry;
 pub mod jmath;
 pub mod no_ai;

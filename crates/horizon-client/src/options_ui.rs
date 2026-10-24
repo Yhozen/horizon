@@ -2,7 +2,7 @@
 //! Controls, Key Binds, Mouse Settings, Chat Settings, Accessibility,
 //! Language and Resource Packs, laid out like vanilla's HeaderAndFooter /
 //! OptionsList screens and drawn with the shared widgets.
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::{
     gamepad::{self, GlyphStyle},

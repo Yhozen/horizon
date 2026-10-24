@@ -1307,9 +1307,9 @@ impl Streaming {
             self.save_checked_out(written);
             return;
         }
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let deadline = web_time::Instant::now() + std::time::Duration::from_secs(30);
         while self.decorating > 0 || !self.finishing.is_empty() || self.saving > 0 {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let left = deadline.saturating_duration_since(web_time::Instant::now());
             match self.results.recv_timeout(left) {
                 Ok(Done::Decorated(x, z, region)) => self.receive_decorated(x, z, region),
                 Ok(Done::Generated(chunk)) => self.receive_generated(chunk, world),
@@ -1336,7 +1336,7 @@ impl Streaming {
     /// Proto snapshots are checked out to workers before chunk writes, just as
     /// in `save(true)`, so older generation cannot overwrite the final chunks.
     pub fn poll_save(&mut self, world: &mut World) -> bool {
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         while let Ok(done) = self.results.try_recv() {
             match done {
                 Done::Decorated(x, z, region) => self.receive_decorated(x, z, region),
@@ -1573,9 +1573,9 @@ impl Ranges<'_> {
 impl Drop for Streaming {
     fn drop(&mut self) {
         // Saves in flight hold proto chunks nothing else would save.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let deadline = web_time::Instant::now() + std::time::Duration::from_secs(30);
         while self.saving > 0 {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let left = deadline.saturating_duration_since(web_time::Instant::now());
             match self.results.recv_timeout(left) {
                 Ok(Done::Saved(_)) => self.saving -= 1,
                 Ok(_) => {}
@@ -1885,7 +1885,8 @@ mod tests {
     #[test]
     #[ignore = "reproducible actual generation scheduler benchmark; run with --ignored --nocapture"]
     fn generation_scan_benchmark() {
-        use std::{hint::black_box, time::Instant};
+        use std::hint::black_box;
+        use web_time::Instant;
         let mut f = GenerationFixture::new(32, true);
         f.fill_steady();
         let mut gate = GenerationScan::default();
@@ -2233,7 +2234,7 @@ mod cover_tests {
                 .collect();
             let rounds = 100;
             let time = |r: &Ranges| {
-                let t = std::time::Instant::now();
+                let t = web_time::Instant::now();
                 let mut n = 0usize;
                 for _ in 0..rounds {
                     for &(x, z) in &columns {
@@ -2245,7 +2246,7 @@ mod cover_tests {
                 std::hint::black_box(n);
                 t.elapsed().as_secs_f64() * 1e3 / f64::from(rounds)
             };
-            let t = std::time::Instant::now();
+            let t = web_time::Instant::now();
             for _ in 0..rounds {
                 std::hint::black_box(ExtraCover::new(std::hint::black_box(&extra)));
             }

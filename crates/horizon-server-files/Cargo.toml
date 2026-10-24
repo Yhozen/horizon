@@ -7,6 +7,8 @@ rust-version = "1.90"
 description = "The dedicated server's vanilla files: server.properties, eula.txt, ops, whitelist and bans, and account lookups"
 
 [dependencies]
+# std::time on native; the page clock in the browser build (docs/web.md), where std's panics.
+web-time = "1.1"
 horizon-core = { path = "../horizon-core" }
 horizon-protocol = { path = "../horizon-protocol" }
 horizon-world = { path = "../horizon-world" }

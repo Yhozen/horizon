@@ -24,7 +24,7 @@ use {
         text::{self, Text},
     },
     horizon_mods::{Clock, Mods, Output, Player, Snapshot, Status},
-    std::time::Instant,
+    web_time::Instant,
 };
 
 #[derive(Default)]

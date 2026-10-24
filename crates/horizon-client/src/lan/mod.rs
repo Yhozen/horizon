@@ -258,9 +258,9 @@ impl Shared {
         }
         if self.is_online(uuid) {
             let _ = self.events.send(NetEvent::Duplicate(uuid));
-            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            let deadline = web_time::Instant::now() + Duration::from_secs(30);
             while self.is_online(uuid) {
-                if std::time::Instant::now() > deadline {
+                if web_time::Instant::now() > deadline {
                     return Some(translatable("multiplayer.disconnect.slow_login", &[]));
                 }
                 std::thread::sleep(Duration::from_millis(10));
