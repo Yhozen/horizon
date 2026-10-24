@@ -15,12 +15,15 @@
 //! The loaders need no mod code, vanilla state ids never move, and with no
 //! content mod the root is the base root itself.
 use crate::{Result, blocks::MAP_COLORS};
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_mods::content::{Block, Content, Rarity};
 use horizon_world::nbt::{self, JavaString, Limits, Tag};
 use serde::{Deserialize, Serialize, de};
 use std::{
     collections::BTreeMap,
-    fmt, fs,
+    fmt,
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -836,7 +839,7 @@ impl Overlay<'_> {
             let meta = fs::symlink_metadata(&path);
             if meta
                 .as_ref()
-                .is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+                .is_ok_and(|m| m.is_dir_vfs() && !m.file_type().is_symlink())
             {
                 continue;
             }
@@ -867,7 +870,7 @@ fn link(target: &Path, at: &Path) -> std::io::Result<()> {
 }
 #[cfg(not(unix))]
 fn link(target: &Path, at: &Path) -> std::io::Result<()> {
-    if target.is_dir() {
+    if target.is_dir_vfs() {
         fs::create_dir_all(at)?;
         for entry in fs::read_dir(target)?.flatten() {
             link(&entry.path(), &at.join(entry.file_name()))?;
@@ -916,7 +919,7 @@ impl Known {
         }
         items.extend(plan.items.iter().map(|i| i.rename.to.clone()));
         let keys = |name: &str| -> Result<std::collections::BTreeSet<String>> {
-            Ok(match base.join(name).exists() {
+            Ok(match base.join(name).exists_vfs() {
                 true => match read_json(&base.join(name))? {
                     J::Obj(o) => o.into_iter().map(|(k, _)| k).collect(),
                     _ => Default::default(),
@@ -1064,6 +1067,13 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>) -> Result<()> {
         };
         overlay.write(name, &bytes)
     };
+    // The browser build has no threads.
+    if cfg!(target_arch = "wasm32") {
+        for (name, _) in jobs.iter() {
+            table(name)?;
+        }
+        return Ok(());
+    }
     let next = std::sync::atomic::AtomicUsize::new(0);
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     std::thread::scope(|scope| {
@@ -1159,7 +1169,7 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
     }
     let mut bundles: Vec<(&str, J)> = Vec::new();
     for name in TAG_BUNDLES {
-        if base.join(name).exists() {
+        if base.join(name).exists_vfs() {
             bundles.push((name, read_json(&base.join(name))?));
         }
     }
@@ -1202,7 +1212,7 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
             Some((format!("{ns}:{}", path.strip_suffix(".json")?), merge))
         })
         .collect();
-    if !biome_tags.is_empty() && base.join(BIOME_TAGS).exists() {
+    if !biome_tags.is_empty() && base.join(BIOME_TAGS).exists_vfs() {
         let mut doc = read_json(&base.join(BIOME_TAGS))?;
         for (id, merge) in biome_tags {
             let text = match doc.get(&id) {
@@ -1217,7 +1227,7 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
     // Structures and the pools, sets, processors and features they use, then
     // what mods add to sets and pools, in mod and file order.
     for (bundle, entries) in &worldgen {
-        if !base.join(bundle).exists() {
+        if !base.join(bundle).exists_vfs() {
             continue;
         }
         let mut doc = read_json(&base.join(bundle))?;
@@ -1305,20 +1315,20 @@ fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
         ))
     };
     let mut parts = vec!["horizon mod content 1".to_owned()];
-    parts.push(meta(&std::env::current_exe()?)?);
+    parts.push(meta(&horizon_core::fs::current_exe()?)?);
     let base = std::path::absolute(base)?;
     parts.push(
         String::from_utf8_lossy(&fs::read(base.join("horizon-resources.json"))?).into_owned(),
     );
     for name in JSON_TABLES.iter().chain(&NBT_TABLES).chain(&TAG_BUNDLES) {
-        if base.join(name).exists() {
+        if base.join(name).exists_vfs() {
             parts.push(meta(&base.join(name))?);
         }
     }
     for m in mods {
         parts.push(m.id.clone());
         let source = m.content.source();
-        if source.is_dir() {
+        if source.is_dir_vfs() {
             for file in &m.content.files {
                 parts.push(meta(&source.join(file))?);
             }

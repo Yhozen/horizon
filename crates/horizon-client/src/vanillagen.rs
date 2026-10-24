@@ -6,6 +6,8 @@ use crate::{
     save::SavedProto,
     streaming::{ChunkGenerator, LodSampler, Proto},
 };
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_core::{
     paletted::PalettedContainer,
     position::ChunkPos,
@@ -102,7 +104,7 @@ impl VanillaTerrain {
                 "Horizon: {} placed features cannot run and will be skipped",
                 unsupported.len()
             );
-            if !dir.join("blocks/block-properties.nbt").exists() {
+            if !dir.join("blocks/block-properties.nbt").exists_vfs() {
                 log::warn!(
                     "Horizon: the worldgen bundle lacks the block behavior exports (worldgen/blocks/*.nbt); \
                      prepare again (the launcher, or horizon-prepare --prepare) to add them"

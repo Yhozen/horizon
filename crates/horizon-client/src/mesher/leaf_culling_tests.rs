@@ -1,11 +1,13 @@
 use super::*;
 use horizon_assets::model::Direction as ModelDirection;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 
 #[test]
 fn leaf_culling_removes_only_internal_leaf_and_root_faces() {
     let root =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3");
-    if !root.join("horizon-resources.json").exists() {
+    if !root.join("horizon-resources.json").exists_vfs() {
         return;
     }
     let assets = Assets::load(&root).unwrap();

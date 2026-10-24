@@ -9,11 +9,13 @@ use crate::{
     items::{ItemStack, Items},
     particles::{DYE_FIREWORK_COLORS, FireworkExplosion, FireworkShape},
 };
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_world::nbt::Tag;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
-    fs,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -1196,7 +1198,7 @@ impl Recipes {
             .collect();
         for namespace in crate::mod_content::namespaces(root) {
             let dir = root.join(format!("data/{namespace}/recipe"));
-            if dir.is_dir() {
+            if dir.is_dir_vfs() {
                 files.extend(
                     json_files(&dir)?
                         .into_iter()
@@ -1704,14 +1706,14 @@ mod tests {
         let stacks: Vec<ItemStack> = (0..1000)
             .map(|n| ItemStack::new(&format!("minecraft:item_{}", n % 400), 1))
             .collect();
-        let t = std::time::Instant::now();
+        let t = web_time::Instant::now();
         let a = stacks
             .iter()
             .filter(|s| recipes.cook_scan("smelting", s).cloned().is_some())
             .count();
         let before = t.elapsed().as_secs_f64() * 1e3;
         recipes.cook("smelting", &stacks[0]);
-        let t = std::time::Instant::now();
+        let t = web_time::Instant::now();
         let b = stacks
             .iter()
             .filter(|s| recipes.cook("smelting", s).is_some())

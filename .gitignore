@@ -31,3 +31,5 @@
 /.horizon-cache/
 /crash-reports/
 /debug/
+# The browser build: wasm-bindgen output and the data archive (Mojang files).
+/web/dist/

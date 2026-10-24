@@ -4,9 +4,10 @@
 //! and `LocalPlayer.updateIsUnderwater` (enter/exit sounds and the
 //! `UnderLiquidAmbientSoundInstance` loop), played through the sound engine.
 use crate::sound_engine::{AMBIENT, InstanceId, PLAYERS, SoundEngine, SoundInstance, Sounds};
+use horizon_core::fs;
 use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, path::Path};
 
 /// `AmbientMoodSettings`.
 #[derive(Clone, Debug, PartialEq)]

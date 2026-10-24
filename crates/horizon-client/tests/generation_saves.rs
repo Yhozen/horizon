@@ -20,8 +20,9 @@ use std::{
     path::Path,
     sync::{Arc, Mutex},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 fn resources() -> Option<std::path::PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))

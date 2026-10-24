@@ -655,10 +655,10 @@ impl Game<'_> {
             .advancements
             .to_json(&self.adv.tree, horizon_world::DATA_VERSION);
         if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
+            let _ = horizon_core::fs::create_dir_all(dir);
         }
         if let Ok(text) = serde_json::to_string_pretty(&json) {
-            let _ = std::fs::write(path, text);
+            let _ = horizon_core::fs::write(path, text);
         }
         if let Some(play) = host.play.get(&guest.conn) {
             play.stats
@@ -678,7 +678,7 @@ impl Game<'_> {
         };
         let tree = self.advancement_tree();
         let path = super::stats::player_json(&self.world_root, "advancements", uuid);
-        let saved = std::fs::read_to_string(path)
+        let saved = horizon_core::fs::read_to_string(path)
             .ok()
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
         if let Some(g) = host.hub.guest_mut(conn)

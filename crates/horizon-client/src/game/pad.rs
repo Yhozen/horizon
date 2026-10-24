@@ -11,7 +11,7 @@ use horizon_client::{
     mouse::Rotation,
 };
 use serde_json::{Value, json};
-use std::time::Instant;
+use web_time::Instant;
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode};
 
 pub(super) const HELP: &[&str] = &[

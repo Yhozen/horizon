@@ -19,8 +19,9 @@ use std::{
     io::{BufRead, BufReader, BufWriter, Write},
     path::PathBuf,
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn int(value: &Value) -> Result<i32> {

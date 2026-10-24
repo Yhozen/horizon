@@ -2,7 +2,8 @@
 //! `horizon-graphics.txt` next to `options.txt` so that file stays exactly
 //! vanilla's. Every default reproduces vanilla's rendering; only choices the
 //! player makes here depart from it.
-use std::{fs, path::Path};
+use horizon_core::fs;
+use std::path::Path;
 
 pub const FILE: &str = "horizon-graphics.txt";
 
@@ -386,6 +387,10 @@ impl Graphics {
         // thread by default) each need one, and a pool that fills every core
         // starves them: the frame rate collapses to single digits while the
         // workers saturate the CPU and its memory bandwidth.
+        // The browser build has no threads: the frame does the work.
+        if cfg!(target_arch = "wasm32") {
+            return 1;
+        }
         let auto = std::thread::available_parallelism()
             .map_or(2, |n| n.get())
             .saturating_sub(2)

@@ -9,6 +9,8 @@ use crate::{
     items::{ItemStack, Items},
     world::World,
 };
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 
 /// What the menus need to know about items.
 pub trait Rules {
@@ -687,7 +689,7 @@ mod tests {
                     .join("../../.local/horizon-client")
                     .join(horizon_core::VANILLA_VERSION)
             });
-        if !root.join("items.json").exists() {
+        if !root.join("items.json").exists_vfs() {
             eprintln!("skipping resource-backed bundle check: {}", root.display());
             return;
         }

@@ -9,6 +9,8 @@ use horizon_client::{
     screen_draw::Measure,
     text::{ClickEvent, Style, Text},
 };
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use std::collections::BTreeMap;
 
 /// The tree the chat parses and completes with: a server's, once it has
@@ -77,7 +79,7 @@ pub struct UiState {
     pub chat: Chat,
     pub chat_screen: Option<ChatScreen>,
     /// When the chat screen opened (its input took the focus: the cursor blink).
-    pub chat_opened: Option<std::time::Instant>,
+    pub chat_opened: Option<web_time::Instant>,
     pub registries: Registries,
     pub rules: GameRules,
     pub clock: WorldClock,
@@ -98,7 +100,7 @@ pub struct UiState {
     pub vanilla_root: std::path::PathBuf,
     /// Death screen cause and when the player died (buttons wait 20 ticks).
     pub death_text: Option<Text>,
-    pub died_at: Option<std::time::Instant>,
+    pub died_at: Option<web_time::Instant>,
 }
 
 impl Game<'_> {
@@ -130,12 +132,12 @@ impl Game<'_> {
                 let mut out = Vec::new();
                 let mut stack = vec![root.clone()];
                 while let Some(d) = stack.pop() {
-                    let Ok(entries) = std::fs::read_dir(&d) else {
+                    let Ok(entries) = horizon_core::fs::read_dir(&d) else {
                         continue;
                     };
                     for e in entries.flatten() {
                         let p = e.path();
-                        if p.is_dir() {
+                        if p.is_dir_vfs() {
                             stack.push(p);
                         } else if p.extension().and_then(|x| x.to_str()) == Some("json")
                             && let Ok(rel) = p.strip_prefix(&root)
@@ -158,12 +160,12 @@ impl Game<'_> {
                 let mut out = Vec::new();
                 let mut stack = vec![root.clone()];
                 while let Some(d) = stack.pop() {
-                    let Ok(entries) = std::fs::read_dir(&d) else {
+                    let Ok(entries) = horizon_core::fs::read_dir(&d) else {
                         continue;
                     };
                     for e in entries.flatten() {
                         let p = e.path();
-                        if p.is_dir() {
+                        if p.is_dir_vfs() {
                             stack.push(p);
                         } else if p.extension().and_then(|x| x.to_str()) == Some("nbt")
                             && let Ok(rel) = p.strip_prefix(&root)
@@ -289,7 +291,7 @@ impl Game<'_> {
         reg.summonable = summonable;
         let root = self.options.resources.clone();
         let mut types: Vec<String> = serde_json::from_slice::<serde_json::Value>(
-            &std::fs::read(root.join("entity-types.json")).unwrap_or_default(),
+            &horizon_core::fs::read(root.join("entity-types.json")).unwrap_or_default(),
         )
         .ok()
         .and_then(|v| {
@@ -307,7 +309,7 @@ impl Game<'_> {
         types.sort();
         reg.entity_types = types;
         let list = |dir: &str| -> Vec<String> {
-            let mut out: Vec<String> = std::fs::read_dir(root.join(dir))
+            let mut out: Vec<String> = horizon_core::fs::read_dir(root.join(dir))
                 .into_iter()
                 .flatten()
                 .flatten()
@@ -347,7 +349,7 @@ impl Game<'_> {
                 name.trim_start_matches("minecraft:")
             ));
             let Ok(v) = serde_json::from_slice::<serde_json::Value>(
-                &std::fs::read(path).unwrap_or_default(),
+                &horizon_core::fs::read(path).unwrap_or_default(),
             ) else {
                 continue;
             };
@@ -376,7 +378,7 @@ impl Game<'_> {
         }
         // Vanilla's built-in registries (mob effects, components, dialogs...).
         for dir in [&self.options.resources, &self.ui.vanilla_root] {
-            if let Ok(bytes) = std::fs::read(dir.join("command-registries.json"))
+            if let Ok(bytes) = horizon_core::fs::read(dir.join("command-registries.json"))
                 && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes)
             {
                 self.ui.registries.fill_from_export(&v);
@@ -426,7 +428,7 @@ impl Game<'_> {
         );
         screen.auto_suggestions = self.settings.auto_suggestions;
         self.ui.chat_screen = Some(screen);
-        self.ui.chat_opened = Some(std::time::Instant::now());
+        self.ui.chat_opened = Some(web_time::Instant::now());
         self.screen = Screen::Chat;
         self.keys.clear();
         self.left = false;
@@ -745,7 +747,8 @@ impl Game<'_> {
         self.ui.rules = GameRules::load(&self.world_root);
         self.ui.clock = WorldClock::default();
         self.ui.difficulty = read_difficulty(&self.world_root).unwrap_or(2);
-        if let Ok(bytes) = std::fs::read(self.world_root.join("data/minecraft/world_clocks.dat"))
+        if let Ok(bytes) =
+            horizon_core::fs::read(self.world_root.join("data/minecraft/world_clocks.dat"))
             && let Ok(raw) = horizon_world::compression::Compression::Gzip.decode(&bytes, 1 << 20)
             && let Ok((root, _)) =
                 horizon_world::nbt::read_named(&raw, horizon_world::nbt::Limits::default())
@@ -823,7 +826,7 @@ impl Game<'_> {
     /// cause is known to the client).
     pub(super) fn death_message(&mut self) {
         let cause = self.ui.death_cause.take();
-        self.ui.died_at = Some(std::time::Instant::now());
+        self.ui.died_at = Some(web_time::Instant::now());
         self.ui.death_text = None;
         if !self.ui.rules.bool("show_death_messages") {
             return;
@@ -851,10 +854,10 @@ impl Game<'_> {
     }
     /// F2: ScreenShot.grab into `screenshots/` with vanilla's file name.
     pub(super) fn take_screenshot(&mut self) {
-        let dir = std::env::current_dir()
+        let dir = horizon_core::fs::current_dir()
             .unwrap_or_default()
             .join("screenshots");
-        if std::fs::create_dir_all(&dir).is_err() {
+        if horizon_core::fs::create_dir_all(&dir).is_err() {
             return;
         }
         let name = screenshot_name(&dir);
@@ -894,8 +897,8 @@ impl Game<'_> {
 /// `yyyy-MM-dd_HH.mm.ss[_n].png` (Util.getFilenameFormattedDateTime, local time
 /// approximated as UTC).
 pub fn screenshot_name(dir: &std::path::Path) -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let secs = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     let days = (secs / 86400) as i64;
     let (h, m, s) = ((secs % 86400) / 3600, (secs % 3600) / 60, secs % 60);
@@ -916,14 +919,14 @@ pub fn screenshot_name(dir: &std::path::Path) -> String {
         } else {
             format!("{base}_{n}.png")
         };
-        if !dir.join(&name).exists() {
+        if !dir.join(&name).exists_vfs() {
             return name;
         }
         n += 1;
     }
 }
 fn read_difficulty(world: &std::path::Path) -> Option<u8> {
-    let bytes = std::fs::read(world.join("level.dat")).ok()?;
+    let bytes = horizon_core::fs::read(world.join("level.dat")).ok()?;
     let raw = horizon_world::compression::Compression::Gzip
         .decode(&bytes, 64 << 20)
         .ok()?;
@@ -938,7 +941,7 @@ fn read_difficulty(world: &std::path::Path) -> Option<u8> {
 fn write_difficulty(world: &std::path::Path, difficulty: u8) -> horizon_client::Result<()> {
     use horizon_world::{compression::Compression, nbt};
     let path = world.join("level.dat");
-    let bytes = std::fs::read(&path)?;
+    let bytes = horizon_core::fs::read(&path)?;
     let raw = Compression::Gzip.decode(&bytes, 64 << 20)?;
     let (mut root, _) = nbt::read_named(&raw, nbt::Limits::default()).map_err(|e| e.to_string())?;
     if let Some(data) = root.tag.get_mut("Data")
@@ -947,7 +950,7 @@ fn write_difficulty(world: &std::path::Path, difficulty: u8) -> horizon_client::
         *d = nbt::Tag::Byte(difficulty as i8);
     }
     let out = nbt::write_named(&root, nbt::Limits::default()).map_err(|e| e.to_string())?;
-    std::fs::write(&path, Compression::Gzip.encode(&out)?)?;
+    horizon_core::fs::write(&path, Compression::Gzip.encode(&out)?)?;
     Ok(())
 }
 

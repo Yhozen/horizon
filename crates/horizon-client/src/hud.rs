@@ -2,9 +2,11 @@
 //! textures, and a batch of textured quads in GUI pixels (vanilla's automatic
 //! GUI scale is applied when drawing).
 use crate::Result;
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use std::{
     collections::HashMap,
-    fs,
     path::{Path, PathBuf},
 };
 use wgpu::util::DeviceExt;
@@ -121,7 +123,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        if path.is_dir_vfs() {
             walk(&path, out);
         } else if path.extension().is_some_and(|e| e == "png") {
             out.push(path);
@@ -387,6 +389,13 @@ impl HudAtlas {
         };
         let threads = std::thread::available_parallelism().map_or(2, |n| n.get());
         let chunk = files.len().div_ceil(threads).max(1);
+        // The browser build has no threads.
+        #[cfg(target_arch = "wasm32")]
+        let decoded: Vec<_> = {
+            let _ = chunk;
+            files.iter().filter_map(decode_one).collect()
+        };
+        #[cfg(not(target_arch = "wasm32"))]
         let decoded: Vec<_> = std::thread::scope(|scope| {
             let handles: Vec<_> = files
                 .chunks(chunk)

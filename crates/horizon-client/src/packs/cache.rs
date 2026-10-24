@@ -1,11 +1,14 @@
 //! Overlay reuse validated by source topology and filesystem stamps.
 //! Published output is an owned cache artifact; hits do not traverse its tree.
 use super::{Pack, Source, build_overlay_uncached};
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 #[cfg(any(test, not(unix)))]
 use std::io::Read;
-use std::{collections::BTreeSet, fs, io, path::Path, path::PathBuf};
+use std::{collections::BTreeSet, io, path::Path, path::PathBuf};
 
 // Bump when overlay/merge semantics change. Markers are disposable cache data.
 const VERSION: u32 = 3;
@@ -88,7 +91,7 @@ fn stamp(hash: &mut Sha256, path: &Path) -> io::Result<()> {
     {
         // Portable metadata lacks a change timestamp. Preserve content-based
         // validation for materialized files on those platforms.
-        if meta.is_file() {
+        if meta.is_file_vfs() {
             return content(hash, path);
         }
         if let Ok(created) = meta.created() {
@@ -109,7 +112,7 @@ fn dependency_signature(path: &Path, directory: bool) -> io::Result<String> {
     match fs::metadata(path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => field(&mut hash, b"missing"),
         Err(e) => return Err(e),
-        Ok(meta) if directory && meta.is_dir() => {
+        Ok(meta) if directory && meta.is_dir_vfs() => {
             field(&mut hash, b"directory");
             stamp(&mut hash, path)?;
         }
@@ -161,7 +164,7 @@ fn tree_inner(
             return Ok(());
         }
     }
-    if path.is_dir() {
+    if path.is_dir_vfs() {
         let canonical = if pack.is_some() {
             let canonical = fs::canonicalize(path)?;
             if !active.insert(canonical.clone()) {
@@ -254,7 +257,7 @@ fn absolute(path: &Path) -> io::Result<PathBuf> {
     if path.is_absolute() {
         Ok(path.into())
     } else {
-        std::env::current_dir().map(|cwd| cwd.join(path))
+        horizon_core::fs::current_dir().map(|cwd| cwd.join(path))
     }
 }
 
@@ -285,7 +288,7 @@ pub(super) fn build(vanilla: &Path, packs: &[Pack], out: &Path) -> io::Result<()
         && marker.vanilla == vanilla_key
         && marker.packs == *signature
         && marker.dependencies.valid()
-        && out.is_dir()
+        && out.is_dir_vfs()
     {
         return Ok(());
     }
@@ -518,7 +521,7 @@ mod tests {
         // still tolerates it, and does not publish a marker for an incomplete input.
         fs::remove_dir_all(f.0.join("low")).unwrap();
         f.rebuild_matches(&[low]);
-        assert!(!marker.exists());
+        assert!(!marker.exists_vfs());
     }
 
     #[test]
@@ -561,14 +564,14 @@ mod tests {
         assert!(
             packs::build_overlay(&f.0.join("vanilla"), std::slice::from_ref(&pack), &out).is_err()
         );
-        assert!(!marker_path(&out).exists());
+        assert!(!marker_path(&out).exists_vfs());
         f.write("pack.zip", &archive(&files(b"ddd"), true));
         f.rebuild_matches(std::slice::from_ref(&pack));
         fs::remove_file(f.0.join("pack.zip")).unwrap();
         assert!(
             packs::build_overlay(&f.0.join("vanilla"), std::slice::from_ref(&pack), &out).is_err()
         );
-        assert!(!marker_path(&out).exists());
+        assert!(!marker_path(&out).exists_vfs());
         assert!(
             packs::resource_root(&f.0.join("vanilla"), &[pack], &f.0.join("selection-cache"))
                 .is_err()
@@ -585,7 +588,7 @@ mod tests {
         fs::create_dir_all(f.0.join("pack/docs")).unwrap();
         std::os::unix::fs::symlink(f.0.join("pack"), f.0.join("pack/docs/back")).unwrap();
         f.rebuild_matches(std::slice::from_ref(&pack));
-        assert!(!marker_path(&f.0.join("cached")).exists());
+        assert!(!marker_path(&f.0.join("cached")).exists_vfs());
     }
 
     #[cfg(unix)]
@@ -644,7 +647,7 @@ mod tests {
             pack.overlays = vec![overlay.into()];
             f.rebuild_matches(std::slice::from_ref(&pack));
             let marker = marker_path(&f.0.join("cached"));
-            assert!(marker.exists());
+            assert!(marker.exists_vfs());
             f.write(&format!("pack/extra/{name}"), br#"{"p":2}"#);
             f.rebuild_matches(std::slice::from_ref(&pack));
             assert_eq!(
@@ -660,7 +663,7 @@ mod tests {
         ] {
             pack.overlays = vec![overlay];
             f.rebuild_matches(std::slice::from_ref(&pack));
-            assert!(!marker_path(&f.0.join("cached")).exists());
+            assert!(!marker_path(&f.0.join("cached")).exists_vfs());
             f.write(&format!("outside/{name}"), br#"{"p":4}"#);
             f.rebuild_matches(std::slice::from_ref(&pack));
             assert_eq!(
@@ -760,7 +763,7 @@ mod tests {
             };
             assert_eq!(fs::read(out.join(name)).unwrap(), expected);
         }
-        assert!(lock_path(&out).exists());
+        assert!(lock_path(&out).exists_vfs());
     }
 
     #[cfg(unix)]
@@ -771,7 +774,7 @@ mod tests {
         let mut pack = f.dir_pack("pack");
         let name = "assets/minecraft/textures/a";
         f.write(&format!("pack/{name}"), b"pack");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = horizon_core::fs::current_dir().unwrap();
         let mut relative = PathBuf::new();
         for component in cwd.components() {
             if matches!(component, std::path::Component::Normal(_)) {
@@ -804,9 +807,10 @@ mod tests {
     #[test]
     #[ignore = "requires prepared resources and real pack paths in environment"]
     fn benchmark_real_resource_root() {
-        use std::{hint::black_box, time::Instant};
+        use std::hint::black_box;
+        use web_time::Instant;
         let vanilla = PathBuf::from(std::env::var("HORIZON_OVERLAY_BENCH_VANILLA").unwrap());
-        assert!(vanilla.join("horizon-resources.json").is_file());
+        assert!(vanilla.join("horizon-resources.json").is_file_vfs());
         let paths: Vec<PathBuf> =
             serde_json::from_str(&std::env::var("HORIZON_OVERLAY_BENCH_PACKS").unwrap()).unwrap();
         // The original resource_root selection/cache-key path, with its original builder.
@@ -842,7 +846,7 @@ mod tests {
             let reference = original(&vanilla, selected, &reference_cache);
             let out = packs::resource_root(&vanilla, selected, &cached_cache).unwrap();
             assert_ne!(out, vanilla, "resource_root must not fall back to vanilla");
-            assert!(marker_path(&out).exists());
+            assert!(marker_path(&out).exists_vfs());
             let expected = output_signature(&reference).unwrap();
             assert_eq!(output_signature(&out).unwrap(), expected);
             for _ in 0..2 {

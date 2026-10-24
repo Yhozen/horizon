@@ -7,6 +7,8 @@
 //! versions by the launcher. Its key includes the running executable, so a build
 //! that resolves the tables differently never reads another build's snapshot.
 use super::*;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -16,7 +18,6 @@ use std::{
         OnceLock,
         atomic::{AtomicU64, Ordering},
     },
-    time::UNIX_EPOCH,
 };
 
 const MAGIC: &[u8; 8] = b"HZBEHAV\0";
@@ -140,13 +141,13 @@ fn fingerprint(registry: &BlockRegistry, root: &Path) -> io::Result<[u8; 32]> {
     hasher.update(b"horizon resolved behaviours 2");
     // The build that resolved the tables: the version constant alone misses
     // loader changes that keep the snapshot layout.
-    let exe = std::env::current_exe()?;
+    let exe = horizon_core::fs::current_exe()?;
     let built = fs::metadata(&exe)?;
     hash_str(&mut hasher, &exe.to_string_lossy());
     hasher.update(built.len().to_le_bytes());
     let modified = built
         .modified()?
-        .duration_since(UNIX_EPOCH)
+        .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| invalid(e.to_string()))?;
     hasher.update(modified.as_nanos().to_le_bytes());
     for relative in [
@@ -757,7 +758,7 @@ mod tests {
             .unwrap_or_else(|| {
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3")
             });
-        if !source.join("block-behaviours.json").exists() {
+        if !source.join("block-behaviours.json").exists_vfs() {
             eprintln!("skipping behaviour cache tests: no client resources");
             return None;
         }
@@ -778,7 +779,7 @@ mod tests {
         }
         for entry in fs::read_dir(source.join("data/minecraft/tags/fluid")).unwrap() {
             let entry = entry.unwrap();
-            if entry.file_type().unwrap().is_file() {
+            if entry.file_type().unwrap().is_file_vfs() {
                 fs::copy(
                     entry.path(),
                     dir.join("data/minecraft/tags/fluid")
@@ -824,9 +825,9 @@ mod tests {
         };
         assert!(load_from(&dir, &registry, &root.0).is_none());
         let initial = load_or_build();
-        assert!(dir.join(FILE_NAME).is_file());
+        assert!(dir.join(FILE_NAME).is_file_vfs());
         assert!(
-            !root.0.join(FILE_NAME).exists(),
+            !root.0.join(FILE_NAME).exists_vfs(),
             "the resource folder stays untouched"
         );
         let hit = load_from(&dir, &registry, &root.0).expect("cache hit");

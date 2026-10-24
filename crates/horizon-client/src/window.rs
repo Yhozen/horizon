@@ -168,12 +168,12 @@ pub trait LimiterClock {
 /// `LockSupport.parkNanos` and a CPU spin hint for `Thread.onSpinWait`.
 #[derive(Clone, Copy, Debug)]
 pub struct SystemClock {
-    origin: std::time::Instant,
+    origin: web_time::Instant,
 }
 impl Default for SystemClock {
     fn default() -> Self {
         Self {
-            origin: std::time::Instant::now(),
+            origin: web_time::Instant::now(),
         }
     }
 }

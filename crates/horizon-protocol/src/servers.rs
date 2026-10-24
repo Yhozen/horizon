@@ -53,7 +53,7 @@ impl ServerEntry {
 
 /// ServerList.load: missing or unreadable files give an empty list.
 pub fn load(path: &Path) -> Vec<ServerEntry> {
-    let Ok(bytes) = std::fs::read(path) else {
+    let Ok(bytes) = horizon_core::fs::read(path) else {
         return Vec::new();
     };
     let Ok((root, _)) = nbt::read_named(&bytes, nbt::Limits::default()) else {
@@ -80,8 +80,8 @@ pub fn save(path: &Path, servers: &[ServerEntry]) -> std::io::Result<()> {
     };
     let bytes = nbt::write_named(&root, nbt::Limits::default()).map_err(std::io::Error::other)?;
     let tmp = path.with_extension("dat_tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(tmp, path)
+    horizon_core::fs::write(&tmp, bytes)?;
+    horizon_core::fs::rename(tmp, path)
 }
 
 /// ServerAddress.parseString: `host`, `host:port` or `[v6]:port`; default 25565.
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn servers_dat_round_trips() {
         let dir = std::env::temp_dir().join(format!("horizon-servers-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        horizon_core::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("servers.dat");
         let list = vec![
             ServerEntry::new("Minecraft Server", "localhost:25565"),
@@ -125,11 +125,14 @@ mod tests {
         save(&path, &list).unwrap();
         assert_eq!(load(&path), list);
         // Vanilla layout: an unnamed root compound with a "servers" list.
-        let (root, _) =
-            nbt::read_named(&std::fs::read(&path).unwrap(), nbt::Limits::default()).unwrap();
+        let (root, _) = nbt::read_named(
+            &horizon_core::fs::read(&path).unwrap(),
+            nbt::Limits::default(),
+        )
+        .unwrap();
         assert_eq!(root.name, JavaString::from(""));
         assert!(matches!(root.tag.get("servers"), Some(Tag::List(l)) if l.len() == 2));
-        std::fs::remove_dir_all(dir).unwrap();
+        horizon_core::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

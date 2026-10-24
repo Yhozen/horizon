@@ -161,11 +161,8 @@ pub fn pump(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        io::Read,
-        net::TcpListener,
-        time::{Duration, Instant},
-    };
+    use std::{io::Read, net::TcpListener, time::Duration};
+    use web_time::Instant;
 
     #[test]
     fn a_deadline_ends_the_stream_unless_dropped() {

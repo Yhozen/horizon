@@ -6,11 +6,12 @@
 //! arrow when it is above or below the screen.
 use crate::hud_layout::{Blend, GuiDraw};
 use horizon_assets::animation::{AnimationClip, AnimationMetadata};
+use horizon_core::fs;
 use horizon_core::geometry::trig;
 use horizon_protocol::packets::play::{
     TrackedWaypoint, WaypointId, WaypointTarget, waypoint_operation,
 };
-use std::{borrow::Cow, collections::HashMap, fs, path::Path};
+use std::{borrow::Cow, collections::HashMap, path::Path};
 
 /// `WaypointStyle`: the sprites (under `hud/locator_bar_dot/`) from near to far.
 #[derive(Clone, Debug, PartialEq)]

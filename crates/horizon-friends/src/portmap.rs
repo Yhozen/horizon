@@ -6,8 +6,9 @@
 use std::{
     io::{self, Read, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream, ToSocketAddrs, UdpSocket},
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 /// How long a mapping is asked for; it is renewed at half-time.
 pub const LEASE: Duration = Duration::from_secs(3600);

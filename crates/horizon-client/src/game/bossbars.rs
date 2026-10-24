@@ -11,6 +11,8 @@ use horizon_client::{
     scoreboard_cmd::format_list,
     text::Text,
 };
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_world::nbt::Tag;
 
 #[derive(Default)]
@@ -44,7 +46,7 @@ impl Game<'_> {
         if !self.bosses.loaded || self.remote.is_some() {
             return;
         }
-        if self.bosses.bars.bars.is_empty() && !self.bossbar_path().exists() {
+        if self.bosses.bars.bars.is_empty() && !self.bossbar_path().exists_vfs() {
             return;
         }
         let _ = save::write_dat(

@@ -1,13 +1,10 @@
 //! Shared nearest-sampled sprite array for block and item textures.
 use crate::Result;
 use horizon_assets::animation::{AnimationClip, AnimationMetadata};
-use std::{
-    collections::BTreeMap,
-    fs::{self, File},
-    io::BufReader,
-    path::Path,
-    sync::Arc,
-};
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
+use horizon_core::fs::{self, File};
+use std::{collections::BTreeMap, io::BufReader, path::Path, sync::Arc};
 
 #[derive(Clone)]
 pub struct SpriteAnimation {
@@ -431,7 +428,7 @@ mod tests {
             .join(horizon_core::VANILLA_VERSION);
         if !root
             .join("assets/minecraft/textures/block/fire_0.png")
-            .exists()
+            .exists_vfs()
         {
             return;
         }
@@ -465,8 +462,8 @@ mod tests {
         let root = std::env::temp_dir().join(format!(
             "horizon-sprite-detail-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            web_time::SystemTime::now()
+                .duration_since(web_time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));

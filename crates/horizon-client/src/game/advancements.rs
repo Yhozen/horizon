@@ -13,8 +13,8 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
-    time::Instant,
 };
+use web_time::Instant;
 
 pub(super) struct Toast {
     icon: String,
@@ -185,8 +185,8 @@ impl adv::World for View<'_, '_> {
     }
 }
 fn now_text() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let secs = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs()) as i64;
     adv::date_text(secs)
 }
@@ -277,7 +277,7 @@ impl Game<'_> {
         self.advancement_tree();
         let progress = self
             .adv_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|p| horizon_core::fs::read_to_string(p).ok())
             .and_then(|t| serde_json::from_str::<Value>(&t).ok())
             .map(|v| Progress::from_json(&v))
             .unwrap_or_default();
@@ -299,10 +299,10 @@ impl Game<'_> {
             .progress
             .to_json(&self.adv.tree, horizon_world::DATA_VERSION);
         if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
+            let _ = horizon_core::fs::create_dir_all(dir);
         }
         if let Ok(text) = serde_json::to_string_pretty(&json) {
-            let _ = std::fs::write(path, text);
+            let _ = horizon_core::fs::write(path, text);
         }
     }
     /// The player as predicates see it.

@@ -7,7 +7,8 @@
 //! refused with "You logged in from another location". The generated name is
 //! kept in `horizon-player.txt` next to `options.txt` so the same player gets
 //! the same offline UUID (and inventory on a friend's world) every time.
-use std::{fs, path::Path};
+use horizon_core::fs;
+use std::path::Path;
 
 pub const FILE: &str = "horizon-player.txt";
 const KEY: &str = "name:";
@@ -48,8 +49,8 @@ fn parse(text: &str) -> Option<String> {
 }
 
 fn seed() -> u64 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let nanos = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos() as u64);
     // Two players starting the game in the same millisecond still differ.
     let mut x = nanos ^ u64::from(std::process::id()).rotate_left(32);

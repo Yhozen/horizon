@@ -8,11 +8,14 @@
 //! maps are kept as found (structure search is not run); conditions that
 //! need an entity, tool or damage source fail when the context has none, as
 //! they do for containers.
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
-    fs, io,
+    io,
     path::Path,
 };
 
@@ -270,7 +273,7 @@ fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::R
     };
     let mut namespaces: Vec<String> = entries
         .flatten()
-        .filter(|e| e.path().is_dir())
+        .filter(|e| e.path().is_dir_vfs())
         .filter_map(|e| e.file_name().to_str().map(str::to_owned))
         .collect();
     namespaces.sort();
@@ -294,7 +297,7 @@ fn load_dir(
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        if path.is_dir() {
+        if path.is_dir_vfs() {
             load_dir(&path, namespace, &format!("{prefix}{stem}/"), out)?;
         } else if path.extension().is_some_and(|e| e == "json") {
             let value = serde_json::from_slice(&fs::read(&path)?)?;

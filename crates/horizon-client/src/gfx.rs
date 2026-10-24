@@ -10,7 +10,10 @@ use crate::{
     sprites::SpriteAnimation,
 };
 use glam::{DVec3, Mat4, Vec3, Vec4};
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use web_time::Instant;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
@@ -489,11 +492,17 @@ pub(crate) const SPRITE_SPLIT: u32 = 2048;
 /// [`SPRITE_SPLIT`], or a smaller split from `HORIZON_SPRITE_SPLIT` (dev
 /// only: vanilla's sprites drawn from several arrays must look the same).
 fn sprite_split() -> u32 {
+    // WebGPU gives 256 texture layers by default.
+    let default = if cfg!(target_arch = "wasm32") {
+        256
+    } else {
+        SPRITE_SPLIT
+    };
     std::env::var("HORIZON_SPRITE_SPLIT")
         .ok()
         .and_then(|v| v.parse().ok())
         .filter(|&n| (1..=SPRITE_SPLIT).contains(&n))
-        .unwrap_or(SPRITE_SPLIT)
+        .unwrap_or(default)
 }
 /// Sprite arrays terrain.wgsl binds (`sprites`, `sprites_1`...).
 const SPRITE_ARRAYS: u32 = 8;
@@ -651,6 +660,7 @@ fn mip_chain(
 /// pass is also what passes each draw's first instance to shaders reading
 /// `instance_index`, and DirectX 12 is the fallback, where working matters
 /// more than CPU time.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn instance_descriptor(backends: wgpu::Backends) -> wgpu::InstanceDescriptor {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = backends.with_env();
@@ -669,6 +679,7 @@ fn instance_descriptor(backends: wgpu::Backends) -> wgpu::InstanceDescriptor {
 /// Vulkan has no adapter (no Vulkan driver) or no device. A native crash in
 /// the driver can't be caught in the game; the launcher switches the setting
 /// to DirectX 12 after one at the renderer's start (#746).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn backend_order(api: GraphicsApi, windows: bool, wgpu_backend: bool) -> Vec<wgpu::Backends> {
     if !windows || wgpu_backend {
         return vec![wgpu::Backends::default()];
@@ -679,6 +690,7 @@ fn backend_order(api: GraphicsApi, windows: bool, wgpu_backend: bool) -> Vec<wgp
         GraphicsApi::Dx12 => vec![wgpu::Backends::DX12],
     }
 }
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn backends_name(backends: wgpu::Backends) -> &'static str {
     match backends {
         wgpu::Backends::VULKAN => "Vulkan",
@@ -741,18 +753,98 @@ fn surface_format(
     formats: &[wgpu::TextureFormat],
     default: wgpu::TextureFormat,
 ) -> wgpu::TextureFormat {
-    [
+    // 🤖 Agent: Chrome on Linux prefers (and can share with its compositor
+    // only) `rgba8unorm` canvases.
+    #[cfg(target_arch = "wasm32")]
+    let order = [
+        wgpu::TextureFormat::Rgba8Unorm,
+        wgpu::TextureFormat::Bgra8Unorm,
+    ];
+    #[cfg(not(target_arch = "wasm32"))]
+    let order = [
         wgpu::TextureFormat::Bgra8Unorm,
         wgpu::TextureFormat::Rgba8Unorm,
-    ]
-    .into_iter()
-    .find(|f| formats.contains(f))
-    .or_else(|| formats.iter().copied().find(|f| !f.is_srgb()))
-    .unwrap_or(default)
+    ];
+    order
+        .into_iter()
+        .find(|f| formats.contains(f))
+        .or_else(|| formats.iter().copied().find(|f| !f.is_srgb()))
+        .unwrap_or(default)
+}
+// The browser build's WebGPU device, opened (asynchronously) by
+// `open_web_gpu` before the game starts, so `Renderer::new` finds it ready
+// and never waits.
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static WEB_GPU: std::cell::RefCell<Option<(wgpu::Instance, wgpu::Adapter, wgpu::Device, wgpu::Queue)>> =
+        const { std::cell::RefCell::new(None) };
+}
+/// Opens the page's WebGPU adapter and device, for [`open_device`].
+#[cfg(target_arch = "wasm32")]
+pub async fn open_web_gpu() -> Result<()> {
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::BROWSER_WEBGPU;
+    let instance = wgpu::Instance::new(descriptor);
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| format!("no WebGPU adapter: {e}"))?;
+    describe_adapter(&adapter);
+    let limits = adapter.limits();
+    let features = timing::GpuTimer::features(&adapter)
+        | cull::Cull::features(&adapter)
+        | (adapter.features() & wgpu::Features::INDIRECT_FIRST_INSTANCE);
+    startup_step(format_args!(
+        "requesting the WebGPU device with features [{features}] ({} texture layers)",
+        limits.max_texture_array_layers
+    ));
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            label: Some("Horizon device"),
+            required_features: features,
+            required_limits: limits,
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| format!("no WebGPU device: {e}"))?;
+    WEB_GPU.with(|slot| *slot.borrow_mut() = Some((instance, adapter, device, queue)));
+    Ok(())
+}
+/// The browser build: the device [`open_web_gpu`] opened, and a surface on
+/// the window's canvas.
+#[cfg(target_arch = "wasm32")]
+async fn open_device(
+    window: &Arc<Window>,
+    offscreen: bool,
+    _api: GraphicsApi,
+    layers: u32,
+) -> Result<Opened> {
+    let (instance, adapter, device, queue) = WEB_GPU
+        .with(|slot| slot.borrow().clone())
+        .ok_or("the WebGPU device is not open (open_web_gpu)")?;
+    check_layers(&adapter.limits(), layers)?;
+    let surface = if offscreen {
+        None
+    } else {
+        Some(instance.create_surface(window.clone())?)
+    };
+    Ok(Opened {
+        instance,
+        surface,
+        adapter,
+        device,
+        queue,
+    })
 }
 /// Opens a device on the first of `backend_order`'s backends that gives one.
 /// Offscreen rendering needs no surface, so it can use a GPU the window's
 /// display cannot present from (a headless compositor).
+#[cfg(not(target_arch = "wasm32"))]
 async fn open_device(
     window: &Arc<Window>,
     offscreen: bool,
@@ -850,6 +942,7 @@ const NO_GPU_DRIVER: &str = "No graphics driver with Vulkan or DirectX 12 found:
 #[cfg(target_os = "macos")]
 const NO_GPU_DRIVER: &str = "No Metal graphics device found";
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const NO_GPU_DRIVER: &str = "No Vulkan graphics driver found: Horizon needs the Vulkan loader \
      (libvulkan.so.1) and a Vulkan driver for your GPU (Mesa's, or NVIDIA's)";
 /// Logs a step of the renderer's start, for a native crash in the graphics
@@ -958,7 +1051,8 @@ impl Renderer {
             config.format = surface_format(&caps.formats, config.format);
             config.view_formats = vec![config.format.remove_srgb_suffix()];
             // Screenshots copy the presented frame back from the swapchain.
-            if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
+            if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) && !cfg!(target_arch = "wasm32")
+            {
                 config.usage |= wgpu::TextureUsages::COPY_SRC;
             }
             config.present_mode = previous
@@ -4144,7 +4238,7 @@ impl Renderer {
         }
         buffer.unmap();
         let mut encoder = png::Encoder::new(
-            std::io::BufWriter::new(std::fs::File::create(path)?),
+            std::io::BufWriter::new(horizon_core::fs::File::create(path)?),
             width,
             height,
         );
@@ -4318,7 +4412,7 @@ mod tests {
     #[test]
     fn shaders_translate_to_hlsl_for_directx_12() {
         fn wgsl_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-            for entry in std::fs::read_dir(dir).unwrap() {
+            for entry in horizon_core::fs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
                 if path.is_dir() {
                     wgsl_files(&path, out);
@@ -4334,7 +4428,7 @@ mod tests {
         );
         assert!(files.len() >= 10, "{files:?}");
         for path in files {
-            let text = std::fs::read_to_string(&path).unwrap();
+            let text = horizon_core::fs::read_to_string(&path).unwrap();
             // entity.wgsl comes after the overlay's constants (entity_shader).
             let module = naga::front::wgsl::parse_str(&text)
                 .or_else(|_| {
@@ -4503,7 +4597,7 @@ mod sprite_upload_tests {
             .join(horizon_core::VANILLA_VERSION);
         if !root
             .join("assets/minecraft/textures/block/rail.png")
-            .exists()
+            .exists_vfs()
         {
             return;
         }

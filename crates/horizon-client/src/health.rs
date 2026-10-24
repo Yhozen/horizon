@@ -5,6 +5,9 @@ use crate::{
     Result,
     motion::{MotionEvent, PlayerMotion},
 };
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_world::{
     attributes::live::LiveAttributes,
     block_landing::LandingDamage,
@@ -21,7 +24,7 @@ use horizon_world::{
     server_player_damage::ServerDamageEnvironment,
     synced_floats::{FloatValue, Observer, SyncedFloats},
 };
-use std::{fs, io, path::Path};
+use std::{io, path::Path};
 pub(crate) type Attributes = LiveAttributes<Box<dyn FnMut() -> i32>>;
 pub(crate) type State = HurtState<DamageTypeId>;
 

@@ -71,7 +71,9 @@ impl StartupMenu {
         self.root = root;
         if self.title.is_none() {
             let mut title = Title::new(
-                std::env::current_dir().unwrap_or_default().join("saves"),
+                horizon_core::fs::current_dir()
+                    .unwrap_or_default()
+                    .join("saves"),
                 &self.root,
             );
             title.last_server = settings.file.string("lastServer");
@@ -209,42 +211,53 @@ pub(super) fn spawn_loader(
     vanilla_root: &std::path::Path,
     started: Instant,
     progress: &Progress,
-) -> Result<(Receiver<LoaderMsg>, JoinHandle<()>)> {
+) -> Result<(Receiver<LoaderMsg>, Option<JoinHandle<()>>)> {
     let (sender, receiver) = std::sync::mpsc::channel();
     let settings = settings.clone();
     let vanilla_root = vanilla_root.to_path_buf();
     let dev_mods = options.dev_mods.clone();
     let progress = progress.clone();
-    let handle = std::thread::Builder::new()
-        .name("resource-loader".into())
-        .spawn(move || {
-            let mut pack_error = None;
-            let root = packs::startup_root(&vanilla_root, &settings.resource_packs).unwrap_or_else(
-                |error| {
-                    pack_error = Some(error.to_string());
-                    vanilla_root.clone()
-                },
-            );
-            let root = mods::content_root(&root, &settings.mods.enabled, &dev_mods);
-            let result = load_resources(
-                root,
-                &vanilla_root,
-                &settings,
-                started,
-                true,
-                &progress,
-                &mut |gui, root| {
-                    let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf()));
-                },
-            )
-            .map(|mut loaded| {
-                loaded.pack_error = loaded.pack_error.or(pack_error);
-                loaded
-            })
-            .map_err(|error| error.to_string());
-            let _ = sender.send(LoaderMsg::Done(result));
-        })?;
-    Ok((receiver, handle))
+    let run = move || {
+        let mut pack_error = None;
+        let root = packs::startup_root(&vanilla_root, &settings.resource_packs).unwrap_or_else(
+            |error| {
+                pack_error = Some(error.to_string());
+                vanilla_root.clone()
+            },
+        );
+        let root = mods::content_root(&root, &settings.mods.enabled, &dev_mods);
+        let result = load_resources(
+            root,
+            &vanilla_root,
+            &settings,
+            started,
+            true,
+            &progress,
+            &mut |gui, root| {
+                let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf()));
+            },
+        )
+        .map(|mut loaded| {
+            loaded.pack_error = loaded.pack_error.or(pack_error);
+            loaded
+        })
+        .map_err(|error| error.to_string());
+        let _ = sender.send(LoaderMsg::Done(result));
+    };
+    // wasm32 has no threads: load on this thread so the channel already has
+    // Ui/Done when the event loop starts polling.
+    #[cfg(target_arch = "wasm32")]
+    {
+        run();
+        return Ok((receiver, None));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let handle = std::thread::Builder::new()
+            .name("resource-loader".into())
+            .spawn(run)?;
+        Ok((receiver, Some(handle)))
+    }
 }
 
 impl Loading {
@@ -359,12 +372,12 @@ impl Loading {
                 }
                 Event::OpenPackFolder => {
                     let dir = packs::packs_dir();
-                    let _ = std::fs::create_dir_all(&dir);
+                    let _ = horizon_core::fs::create_dir_all(&dir);
                     packs::open_folder(&dir);
                 }
                 Event::OpenModFolder => {
                     let dir = Game::options_path().with_file_name(horizon_client::mod_list::DIR);
-                    let _ = std::fs::create_dir_all(&dir);
+                    let _ = horizon_core::fs::create_dir_all(&dir);
                     packs::open_folder(&dir);
                 }
                 Event::Credits => {
@@ -657,7 +670,7 @@ impl Loading {
             &self.progress,
         )?;
         self.receiver = receiver;
-        self.handle = Some(handle);
+        self.handle = handle;
         self.menu.reload_packs = false;
         Ok(())
     }

@@ -190,14 +190,14 @@ pub fn shown_address(address: &str) -> String {
 /// The relay the player set (`friendsRelay` in horizon.txt, beside
 /// options.txt), else `HORIZON_RELAY_URL`. None by default.
 pub fn friends_relay_setting() -> Option<String> {
-    let dir = std::env::current_dir().ok()?;
+    let dir = horizon_core::fs::current_dir().ok()?;
     crate::ui_theme::preference(&dir, "friendsRelay")
         .filter(|r| !r.is_empty())
         .or_else(horizon_friends::relay_url)
 }
 /// Remember the relay typed on Join a friend (empty forgets it).
 pub fn save_friends_relay(relay: &str) {
-    if let Ok(dir) = std::env::current_dir() {
+    if let Ok(dir) = horizon_core::fs::current_dir() {
         crate::ui_theme::set_preference(&dir, "friendsRelay", (!relay.is_empty()).then_some(relay));
     }
 }
@@ -548,7 +548,7 @@ pub fn json_text(v: &serde_json::Value, lang: &Language) -> String {
 
 /// en_us.json from the prepared resources.
 pub fn load_language(resources: &std::path::Path) -> Language {
-    std::fs::read(resources.join("assets/minecraft/lang/en_us.json"))
+    horizon_core::fs::read(resources.join("assets/minecraft/lang/en_us.json"))
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default()
@@ -583,7 +583,7 @@ pub fn ping(address: &str, timeout: Duration) -> Result<(serde_json::Value, u128
         }
         _ => return Err("unexpected status reply".into()),
     };
-    let start = std::time::Instant::now();
+    let start = web_time::Instant::now();
     c.send(&status::Serverbound::PingRequest(status::Ping { time: 1 }).encode())
         .map_err(e)?;
     let _ = c.recv().map_err(e)?;

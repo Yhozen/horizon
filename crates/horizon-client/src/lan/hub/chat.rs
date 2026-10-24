@@ -12,8 +12,8 @@ use horizon_world::nbt::{JavaString, Tag};
 
 /// Now, in epoch milliseconds (Instant.now()).
 pub fn now_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64)
 }
 

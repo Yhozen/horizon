@@ -6,6 +6,8 @@ use crate::{
     save::Level,
     text::{Text, format_translation},
 };
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use std::path::{Path, PathBuf};
 use std::{
     cell::{Cell, RefCell},
@@ -128,7 +130,7 @@ pub struct Title {
     /// Direct Connection's address, synchronized with `options.txt`'s `lastServer`.
     pub last_server: String,
     pub saves: PathBuf,
-    pub started: std::time::Instant,
+    pub started: web_time::Instant,
     search: String,
     search_focused: bool,
     /// The focused text field's cursor, selection and scroll.
@@ -143,7 +145,7 @@ pub struct Title {
     icons: RefCell<std::collections::HashMap<PathBuf, (std::time::SystemTime, Option<Vec<u8>>)>>,
     splash: Option<String>,
     /// The saves listed for Home, re-read every couple of seconds.
-    recent: std::cell::RefCell<Option<(std::time::Instant, Vec<WorldEntry>)>>,
+    recent: std::cell::RefCell<Option<(web_time::Instant, Vec<WorldEntry>)>>,
 }
 pub(crate) struct Button {
     x: f32,
@@ -168,14 +170,14 @@ pub fn parse_seed(text: &str) -> Option<i64> {
     }))
 }
 pub fn list_worlds(saves: &Path) -> Vec<WorldEntry> {
-    let mut worlds: Vec<WorldEntry> = std::fs::read_dir(saves)
+    let mut worlds: Vec<WorldEntry> = horizon_core::fs::read_dir(saves)
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| {
             let path = e.path();
             let level = Level::read(&path)?;
-            let modified = std::fs::metadata(path.join("level.dat"))
+            let modified = horizon_core::fs::metadata(path.join("level.dat"))
                 .and_then(|m| m.modified())
                 .ok()?;
             let data = crate::save::read_dat(&path.join("level.dat"))?;
@@ -226,7 +228,7 @@ impl Title {
         use chrono::Datelike;
         let today = chrono::Local::now();
         let mode = Mode::Main;
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         Self {
             mode,
             last_server: String::new(),
@@ -243,10 +245,12 @@ impl Title {
             toast: None,
             icons: RefCell::new(std::collections::HashMap::new()),
             splash: choose_splash(
-                &std::fs::read_to_string(resources.join("assets/minecraft/texts/splashes.txt"))
-                    .unwrap_or_default(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
+                &horizon_core::fs::read_to_string(
+                    resources.join("assets/minecraft/texts/splashes.txt"),
+                )
+                .unwrap_or_default(),
+                web_time::SystemTime::now()
+                    .duration_since(web_time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .subsec_nanos() as usize,
                 (today.month(), today.day()),
@@ -466,23 +470,24 @@ impl Title {
     ) {
         let path = self.saves.join(&world.folder).join("icon.png");
         let mut icons = self.icons.borrow_mut();
-        let pixels = if let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified()) {
-            let cached = icons
-                .entry(path.clone())
-                .or_insert_with(|| (std::time::UNIX_EPOCH, None));
-            if cached.0 != modified {
-                *cached = (
-                    modified,
-                    crate::hud::decode(&path)
-                        .ok()
-                        .filter(|(w, h, _)| *w == 64 && *h == 64)
-                        .map(|(_, _, p)| p),
-                );
-            }
-            cached.1.as_ref()
-        } else {
-            None
-        };
+        let pixels =
+            if let Ok(modified) = horizon_core::fs::metadata(&path).and_then(|m| m.modified()) {
+                let cached = icons
+                    .entry(path.clone())
+                    .or_insert_with(|| (std::time::UNIX_EPOCH, None));
+                if cached.0 != modified {
+                    *cached = (
+                        modified,
+                        crate::hud::decode(&path)
+                            .ok()
+                            .filter(|(w, h, _)| *w == 64 && *h == 64)
+                            .map(|(_, _, p)| p),
+                    );
+                }
+                cached.1.as_ref()
+            } else {
+                None
+            };
         let sprite = format!("horizon/world-icon{slot}");
         if let Some(pixels) = pixels
             && let Some(rect) = atlas.sprites.get(&sprite)
@@ -514,7 +519,7 @@ impl Title {
             Some((at, worlds)) if at.elapsed().as_secs() < 2 => worlds.clone(),
             _ => {
                 let worlds = list_worlds(&self.saves);
-                *recent = Some((std::time::Instant::now(), worlds.clone()));
+                *recent = Some((web_time::Instant::now(), worlds.clone()));
                 worlds
             }
         }
@@ -559,7 +564,7 @@ impl Title {
         // FileUtil.findAvailableName: append (n) until unused.
         let mut folder = base.clone();
         let mut n = 1;
-        while self.saves.join(&folder).exists() {
+        while self.saves.join(&folder).exists_vfs() {
             folder = format!("{base} ({n})");
             n += 1;
         }
@@ -671,7 +676,10 @@ impl Title {
                         top + 64.0,
                         200.0,
                         &lang::get_or("selectWorld.edit.resetIcon", "Reset Icon"),
-                        self.saves.join(&world.folder).join("icon.png").is_file(),
+                        self.saves
+                            .join(&world.folder)
+                            .join("icon.png")
+                            .is_file_vfs(),
                         30,
                     ),
                     b(

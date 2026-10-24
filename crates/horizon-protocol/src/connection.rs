@@ -11,8 +11,9 @@ use std::{
         Arc, Condvar, Mutex,
         atomic::{AtomicI64, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 /// One direction of a [`Pipe`]: the bytes written and not read yet, and
 /// whether either end closed it.

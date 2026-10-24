@@ -10,7 +10,7 @@
 //! The one exception is [`live`]: the anonymous "I'm playing" ping the game sends while it
 //! runs, for the live player count. It holds no install ID and nothing about the player.
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use web_time::{SystemTime, UNIX_EPOCH};
 
 pub mod batch;
 pub mod consent;

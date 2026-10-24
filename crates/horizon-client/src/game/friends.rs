@@ -15,7 +15,8 @@ use horizon_client::{
 };
 use horizon_friends::{Host, HostConfig, HostEvent, PathMode, host::DEFAULT_PORT, reach, stun};
 use horizon_protocol::{GAME_VERSION, PROTOCOL_VERSION};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 pub(super) struct Sharing {
     host: Host,
@@ -41,7 +42,7 @@ fn stun_servers() -> Vec<String> {
     if std::env::var_os("HORIZON_STUN_SERVERS").is_some() {
         return stun::servers_from_env();
     }
-    let dir = std::env::current_dir().unwrap_or_default();
+    let dir = horizon_core::fs::current_dir().unwrap_or_default();
     match horizon_client::ui_theme::preference(&dir, "friendsStun") {
         Some(list) => stun::parse_servers(&list),
         None => stun::servers_from_env(),

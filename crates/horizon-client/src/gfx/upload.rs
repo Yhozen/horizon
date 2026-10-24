@@ -9,7 +9,10 @@ use std::num::NonZeroU64;
 const CHUNK: u64 = 1 << 20;
 
 pub struct Uploads {
+    #[cfg(not(target_arch = "wasm32"))]
     belt: wgpu::util::StagingBelt,
+    #[cfg(target_arch = "wasm32")]
+    belt: web::Belt,
 }
 
 impl Uploads {
@@ -20,7 +23,10 @@ impl Uploads {
     /// a buffer of their own).
     pub fn with_chunk(device: &wgpu::Device, chunk: u64) -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             belt: wgpu::util::StagingBelt::new(device.clone(), chunk),
+            #[cfg(target_arch = "wasm32")]
+            belt: web::Belt::new(device.clone(), chunk),
         }
     }
     /// Copy tightly packed RGBA8 `pixels` (`width` by `height`) into one mip
@@ -88,6 +94,124 @@ impl Uploads {
     /// encoder's submission finishes on the GPU.
     pub fn finish(&mut self, encoder: &wgpu::CommandEncoder) {
         self.belt.finish_and_recall_on_submit(encoder);
+    }
+}
+
+/// 🤖 Agent: the browser build's belt. `StagingBelt` recalls its buffers
+/// through `map_async` and `on_submitted_work_done`, which fail in Chrome
+/// once the frame loop runs inside the page's event loop; here every frame
+/// gets buffers mapped at creation instead, unmapped before the submit and
+/// kept alive for a few frames so the GPU is done with them when they drop.
+#[cfg(target_arch = "wasm32")]
+mod web {
+    use std::num::NonZeroU64;
+
+    const FRAMES: usize = 4;
+
+    pub struct Belt {
+        device: wgpu::Device,
+        chunk: u64,
+        open: Option<(wgpu::Buffer, u64)>,
+        frame: Vec<wgpu::Buffer>,
+        old: std::collections::VecDeque<Vec<wgpu::Buffer>>,
+    }
+
+    pub struct Slice {
+        buffer: wgpu::Buffer,
+        offset: u64,
+        size: u64,
+    }
+
+    impl Slice {
+        pub fn buffer(&self) -> &wgpu::Buffer {
+            &self.buffer
+        }
+        pub fn offset(&self) -> u64 {
+            self.offset
+        }
+        pub fn get_mapped_range_mut(&self) -> Option<wgpu::BufferViewMut> {
+            self.buffer
+                .slice(self.offset..self.offset + self.size)
+                .get_mapped_range_mut()
+                .ok()
+        }
+    }
+
+    impl Belt {
+        pub fn new(device: wgpu::Device, chunk: u64) -> Self {
+            Self {
+                device,
+                chunk,
+                open: None,
+                frame: Vec::new(),
+                old: Default::default(),
+            }
+        }
+        pub fn allocate(&mut self, size: NonZeroU64, alignment: NonZeroU64) -> Slice {
+            let size = size.get().next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
+            let align = alignment.get().max(wgpu::MAP_ALIGNMENT);
+            let fits = |(buffer, used): &(wgpu::Buffer, u64)| {
+                used.next_multiple_of(align) + size <= buffer.size()
+            };
+            if !self.open.as_ref().is_some_and(fits) {
+                if let Some((buffer, _)) = self.open.take() {
+                    self.frame.push(buffer);
+                }
+                let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("web staging"),
+                    size: size.max(self.chunk),
+                    usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: true,
+                });
+                self.open = Some((buffer, 0));
+            }
+            let (buffer, used) = self.open.as_mut().expect("opened above");
+            let offset = used.next_multiple_of(align);
+            *used = offset + size;
+            Slice {
+                buffer: buffer.clone(),
+                offset,
+                size,
+            }
+        }
+        pub fn write_buffer(
+            &mut self,
+            encoder: &mut wgpu::CommandEncoder,
+            target: &wgpu::Buffer,
+            offset: u64,
+            size: NonZeroU64,
+        ) -> WriteView {
+            let slice = self.allocate(size, NonZeroU64::new(4).expect("non-zero"));
+            encoder.copy_buffer_to_buffer(&slice.buffer, slice.offset, target, offset, size.get());
+            WriteView {
+                view: slice.get_mapped_range_mut().expect("mapped at creation"),
+                len: size.get() as usize,
+            }
+        }
+        pub fn finish_and_recall_on_submit(&mut self, _encoder: &wgpu::CommandEncoder) {
+            if let Some((buffer, _)) = self.open.take() {
+                self.frame.push(buffer);
+            }
+            for buffer in &self.frame {
+                buffer.unmap();
+            }
+            self.old.push_back(std::mem::take(&mut self.frame));
+            while self.old.len() > FRAMES {
+                self.old.pop_front();
+            }
+        }
+    }
+
+    /// The mapped bytes of one buffer write, cut to the written length.
+    pub struct WriteView {
+        view: wgpu::BufferViewMut,
+        len: usize,
+    }
+
+    impl WriteView {
+        pub fn copy_from_slice(mut self, bytes: &[u8]) {
+            self.view.slice(..self.len).copy_from_slice(bytes);
+        }
     }
 }
 

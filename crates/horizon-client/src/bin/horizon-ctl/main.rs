@@ -10,8 +10,9 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 use horizon_client::control::Stream;
 use serde_json::{Value, json};
@@ -299,7 +300,7 @@ fn logs(home: &Path, words: &[String]) -> Result<Value, Failure> {
                 logging::crash_reports_dir(home).display()
             ))
         })?;
-        let text = std::fs::read_to_string(&path)
+        let text = horizon_core::fs::read_to_string(&path)
             .map_err(|e| missing(format!("{}: {e}", path.display())))?;
         return Ok(json!({ "path": path, "text": text }));
     }
@@ -317,7 +318,7 @@ fn usage(name: &str) -> String {
 fn absolute_paths(words: &mut [String]) {
     if words.first().map(String::as_str) == Some("screenshot")
         && let Some(path) = words.get_mut(1)
-        && let Ok(cwd) = std::env::current_dir()
+        && let Ok(cwd) = horizon_core::fs::current_dir()
     {
         *path = cwd.join(&*path).display().to_string();
     }
@@ -500,7 +501,7 @@ fn main() -> ExitCode {
         Some("script") => {
             let keep_going = args.iter().any(|a| a == "--keep-going");
             match args.iter().skip(1).find(|a| !a.starts_with("--")) {
-                Some(file) if file != "-" => match std::fs::File::open(file) {
+                Some(file) if file != "-" => match horizon_core::fs::File::open(file) {
                     Ok(f) => script(&mut session, BufReader::new(f), keep_going, pretty),
                     Err(e) => {
                         print(
@@ -545,7 +546,7 @@ mod tests {
     #[test]
     fn logs_reads_the_end_of_latest_log_and_the_newest_crash_report() {
         let home = std::env::temp_dir().join(format!("horizon-ctl-logs-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
+        let _ = horizon_core::fs::remove_dir_all(&home);
         let words = |s: &str| -> Vec<String> { s.split_whitespace().map(String::from).collect() };
         let failure = logs(&home, &words("")).unwrap_err();
         assert!(
@@ -554,11 +555,11 @@ mod tests {
                 .unwrap()
                 .contains("latest.log")
         );
-        std::fs::create_dir_all(home.join("logs")).unwrap();
+        horizon_core::fs::create_dir_all(home.join("logs")).unwrap();
         let text: String = (1..=150)
             .map(|i| format!("[10:00:00] [Render thread/INFO]: line {i}\n"))
             .collect();
-        std::fs::write(home.join("logs/latest.log"), text).unwrap();
+        horizon_core::fs::write(home.join("logs/latest.log"), text).unwrap();
         let reply = logs(&home, &words("")).unwrap();
         let tail = reply["text"].as_str().unwrap();
         assert_eq!(tail.lines().count(), 100);
@@ -572,20 +573,20 @@ mod tests {
         assert_eq!(logs(&home, &words("--lines 0")).unwrap_err().status, USAGE);
         assert_eq!(logs(&home, &words("--tail")).unwrap_err().status, USAGE);
         assert!(logs(&home, &words("--crash")).is_err());
-        std::fs::create_dir_all(home.join("crash-reports")).unwrap();
-        std::fs::write(
+        horizon_core::fs::create_dir_all(home.join("crash-reports")).unwrap();
+        horizon_core::fs::write(
             home.join("crash-reports/crash-2026-10-13_10.00.00-client.txt"),
             "old",
         )
         .unwrap();
-        std::fs::write(
+        horizon_core::fs::write(
             home.join("crash-reports/crash-2026-10-14_10.00.00-client.txt"),
             "new",
         )
         .unwrap();
         let reply = logs(&home, &words("--crash")).unwrap();
         assert_eq!(reply["text"], "new");
-        let _ = std::fs::remove_dir_all(&home);
+        let _ = horizon_core::fs::remove_dir_all(&home);
     }
 
     #[test]
@@ -621,7 +622,7 @@ mod tests {
     #[test]
     fn no_ai_refuses_every_command() {
         let home = std::env::temp_dir().join(format!("horizon-ctl-no-ai-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
+        let _ = horizon_core::fs::remove_dir_all(&home);
         let mut s = Session::new(std::env::temp_dir().join("horizon-ctl-nobody.sock"), None);
         s.home = home.clone();
         assert_eq!(
@@ -636,7 +637,7 @@ mod tests {
             assert_eq!(f.reply["kind"], "denied");
             assert_eq!(f.reply["error"], horizon_core::no_ai::REFUSAL);
         }
-        let _ = std::fs::remove_dir_all(&home);
+        let _ = horizon_core::fs::remove_dir_all(&home);
     }
 
     #[test]

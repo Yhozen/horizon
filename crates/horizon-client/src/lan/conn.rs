@@ -29,8 +29,9 @@ use std::{
         atomic::{AtomicI32, AtomicI64, AtomicU32, AtomicUsize, Ordering},
         mpsc::{Receiver, RecvTimeoutError, Sender, channel},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 /// ServerCommonPacketListenerImpl.KEEPALIVE_TIME and the disconnect timeout.
 const KEEP_ALIVE_EVERY: Duration = Duration::from_secs(15);

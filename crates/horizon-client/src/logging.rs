@@ -8,8 +8,8 @@
 //! Messages go through the `log` facade. Horizon's own still print their plain text on stderr,
 //! as they did before the log existed; other crates' errors only reach the file (their
 //! warnings are mostly the Vulkan loader's startup chatter).
+use horizon_core::fs::{self, File, OpenOptions};
 use std::collections::VecDeque;
-use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};

@@ -39,6 +39,9 @@ use crate::{
     heightmap::{HeightmapState, HeightmapType},
     registry::{BlockRegistry, BlockStateId},
 };
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_core::{
     biome::{BiomeZoom, obfuscate_seed},
     density::{DensitySampler, SamplerContext},
@@ -49,7 +52,7 @@ use horizon_core::{
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    fs, io,
+    io,
     path::Path,
     sync::{Arc, Mutex, OnceLock},
 };
@@ -199,7 +202,7 @@ fn read_bundle(dir: &Path, name: &str) -> Result<Bundle, GeneratorError> {
     Ok(serde_json::from_str(&text)?)
 }
 fn read_optional_bundle(dir: &Path, name: &str) -> Result<Option<Bundle>, GeneratorError> {
-    if dir.join(format!("{name}.json")).exists() {
+    if dir.join(format!("{name}.json")).exists_vfs() {
         read_bundle(dir, name).map(Some)
     } else {
         Ok(None)
@@ -339,7 +342,7 @@ impl GeneratorData {
         )?;
         let mut presets = read_optional_bundle(dir, "presets")?.unwrap_or_default();
         let reports = dir.join("biome_parameters");
-        if reports.is_dir() {
+        if reports.is_dir_vfs() {
             for entry in fs::read_dir(&reports)? {
                 let path = entry?.path();
                 let Some(stem) = path
@@ -437,7 +440,7 @@ impl GeneratorData {
         };
         let behaviours = dir
             .parent()
-            .filter(|root| root.join("block-behaviours.json").exists())
+            .filter(|root| root.join("block-behaviours.json").exists_vfs())
             .and_then(|root| crate::level::Behaviours::load(registry, root).ok())
             .map(Arc::new);
         Ok(Arc::new(Self {
@@ -1047,7 +1050,7 @@ where
             self.settings.noise_height,
             self.settings.sea_level,
         );
-        let mut clock = std::time::Instant::now();
+        let mut clock = web_time::Instant::now();
         let mut neighbors = Vec::with_capacity(9);
         let mut possible = BTreeSet::new();
         for dz in -1..=1 {
@@ -1582,8 +1585,8 @@ impl<R: RandomSource> MaterialSurfaceQueries for SurfaceQueries<'_, '_, R> {
     }
 }
 
-fn lap(clock: &mut std::time::Instant) -> std::time::Duration {
-    let now = std::time::Instant::now();
+fn lap(clock: &mut web_time::Instant) -> std::time::Duration {
+    let now = web_time::Instant::now();
     let elapsed = now - *clock;
     *clock = now;
     elapsed
@@ -2529,7 +2532,7 @@ mod tests {
             .unwrap_or_else(|| {
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3")
             });
-        if !root.join("worldgen/world_presets.json").exists() {
+        if !root.join("worldgen/world_presets.json").exists_vfs() {
             eprintln!("skipping: no worldgen bundle at {}", root.display());
             return;
         }
@@ -2716,7 +2719,7 @@ mod tests {
             .unwrap_or_else(|| {
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3")
             });
-        if !root.join("worldgen/world_presets.json").exists() {
+        if !root.join("worldgen/world_presets.json").exists_vfs() {
             eprintln!("skipping: no worldgen bundle at {}", root.display());
             return;
         }
@@ -2758,7 +2761,7 @@ mod tests {
             sample.water.is_some(),
             "fixture includes underwater terrain"
         );
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         let mut exact = Vec::new();
         for z in 0..8 {
             for x in 0..8 {
@@ -2766,7 +2769,7 @@ mod tests {
             }
         }
         let dense_time = started.elapsed();
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         let direct = worker.lod_grid(-1024, 0, 32, 8).unwrap();
         for z in 0..8 {
             for x in 0..8 {
@@ -2816,7 +2819,7 @@ mod tests {
             .unwrap_or_else(|| {
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3")
             });
-        if !root.join("worldgen/world_presets.json").exists() {
+        if !root.join("worldgen/world_presets.json").exists_vfs() {
             eprintln!("skipping: no worldgen bundle at {}", root.display());
             return;
         }
@@ -2867,7 +2870,7 @@ mod tests {
             .unwrap_or_else(|| {
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3")
             });
-        if !root.join("worldgen/world_presets.json").exists() {
+        if !root.join("worldgen/world_presets.json").exists_vfs() {
             eprintln!("skipping: no worldgen bundle at {}", root.display());
             return None;
         }
@@ -2991,7 +2994,7 @@ mod tests {
             .unwrap_or_else(|| {
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3")
             });
-        if !root.join("worldgen/world_presets.json").exists() {
+        if !root.join("worldgen/world_presets.json").exists_vfs() {
             eprintln!("skipping: no worldgen bundle at {}", root.display());
             return;
         }

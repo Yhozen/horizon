@@ -248,10 +248,8 @@ impl Rotation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        fs,
-        sync::atomic::{AtomicU32, Ordering},
-    };
+    use horizon_core::fs;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     struct Fixture(std::path::PathBuf);
     impl Fixture {

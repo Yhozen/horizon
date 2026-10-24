@@ -21,8 +21,9 @@ use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::mpsc::Sender,
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalPosition,

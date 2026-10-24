@@ -8,7 +8,7 @@ use horizon_client::{
     signs::wood_type,
 };
 use horizon_protocol::packets::play::{self, Clientbound as C, Serverbound as S};
-use std::time::Instant;
+use web_time::Instant;
 use winit::{
     event::{ElementState, KeyEvent},
     keyboard::{KeyCode, PhysicalKey},

@@ -457,3 +457,25 @@ mod tests {
         assert_eq!(value, "ok");
     }
 }
+
+/// The browser build (WEB.md) has no system clipboard here: only the game's own.
+#[cfg(target_arch = "wasm32")]
+mod arboard {
+    pub enum Error {
+        ContentNotAvailable,
+        #[allow(dead_code)]
+        Unavailable,
+    }
+    pub struct Clipboard;
+    impl Clipboard {
+        pub fn new() -> Result<Self, Error> {
+            Err(Error::Unavailable)
+        }
+        pub fn get_text(&mut self) -> Result<String, Error> {
+            Err(Error::ContentNotAvailable)
+        }
+        pub fn set_text<T: Into<String>>(&mut self, _text: T) -> Result<(), Error> {
+            Err(Error::Unavailable)
+        }
+    }
+}

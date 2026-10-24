@@ -11,6 +11,8 @@ description = "Horizon simulation foundations for the pinned vanilla Java Editio
 rng-trace = []
 
 [dependencies]
+# std::time on native; the page clock in the browser build (WEB.md), where std's panics.
+web-time = "1.1"
 libm = "=0.2.16"
 
 [[bin]]

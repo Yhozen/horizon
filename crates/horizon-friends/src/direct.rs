@@ -2,7 +2,9 @@
 //! offers, and the race that dials all of the other's at once from the port
 //! it also listens on (so two NATs that map a port the same way for every
 //! destination let the two SYNs cross: TCP simultaneous open).
+#[cfg(not(target_arch = "wasm32"))]
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+#[cfg_attr(target_arch = "wasm32", allow(unused_imports))]
 use std::{
     io::{self, Read, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream},
@@ -11,8 +13,9 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc::Sender,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 /// How long the ends try to reach each other directly.
 pub const RACE: Duration = Duration::from_millis(3000);
@@ -21,6 +24,7 @@ const MAGIC: &[u8; 4] = b"HZF1";
 /// A guest dialling an endpoint from an invite code (no relay involved).
 pub const CODE_MAGIC: &[u8; 4] = b"HZF2";
 
+#[cfg(not(target_arch = "wasm32"))]
 fn socket_for(addr: &SocketAddr) -> io::Result<Socket> {
     let s = Socket::new(
         Domain::for_address(*addr),
@@ -36,6 +40,7 @@ fn socket_for(addr: &SocketAddr) -> io::Result<Socket> {
     Ok(s)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unspecified(v6: bool, port: u16) -> SocketAddr {
     if v6 {
         SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port)
@@ -46,6 +51,14 @@ fn unspecified(v6: bool, port: u16) -> SocketAddr {
 
 /// The direct socket's listeners: IPv4 on `port` (0 picks one), and IPv6 on
 /// the same port when the system has it.
+#[cfg(target_arch = "wasm32")]
+pub fn listen(_port: u16) -> io::Result<(Vec<TcpListener>, u16)> {
+    Err(io::ErrorKind::Unsupported.into())
+}
+
+/// The direct socket's listeners: IPv4 on `port` (0 picks one), and IPv6 on
+/// the same port when the system has it.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn listen(port: u16) -> io::Result<(Vec<TcpListener>, u16)> {
     let bind = |addr: SocketAddr| -> io::Result<TcpListener> {
         let s = socket_for(&addr)?;
@@ -67,6 +80,7 @@ pub fn listen(port: u16) -> io::Result<(Vec<TcpListener>, u16)> {
 /// Connect to `to` from local `port` (shared with the listener), or from any
 /// port when that one can't be used (the same pair already connected).
 pub fn connect_from(port: Option<u16>, to: SocketAddr, timeout: Duration) -> io::Result<TcpStream> {
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(port) = port {
         let s = socket_for(&to)?;
         if s.bind(&SockAddr::from(unspecified(to.is_ipv6(), port)))
@@ -84,6 +98,8 @@ pub fn connect_from(port: Option<u16>, to: SocketAddr, timeout: Duration) -> io:
             }
         }
     }
+    #[cfg(target_arch = "wasm32")]
+    let _ = port;
     TcpStream::connect_timeout(&to, timeout)
 }
 

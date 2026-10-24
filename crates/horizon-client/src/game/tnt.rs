@@ -3,6 +3,8 @@
 //! (flint and steel / fire charge).
 use super::{Game, explosion::BlockInteraction};
 use horizon_client::{Result, collisions::SceneCollisions, items::ItemStack, mesher::Vertex};
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_core::{
     geometry::{Aabb, Vec3},
     position::BlockPos,
@@ -490,7 +492,7 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
-        if !root.join("movement-properties.nbt").exists() {
+        if !root.join("movement-properties.nbt").exists_vfs() {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();

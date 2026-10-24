@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
+use web_time::Instant;
 
 use horizon_telemetry::payload::{Crash, Display, Perf, Settings, System, Timings};
 use horizon_telemetry::scrub::Scrubber;
@@ -127,7 +127,7 @@ pub fn gpu_kind(device_type: &str) -> &'static str {
 /// This machine, with the GPU and the screen once the renderer knows them. The drive is the one
 /// under the game folder (the current folder).
 pub fn system() -> System {
-    let home = std::env::current_dir().ok();
+    let home = horizon_core::fs::current_dir().ok();
     let mut system = System::detect_in(home.as_deref());
     if let Some(gpu) = GPU.lock().unwrap_or_else(|e| e.into_inner()).clone() {
         system.vram_mb = match gpu.kind.as_str() {
@@ -314,7 +314,7 @@ impl Session {
 /// The game's resident memory: the peak on Linux, what it uses now elsewhere.
 fn peak_ram_mb() -> u32 {
     let kib = if cfg!(target_os = "linux") {
-        std::fs::read_to_string("/proc/self/status")
+        horizon_core::fs::read_to_string("/proc/self/status")
             .ok()
             .and_then(|t| {
                 t.lines()
@@ -351,8 +351,8 @@ mod tests {
             "horizon-client-telemetry-{name}-{}",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let _ = horizon_core::fs::remove_dir_all(&dir);
+        horizon_core::fs::create_dir_all(&dir).unwrap();
         dir
     }
 

@@ -2,6 +2,8 @@
 //! resource root and enabled packs layered over `en_us`, the language list
 //! from `pack.mcmeta` `language` sections, and a process-wide current
 //! language used by every screen.
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{Arc, RwLock},
@@ -39,14 +41,14 @@ pub trait ResourceSource {
 }
 impl ResourceSource for std::path::PathBuf {
     fn read(&self, path: &str) -> Option<Vec<u8>> {
-        std::fs::read(self.join(path)).ok()
+        horizon_core::fs::read(self.join(path)).ok()
     }
     fn namespaces(&self) -> Vec<String> {
-        std::fs::read_dir(self.join("assets"))
+        horizon_core::fs::read_dir(self.join("assets"))
             .into_iter()
             .flatten()
             .flatten()
-            .filter(|e| e.path().is_dir())
+            .filter(|e| e.path().is_dir_vfs())
             .filter_map(|e| e.file_name().to_str().map(str::to_owned))
             .collect()
     }

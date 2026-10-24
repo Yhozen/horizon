@@ -14,6 +14,8 @@ use crate::{
     crafting::Recipes,
     items::{ItemStack, Items},
 };
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use std::sync::Arc;
 
 mod bundle;
@@ -3019,7 +3021,7 @@ pub(crate) mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
-        if !root.join("items.json").exists() {
+        if !root.join("items.json").exists_vfs() {
             return;
         }
         let items = Items::catalog(&root).unwrap();

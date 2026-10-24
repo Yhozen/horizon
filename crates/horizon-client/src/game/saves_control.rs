@@ -4,7 +4,7 @@
 use super::Game;
 use horizon_client::{Result, title};
 use serde_json::{Value, json};
-use std::{path::PathBuf, sync::mpsc::Sender, time::UNIX_EPOCH};
+use std::{path::PathBuf, sync::mpsc::Sender};
 
 pub(super) const HELP: &[&str] = &[
     "worlds                         the saved worlds, newest first: folder, name, mode, last played, version",
@@ -15,7 +15,7 @@ pub(super) const HELP: &[&str] = &[
 ];
 
 fn saves() -> Result<PathBuf> {
-    Ok(std::env::current_dir()?.join("saves"))
+    Ok(horizon_core::fs::current_dir()?.join("saves"))
 }
 
 impl Game<'_> {
@@ -51,7 +51,7 @@ impl Game<'_> {
                             "folder": w.folder,
                             "name": w.name,
                             "mode": if w.creative { "creative" } else { "survival" },
-                            "last_played": w.modified.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64),
+                            "last_played": w.modified.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64),
                             "commands": w.commands,
                             "version": w.version,
                         })

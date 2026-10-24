@@ -155,7 +155,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
  "wl-clipboard-rs",
  "x11rb",
 ]
@@ -389,7 +389,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -428,6 +430,8 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af491d569909a7e4dee0ad7db7f5341fef5c614d5b8ec8cf765732aba3cff681"
 dependencies = [
+ "serde",
+ "termcolor",
  "unicode-width",
 ]
 
@@ -448,6 +452,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
+]
+
+[[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1042,8 +1056,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1053,9 +1069,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 5.3.0",
  "wasip2",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1236,6 +1254,7 @@ dependencies = [
  "horizon-telemetry",
  "serde",
  "serde_json",
+ "web-time",
 ]
 
 [[package]]
@@ -1254,8 +1273,11 @@ dependencies = [
  "arboard",
  "bytemuck",
  "chrono",
+ "console_error_panic_hook",
  "cpal",
  "flate2",
+ "getrandom 0.2.17",
+ "getrandom 0.3.4",
  "gilrs",
  "glam",
  "horizon-assets",
@@ -1270,17 +1292,24 @@ dependencies = [
  "horizon-theme",
  "horizon-threads",
  "horizon-world",
+ "js-sys",
  "log",
  "miniz_oxide 0.8.9",
  "naga",
  "png",
  "pollster",
+ "ring",
  "rustix 1.1.5",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "sha2",
  "symphonia",
  "ureq",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
  "wgpu",
  "winit",
  "winresource",
@@ -1292,6 +1321,7 @@ name = "horizon-core"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "web-time",
 ]
 
 [[package]]
@@ -1316,6 +1346,7 @@ dependencies = [
  "sha2",
  "socket2",
  "spake2",
+ "web-time",
 ]
 
 [[package]]
@@ -1334,6 +1365,7 @@ dependencies = [
  "serde_json",
  "toml",
  "wasmtime",
+ "web-time",
  "wit-component 0.239.0",
  "wit-parser 0.239.0",
  "zip",
@@ -1380,6 +1412,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "web-time",
 ]
 
 [[package]]
@@ -1428,6 +1461,7 @@ dependencies = [
  "horizon-world",
  "log",
  "ureq",
+ "web-time",
 ]
 
 [[package]]
@@ -1439,6 +1473,7 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
+ "web-time",
 ]
 
 [[package]]
@@ -1465,6 +1500,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "web-time",
  "xxhash-rust",
 ]
 
@@ -2903,6 +2939,7 @@ version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f4925028c7eb5d1fcdaf196971378ed9d2c1c4efc7dc5d011256f76c99c0a96"
 dependencies = [
+ "web-time",
  "zeroize",
 ]
 
@@ -4161,6 +4198,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "js-sys",
  "log",
+ "naga",
  "parking_lot",
  "portable-atomic",
  "profiling",

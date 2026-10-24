@@ -25,8 +25,9 @@ use std::{
         mpsc::{Receiver, Sender, channel},
     },
     thread::JoinHandle,
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 /// Wrong short codes tried at the relay before the host retires it.
 pub const MAX_WRONG: u32 = 5;

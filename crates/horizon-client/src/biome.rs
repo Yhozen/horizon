@@ -1,9 +1,10 @@
 //! Biome colours from the pinned biome definitions and colormaps
 //! (`Biome.getGrassColor`/`getFoliageColor`/..., `BlockTintSources`).
 use crate::Result;
+use horizon_core::fs;
 use horizon_core::{noise::SimplexNoise, random::LegacyRandom};
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, path::Path};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GrassModifier {

@@ -9,10 +9,8 @@
 use super::Game;
 use horizon_client::{Result, text::Text};
 use serde_json::{Value, json};
-use std::{
-    path::Path,
-    time::{Duration, Instant},
-};
+use std::{path::Path, time::Duration};
+use web_time::Instant;
 
 /// A message as `[text, style]` runs with adjacent equal styles merged; the
 /// style lists colour, bold, italic, underlined, strikethrough, obfuscated
@@ -97,7 +95,7 @@ impl Game<'_> {
             );
         self.harness_settle(deadline)?;
         let mut out = String::new();
-        for line in std::fs::read_to_string(script)?.lines() {
+        for line in horizon_core::fs::read_to_string(script)?.lines() {
             if line.trim().is_empty() {
                 continue;
             }
@@ -152,7 +150,7 @@ impl Game<'_> {
                 other => return Err(format!("command harness: unknown op {other}").into()),
             }
         }
-        std::fs::write(output, out)?;
+        horizon_core::fs::write(output, out)?;
         Ok(())
     }
 }

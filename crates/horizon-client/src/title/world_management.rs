@@ -1,9 +1,12 @@
 //! World-list operations. Metadata edits preserve every other NBT field;
 //! backups use vanilla's ZIP layout and never include the session lock.
 use crate::save::{read_dat, write_dat};
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_world::nbt::Tag;
 use std::{
-    fs, io,
+    io,
     path::{Path, PathBuf},
 };
 
@@ -17,7 +20,7 @@ fn world_path(saves: &Path, folder: &str) -> crate::Result<PathBuf> {
         return Err("Invalid world folder".into());
     }
     let path = saves.join(folder);
-    if !fs::symlink_metadata(&path)?.is_dir() {
+    if !fs::symlink_metadata(&path)?.is_dir_vfs() {
         return Err("World folder is not a directory".into());
     }
     Ok(path)
@@ -77,7 +80,7 @@ fn remove_contents(world: &Path, lock: &Path) -> io::Result<()> {
             continue;
         }
         // `file_type` does not follow links, and `remove_dir_all` never does.
-        if entry.file_type()?.is_dir() {
+        if entry.file_type()?.is_dir_vfs() {
             fs::remove_dir_all(&path)?;
         } else {
             fs::remove_file(&path)?;
@@ -163,9 +166,9 @@ fn write_tree(
         if kind.is_symlink() {
             return Err(format!("Cannot back up symbolic link: {}", path.display()).into());
         }
-        if kind.is_dir() {
+        if kind.is_dir_vfs() {
             write_tree(zip, root, &path, folder)?;
-        } else if kind.is_file() && entry.file_name() != "session.lock" {
+        } else if kind.is_file_vfs() && entry.file_name() != "session.lock" {
             let relative = path.strip_prefix(root)?;
             let name = format!("{folder}/{}", relative.to_string_lossy().replace('\\', "/"));
             zip.start_file(

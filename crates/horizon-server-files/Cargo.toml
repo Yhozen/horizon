@@ -7,6 +7,8 @@ rust-version = "1.90"
 description = "The dedicated server's vanilla files: server.properties, eula.txt, ops, whitelist and bans, and account lookups"
 
 [dependencies]
+# std::time on native; the page clock in the browser build (WEB.md), where std's panics.
+web-time = "1.1"
 horizon-core = { path = "../horizon-core" }
 horizon-protocol = { path = "../horizon-protocol" }
 horizon-world = { path = "../horizon-world" }
@@ -14,6 +16,9 @@ log = "0.4"
 # Online mode: finding accounts by name (the services' profiles endpoint).
 # Secure chat: the services' public keys arrive base64-encoded.
 base64 = "0.22"
+
+# Not in the browser build (WEB.md): it has no sockets.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ureq = { version = "2", default-features = false, features = ["tls"] }
 
 [lints]

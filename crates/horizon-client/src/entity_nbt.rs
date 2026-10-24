@@ -15,6 +15,8 @@ use crate::{
     },
     text::Text,
 };
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_core::geometry::Vec3;
 use horizon_world::nbt::{Compound, Tag};
 use std::{collections::HashMap, sync::Arc};
@@ -1938,7 +1940,7 @@ mod axolotl_nbt_tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
-        if !root.join("items.json").exists() {
+        if !root.join("items.json").exists_vfs() {
             return;
         }
         let data = crate::mobs::MobTypes::load(&root).unwrap();
@@ -2112,7 +2114,7 @@ mod sheep_nbt_tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
-        if !root.join("items.json").exists() {
+        if !root.join("items.json").exists_vfs() {
             return;
         }
         let data = crate::mobs::MobTypes::load(&root).unwrap();

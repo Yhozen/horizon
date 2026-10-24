@@ -1,5 +1,7 @@
 use super::*;
 use crate::{assets::Assets, blocks::BlockFacts, items::Items};
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 
 #[test]
 fn renames_ids_keys_and_states() {
@@ -55,7 +57,7 @@ fn prepared() -> Option<PathBuf> {
         manifest.join("../../../../.local/horizon-client/26.3"),
     ]
     .into_iter()
-    .find(|root| root.join("gameplay-facts.json").exists())
+    .find(|root| root.join("gameplay-facts.json").exists_vfs())
 }
 
 /// A content mod folder: a full block, a door and an item-less glass from
@@ -264,7 +266,7 @@ fn content_root_loads_with_every_table() {
     crate::light::LightTables::load(&root, new, &facts).unwrap();
     crate::motion::MotionResources::load(&root, &assets).unwrap();
     horizon_world::worldgen::generator::GeneratorData::load(&root.join("worldgen"), new).unwrap();
-    assert!(root.join("assets/ruby/lang/en_us.json").is_file());
+    assert!(root.join("assets/ruby/lang/en_us.json").is_file_vfs());
     // Blocks without a blockstate of their own take their template's.
     assert_eq!(
         fs::read(root.join("assets/ruby/blockstates/ruby_door.json")).unwrap(),
@@ -275,7 +277,7 @@ fn content_root_loads_with_every_table() {
     assert!(
         fs::symlink_metadata(base.join("facts.json"))
             .unwrap()
-            .is_file()
+            .is_file_vfs()
     );
     fs::remove_dir_all(&scratch).unwrap();
 }
@@ -356,7 +358,7 @@ fn shared_behaviour_document_matches_independent_loaders() {
     let Some(root) = prepared() else { return };
     let assets = Assets::load(&root).expect("assets");
     let doc: serde_json::Value = serde_json::from_reader(std::io::BufReader::new(
-        std::fs::File::open(root.join("block-behaviours.json")).unwrap(),
+        horizon_core::fs::File::open(root.join("block-behaviours.json")).unwrap(),
     ))
     .unwrap();
     let original = BlockFacts::load(&root, assets.registry).unwrap();
@@ -551,14 +553,14 @@ fn content_root_is_reused_until_a_mod_changes() {
         resource_root(&base, std::slice::from_ref(&m), &cache).unwrap(),
         root
     );
-    assert!(sentinel.exists(), "an unchanged mod rebuilt the root");
+    assert!(sentinel.exists_vfs(), "an unchanged mod rebuilt the root");
     let lang = scratch.join("ruby/assets/ruby/lang/en_us.json");
     fs::write(&lang, r#"{"block.ruby.ruby_block": "Ruby Block"}"#).unwrap();
     let file = fs::File::options().write(true).open(&lang).unwrap();
-    file.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5))
+    file.set_modified(web_time::SystemTime::now() + std::time::Duration::from_secs(5))
         .unwrap();
     resource_root(&base, std::slice::from_ref(&m), &cache).unwrap();
-    assert!(!sentinel.exists(), "a changed mod kept the old root");
+    assert!(!sentinel.exists_vfs(), "a changed mod kept the old root");
     assert!(
         fs::read_to_string(root.join("assets/ruby/lang/en_us.json"))
             .unwrap()
@@ -634,7 +636,7 @@ fn content_root_carries_a_structure_mod() {
         content: Content::read(&dir, &package.manifest).unwrap(),
     };
     let root = resource_root(&base, &[m], &scratch.join("cache")).unwrap();
-    assert!(root.join("worldgen/structure/huts/hut.nbt").exists());
+    assert!(root.join("worldgen/structure/huts/hut.nbt").exists_vfs());
     let tags: BTreeMap<String, String> =
         serde_json::from_slice(&fs::read(root.join("worldgen/biome_tags.json")).unwrap()).unwrap();
     let hut: serde_json::Value = serde_json::from_str(&tags["huts:has_hut"]).unwrap();
