@@ -268,6 +268,9 @@ struct Options {
     report: Option<PathBuf>,
     world: Option<String>,
     look: Option<(f32, f32)>,
+    /// `--spawn-radius N`: the respawn radius a new player spawns within,
+    /// instead of the `respawn_radius` game rule (0: the world spawn; repeatable benchmarks).
+    spawn_radius: Option<i32>,
     time: Option<i64>,
     weather: Option<String>,
     dimension: Option<String>,
@@ -336,6 +339,7 @@ impl Options {
             report: None,
             world: None,
             look: None,
+            spawn_radius: None,
             time: None,
             weather: None,
             dimension: None,
@@ -443,6 +447,7 @@ impl Options {
                                 format!("minecraft:{value}")
                             })
                         }
+                        "--spawn-radius" => o.spawn_radius = Some(value.parse()?),
                         "--look" => {
                             let (y, p) = value.split_once(',').ok_or("--look takes YAW,PITCH")?;
                             o.look = Some((y.parse()?, p.parse()?));

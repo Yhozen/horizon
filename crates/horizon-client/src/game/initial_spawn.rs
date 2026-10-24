@@ -133,7 +133,11 @@ impl Game<'_> {
                 finder
             }
             None => {
-                let mut radius = self.ui.rules.int("respawn_radius").max(0);
+                let mut radius = self
+                    .options
+                    .spawn_radius
+                    .unwrap_or_else(|| self.ui.rules.int("respawn_radius"))
+                    .max(0);
                 let to_border = self
                     .border
                     .distance(f64::from(suggestion[0]), f64::from(suggestion[2]))
