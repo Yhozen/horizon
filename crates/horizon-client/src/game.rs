@@ -10721,6 +10721,17 @@ impl Game<'_> {
         }
     }
 }
+/// The control flow after a frame. Native polls; 🤖 Agent: the browser waits, because
+/// `request_redraw` already schedules the next frame on `requestAnimationFrame`, and
+/// winit's web `Poll` re-posts a task (`scheduler.postTask` + an `AbortController`)
+/// back to back, which kept the page's main thread 100% busy between frames.
+fn poll_flow() -> ControlFlow {
+    if cfg!(target_arch = "wasm32") {
+        ControlFlow::Wait
+    } else {
+        ControlFlow::Poll
+    }
+}
 impl ApplicationHandler for Game<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -11619,7 +11630,7 @@ impl ApplicationHandler for Game<'_> {
                 w.request_redraw();
             }
         }
-        event_loop.set_control_flow(ControlFlow::Poll);
+        event_loop.set_control_flow(poll_flow());
     }
     /// The application is ending. On macOS, Quit (Cmd+Q) ends it through
     /// applicationWillTerminate without a CloseRequested; vanilla's GLFW
@@ -13067,7 +13078,7 @@ impl Loading {
                 w.request_redraw();
             }
         }
-        event_loop.set_control_flow(ControlFlow::Poll);
+        event_loop.set_control_flow(poll_flow());
     }
     fn draw(&mut self) {
         let Some(size) = self
