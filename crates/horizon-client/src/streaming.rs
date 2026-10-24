@@ -1012,7 +1012,12 @@ impl Streaming {
         // Decorate chunks whose 3x3 proto neighbourhood is available, in
         // vanilla's order: decoration is order dependent where write regions
         // overlap (see `DecorationOrder`).
-        let workers = self.threads.len();
+        // 🤖 Agent: the browser build's one worker is the frame itself.
+        let workers = if cfg!(target_arch = "wasm32") {
+            1
+        } else {
+            self.threads.len()
+        };
         if self.decorates && self.order_area != Some((self.center, self.radius)) {
             let (decorated, chunks) = (&self.decorated, &world.chunks);
             // The render distance is the server view distance in singleplayer.

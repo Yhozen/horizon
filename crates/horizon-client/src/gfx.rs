@@ -753,14 +753,23 @@ fn surface_format(
     formats: &[wgpu::TextureFormat],
     default: wgpu::TextureFormat,
 ) -> wgpu::TextureFormat {
-    [
+    // 🤖 Agent: Chrome on Linux prefers (and can share with its compositor
+    // only) `rgba8unorm` canvases.
+    #[cfg(target_arch = "wasm32")]
+    let order = [
+        wgpu::TextureFormat::Rgba8Unorm,
+        wgpu::TextureFormat::Bgra8Unorm,
+    ];
+    #[cfg(not(target_arch = "wasm32"))]
+    let order = [
         wgpu::TextureFormat::Bgra8Unorm,
         wgpu::TextureFormat::Rgba8Unorm,
-    ]
-    .into_iter()
-    .find(|f| formats.contains(f))
-    .or_else(|| formats.iter().copied().find(|f| !f.is_srgb()))
-    .unwrap_or(default)
+    ];
+    order
+        .into_iter()
+        .find(|f| formats.contains(f))
+        .or_else(|| formats.iter().copied().find(|f| !f.is_srgb()))
+        .unwrap_or(default)
 }
 // The browser build's WebGPU device, opened (asynchronously) by
 // `open_web_gpu` before the game starts, so `Renderer::new` finds it ready
@@ -1042,7 +1051,8 @@ impl Renderer {
             config.format = surface_format(&caps.formats, config.format);
             config.view_formats = vec![config.format.remove_srgb_suffix()];
             // Screenshots copy the presented frame back from the swapchain.
-            if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
+            if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) && !cfg!(target_arch = "wasm32")
+            {
                 config.usage |= wgpu::TextureUsages::COPY_SRC;
             }
             config.present_mode = previous

@@ -3,8 +3,8 @@
 //! registries report. Data-driven registries (dimension types, biomes, chat
 //! types, damage types ...) are numbered in the order the server sends them
 //! during configuration.
-use horizon_core::fs::PathExt as _;
 use crate::{Error, Result, packets::configuration::RegistryData};
+use horizon_core::fs::PathExt as _;
 use horizon_world::nbt::{JavaString, Tag};
 use std::{collections::HashMap, path::Path};
 

@@ -114,12 +114,12 @@ pub fn load_visibility(
     root: &Path,
     registry: &BlockRegistry,
 ) -> Result<horizon_world::block_render::FaceVisibility> {
+    use horizon_core::fs;
     use horizon_world::{
         block_render::{FaceVisibility, RenderDefinition, SkipRendering},
         collision::CachedCollisionRegistry,
         registry::BlockTableFile,
     };
-    use horizon_core::fs;
     use std::collections::BTreeMap;
     let file = BlockTableFile::open(&root.join("occlusion.nbt"), registry)?;
     let occlusion = CachedCollisionRegistry::from_table(file.table("occlusion")?)?;

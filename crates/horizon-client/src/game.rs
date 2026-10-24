@@ -466,7 +466,7 @@ impl Options {
         Ok(Some(o))
     }
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Screen {
     Playing,
     GameModeSwitcher,
@@ -11592,6 +11592,8 @@ impl ApplicationHandler for Game<'_> {
             }
             return;
         }
+        #[cfg(target_arch = "wasm32")]
+        self.web_status();
         if let Err(error) = self.resume_world_entry() {
             self.error = Some(error);
             event_loop.exit();
@@ -11623,11 +11625,46 @@ impl ApplicationHandler for Game<'_> {
     /// applicationWillTerminate without a CloseRequested; vanilla's GLFW
     /// window turns it into a window close, so Minecraft.stop saves the world.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // 🤖 Agent: the browser has no process exit code, so say why it stopped.
+        #[cfg(target_arch = "wasm32")]
+        if let Some(e) = &self.error {
+            log::error!("Horizon: the game stopped: {e}");
+        }
         self.pad_close_output();
         if let Err(e) = self.save_for_exit() {
             log::warn!("Horizon: failed to save the world on exit: {e}");
         }
         self.finish_perf();
+    }
+}
+impl Game<'_> {
+    /// 🤖 Agent: the browser build's progress line, every two seconds.
+    #[cfg(target_arch = "wasm32")]
+    fn web_status(&mut self) {
+        thread_local! {
+            static LAST: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
+        }
+        let now = Instant::now();
+        if LAST.with(|last| last.get().is_some_and(|t| now - t < Duration::from_secs(2))) {
+            return;
+        }
+        LAST.with(|last| last.set(Some(now)));
+        log::info!(
+            "Horizon web: frame {} screen {:?} title {} paused {} stages {:?} chunks {} generated {} meshed {} loading {} entry {} player {:?}",
+            self.frames,
+            self.screen,
+            self.title.is_some(),
+            self.streaming.paused,
+            self.streaming.stages(),
+            self.world.chunks.len(),
+            self.streaming.generated_total,
+            self.streaming.meshed_total,
+            self.world_loader.is_some(),
+            self.pending_entry.is_some(),
+            self.player
+                .as_ref()
+                .map(|p| [p.position.x, p.position.y, p.position.z]),
+        );
     }
 }
 /// clouds.png as filled cells (`CloudRenderer.prepare`: alpha 10 or more).

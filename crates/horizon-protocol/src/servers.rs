@@ -125,8 +125,11 @@ mod tests {
         save(&path, &list).unwrap();
         assert_eq!(load(&path), list);
         // Vanilla layout: an unnamed root compound with a "servers" list.
-        let (root, _) =
-            nbt::read_named(&horizon_core::fs::read(&path).unwrap(), nbt::Limits::default()).unwrap();
+        let (root, _) = nbt::read_named(
+            &horizon_core::fs::read(&path).unwrap(),
+            nbt::Limits::default(),
+        )
+        .unwrap();
         assert_eq!(root.name, JavaString::from(""));
         assert!(matches!(root.tag.get("servers"), Some(Tag::List(l)) if l.len() == 2));
         horizon_core::fs::remove_dir_all(dir).unwrap();
