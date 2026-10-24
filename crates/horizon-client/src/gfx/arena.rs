@@ -277,7 +277,14 @@ fn try_create(device: &wgpu::Device, size: u64, usage: wgpu::BufferUsages) -> Op
         usage,
         mapped_at_creation: false,
     });
-    // Native error scopes resolve at once.
+    // Native error scopes resolve at once; WebGPU's resolve later, so the
+    // browser build takes the buffer (WebGPU reports out-of-memory itself).
+    #[cfg(target_arch = "wasm32")]
+    {
+        drop(scope.pop());
+        Some(buffer)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     pollster::block_on(scope.pop()).is_none().then_some(buffer)
 }
 

@@ -81,7 +81,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn options_path() -> std::path::PathBuf {
-        std::env::current_dir()
+        horizon_core::fs::current_dir()
             .unwrap_or_default()
             .join("options.txt")
     }

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Horizon (browser build)</title>
+<style>
+  html, body { margin: 0; background: #111; color: #ddd; font: 14px system-ui, sans-serif; }
+  canvas#horizon { display: block; width: 1280px; height: 720px; background: #000; outline: none; }
+  #status { padding: 6px 10px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<canvas id="horizon" width="1280" height="720" tabindex="0"></canvas>
+<div id="status">Loading…</div>
+<script type="module">
+Error.stackTraceLimit = 200;
+// The browser build (docs/web.md): single player, the world in the frame.
+import init, { start } from "./dist/horizon-client.js";
+
+const status = document.getElementById("status");
+const say = (text) => { status.textContent = text; window.horizonStatus = text; console.log("[page] " + text); };
+window.horizonStatus = "loading";
+
+// ?args=--world%20Foo%20--seed%201 replaces the default command line.
+const params = new URLSearchParams(location.search);
+const args = params.has("args")
+  ? params.get("args").split(" ").filter(Boolean)
+  : ["--world", "Web World", "--creative", "--test-terrain", "--render-distance", "4",
+     "--in-frame", "--world-frames", "18446744073709551615", "--timeout-seconds", "1000000000",
+     "--name", "WebPlayer"];
+
+try {
+  if (!navigator.gpu) throw new Error("this browser has no WebGPU (navigator.gpu)");
+  say("Loading the game…");
+  await init();
+  say("Downloading resources…");
+  const response = await fetch("./dist/horizon-data.bin");
+  if (!response.ok) throw new Error(`horizon-data.bin: HTTP ${response.status} (run tools/web/pack.py)`);
+  const data = new Uint8Array(await response.arrayBuffer());
+  say(`Starting (${(data.length / 1e6).toFixed(0)} MB of resources)…`);
+  await start(data, args);
+  say("Running: " + args.join(" "));
+  window.horizonStarted = true;
+} catch (e) {
+  say("Failed: " + (e && e.message ? e.message : e));
+  window.horizonError = String(e && e.message ? e.message : e);
+  console.error(e);
+}
+</script>
+</body>
+</html>

@@ -257,7 +257,7 @@ fn absolute(path: &Path) -> io::Result<PathBuf> {
     if path.is_absolute() {
         Ok(path.into())
     } else {
-        std::env::current_dir().map(|cwd| cwd.join(path))
+        horizon_core::fs::current_dir().map(|cwd| cwd.join(path))
     }
 }
 
@@ -774,7 +774,7 @@ mod tests {
         let mut pack = f.dir_pack("pack");
         let name = "assets/minecraft/textures/a";
         f.write(&format!("pack/{name}"), b"pack");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = horizon_core::fs::current_dir().unwrap();
         let mut relative = PathBuf::new();
         for component in cwd.components() {
             if matches!(component, std::path::Component::Normal(_)) {

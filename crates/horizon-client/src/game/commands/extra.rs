@@ -853,7 +853,9 @@ impl Game<'_> {
         };
         let functions = self.functions_named(&id)?;
         let output = format!("debug-trace-{}.txt", filename_date_time());
-        let dir = std::env::current_dir().unwrap_or_default().join("debug");
+        let dir = horizon_core::fs::current_dir()
+            .unwrap_or_default()
+            .join("debug");
         let mut trace = String::new();
         let mut total = 0;
         let mut traced: Vec<String> = Vec::new();
@@ -940,7 +942,9 @@ impl Game<'_> {
             ));
         };
         let relative = format!("debug/client-{stamp}.json");
-        let path = std::env::current_dir().unwrap_or_default().join(&relative);
+        let path = horizon_core::fs::current_dir()
+            .unwrap_or_default()
+            .join(&relative);
         let report = serde_json::json!({
             "environment": "client",
             "seconds": started.elapsed().as_secs_f64(),

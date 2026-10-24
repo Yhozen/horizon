@@ -119,7 +119,8 @@ pub fn load_visibility(
         collision::CachedCollisionRegistry,
         registry::BlockTableFile,
     };
-    use std::{collections::BTreeMap, fs};
+    use horizon_core::fs;
+    use std::collections::BTreeMap;
     let file = BlockTableFile::open(&root.join("occlusion.nbt"), registry)?;
     let occlusion = CachedCollisionRegistry::from_table(file.table("occlusion")?)?;
     let raw: BTreeMap<String, Value> =

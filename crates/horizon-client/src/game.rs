@@ -244,6 +244,14 @@ use winit::{
     window::{CursorGrabMode, Window, WindowId},
 };
 
+/// The browser build's command line, from the page (web.rs).
+#[cfg(target_arch = "wasm32")]
+static WEB_ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+#[cfg(target_arch = "wasm32")]
+pub fn set_web_args(args: Vec<String>) {
+    let _ = WEB_ARGS.set(args);
+}
+
 #[derive(Clone)]
 struct Options {
     resources: PathBuf,
@@ -299,14 +307,14 @@ impl Options {
     /// next to options.txt (created on first use).
     fn player_name(&self) -> String {
         self.player_name.clone().unwrap_or_else(|| {
-            std::env::current_dir().map_or_else(
+            horizon_core::fs::current_dir().map_or_else(
                 |_| horizon_client::offline_name::generate(0),
                 |dir| horizon_client::offline_name::load_or_create(&dir),
             )
         })
     }
     fn read() -> Result<Option<Self>> {
-        let sibling = std::env::current_exe()?
+        let sibling = horizon_core::fs::current_exe()?
             .parent()
             .ok_or("missing executable directory")?
             .join("resources");
@@ -352,6 +360,9 @@ impl Options {
             integrated: false,
         };
         let mut session_file = std::env::var("HORIZON_SESSION_FILE").ok();
+        #[cfg(target_arch = "wasm32")]
+        let mut args = WEB_ARGS.get().cloned().unwrap_or_default().into_iter();
+        #[cfg(not(target_arch = "wasm32"))]
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -7513,7 +7524,7 @@ impl Game<'_> {
             return Ok(());
         }
         self.join_world_rest()?;
-        let save_root = std::env::current_dir()?.join("saves").join(folder);
+        let save_root = horizon_core::fs::current_dir()?.join("saves").join(folder);
         if integrated::wanted(&self.options, &save_root) {
             return self.open_integrated(folder, name, seed, creative, create);
         }
@@ -7529,7 +7540,7 @@ impl Game<'_> {
         if self.window.is_some() {
             if self.title.is_none() {
                 self.title = Some(Title::new(
-                    std::env::current_dir()?.join("saves"),
+                    horizon_core::fs::current_dir()?.join("saves"),
                     &self.options.resources,
                 ));
             }
@@ -7968,7 +7979,7 @@ impl Game<'_> {
             r.clear_sections();
         }
         self.title = Some(Title::new(
-            std::env::current_dir()?.join("saves"),
+            horizon_core::fs::current_dir()?.join("saves"),
             &self.options.resources,
         ));
         if let Some(title) = &mut self.title {
@@ -10722,6 +10733,17 @@ impl ApplicationHandler for Game<'_> {
         let attributes = Window::default_attributes()
             .with_title("Horizon")
             .with_window_icon(horizon_client::window::icon());
+        // The browser build draws on the page's canvas#horizon.
+        #[cfg(target_arch = "wasm32")]
+        let attributes = {
+            use wasm_bindgen::JsCast;
+            use winit::platform::web::WindowAttributesExtWebSys;
+            let canvas = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.get_element_by_id("horizon"))
+                .and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok());
+            attributes.with_canvas(canvas)
+        };
         // Wayland names the window by its app id, which the horizon.desktop entry matches.
         #[cfg(target_os = "linux")]
         let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
@@ -11650,7 +11672,7 @@ impl<'a> Game<'a> {
         streaming.paused = true;
         let level = Level::default();
         let save = Arc::new(SaveDir::new(
-            std::env::current_dir()?
+            horizon_core::fs::current_dir()?
                 .join("saves")
                 .join(".horizon-title"),
         ));
@@ -11870,7 +11892,7 @@ impl<'a> Game<'a> {
             dragon_model: prepared.dragon_model,
             map_patches: Vec::new(),
             skin_downloads: RefCell::new(horizon_client::skins::Downloader::new(
-                std::env::current_dir()
+                horizon_core::fs::current_dir()
                     .unwrap_or_default()
                     .join("assets/skins"),
             )),
@@ -12080,7 +12102,7 @@ impl Game<'_> {
         self.perf.world_opening();
         if self.title.is_none() {
             self.title = Some(Title::new(
-                std::env::current_dir()?.join("saves"),
+                horizon_core::fs::current_dir()?.join("saves"),
                 &self.options.resources,
             ));
         }
@@ -12708,7 +12730,7 @@ fn start_game<'a>(
     let handoff = prepared.is_some();
     let mut settings = match settings {
         Some(settings) => settings,
-        None => Settings::load(&std::env::current_dir()?.join("options.txt")),
+        None => Settings::load(&horizon_core::fs::current_dir()?.join("options.txt")),
     };
     if let Some(d) = options.distance_override {
         settings.render_distance = d;
@@ -12758,7 +12780,7 @@ fn start_game<'a>(
                 vsync: false,
                 fps_cap: None,
                 offscreen: game.options.offscreen,
-                game_dir: std::env::current_dir()?,
+                game_dir: horizon_core::fs::current_dir()?,
             },
         );
     }
@@ -12795,7 +12817,7 @@ fn start_game<'a>(
                 // Start after the window is handed over, so --world uses the
                 // same responsive initialization path as the title screen.
                 game.title = Some(Title::new(
-                    std::env::current_dir()?.join("saves"),
+                    horizon_core::fs::current_dir()?.join("saves"),
                     &game.options.resources,
                 ));
                 game.pending_entry = Some(PendingWorldEntry::Local {
@@ -12810,7 +12832,7 @@ fn start_game<'a>(
         None if handoff => {}
         None => {
             let mut title = Title::new(
-                std::env::current_dir()?.join("saves"),
+                horizon_core::fs::current_dir()?.join("saves"),
                 &game.options.resources,
             );
             title.last_server = game.settings.file.string("lastServer");
@@ -12843,6 +12865,16 @@ fn write_report(game: &Game<'_>) -> Result<()> {
     Ok(())
 }
 
+/// The browser's event loop returns at once and runs the game from the page's
+/// events and frames, so the game lives as long as the page.
+#[cfg(target_arch = "wasm32")]
+fn run_event_loop(game: Game<'static>) -> Result<()> {
+    use winit::platform::web::EventLoopExtWebSys;
+    EventLoop::new()?.spawn_app(game);
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn run_event_loop(mut game: Game<'_>) -> Result<()> {
     EventLoop::new()?.run_app(&mut game)?;
     write_report(&game)?;
@@ -13249,10 +13281,10 @@ pub fn run() -> Result<()> {
     let started = Instant::now();
     horizon_client::spans::enable(options.spikes.is_some());
     let vanilla_root = options.resources.clone();
-    let early_settings = Settings::load(&std::env::current_dir()?.join("options.txt"));
+    let early_settings = Settings::load(&horizon_core::fs::current_dir()?.join("options.txt"));
     // Snapshots of derived tables live in the game folder, never beside the
     // shared resources.
-    Behaviours::set_cache_dir(std::env::current_dir()?.join(".horizon-cache"));
+    Behaviours::set_cache_dir(horizon_core::fs::current_dir()?.join(".horizon-cache"));
     if !synchronous_startup(&options) {
         return run_loading(options, early_settings, vanilla_root, None, started);
     }
@@ -13285,8 +13317,13 @@ pub fn run() -> Result<()> {
         Audio::new(&options.resources)
     };
     let resources = loaded.resources;
+    // The browser's event loop outlives this call (run_event_loop).
+    #[cfg(target_arch = "wasm32")]
+    let resources: &'static Arc<Resources> = Box::leak(Box::new(resources));
+    #[cfg(not(target_arch = "wasm32"))]
+    let resources = &resources;
     let game = start_game(
-        &resources,
+        resources,
         loaded.pack,
         gui,
         options,

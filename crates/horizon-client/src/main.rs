@@ -2,8 +2,18 @@
 #![forbid(unsafe_code)]
 mod game;
 
+#[cfg(not(target_arch = "wasm32"))]
 use horizon_client::{crash, logging};
 
+#[cfg(target_arch = "wasm32")]
+mod web;
+
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    web::install_hooks();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     horizon_client::telemetry::mark_start();
     let args: Vec<String> = std::env::args().skip(1).collect();

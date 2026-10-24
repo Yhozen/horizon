@@ -129,7 +129,45 @@ impl WorldRequest {
 
 pub(super) struct WorldLoader {
     pub cancelled: bool,
-    handle: JoinHandle<std::result::Result<PreparedWorld, String>>,
+    handle: Handle<std::result::Result<PreparedWorld, String>>,
+}
+
+/// A worker thread's result, or (the browser build, which has no threads)
+/// the result of running it in place.
+enum Handle<T> {
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    Thread(JoinHandle<T>),
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    Done(T),
+}
+
+impl<T: Send + 'static> Handle<T> {
+    fn spawn(name: &str, f: impl FnOnce() -> T + Send + 'static) -> std::io::Result<Self> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = name;
+            Ok(Self::Done(f()))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        std::thread::Builder::new()
+            .name(name.into())
+            .spawn(f)
+            .map(Self::Thread)
+    }
+
+    fn is_finished(&self) -> bool {
+        match self {
+            Self::Thread(handle) => handle.is_finished(),
+            Self::Done(_) => true,
+        }
+    }
+
+    fn join(self) -> std::thread::Result<T> {
+        match self {
+            Self::Thread(handle) => handle.join(),
+            Self::Done(value) => Ok(value),
+        }
+    }
 }
 
 impl WorldLoader {
@@ -140,13 +178,11 @@ impl WorldLoader {
         options: Options,
         settings: Settings,
     ) -> Result<Self> {
-        let handle = std::thread::Builder::new()
-            .name("World initialization".into())
-            .spawn(move || {
-                request
-                    .prepare(&res, &pack, &options, &settings)
-                    .map_err(|e| e.to_string())
-            })?;
+        let handle = Handle::spawn("World initialization", move || {
+            request
+                .prepare(&res, &pack, &options, &settings)
+                .map_err(|e| e.to_string())
+        })?;
         Ok(Self {
             cancelled: false,
             handle,
@@ -158,10 +194,11 @@ impl WorldLoader {
     pub fn cancel(self) -> Self {
         Self {
             cancelled: true,
-            handle: std::thread::spawn(move || {
+            handle: Handle::spawn("World initialization cancelled", move || {
                 drop(self.finish());
                 Err("world initialization cancelled".into())
-            }),
+            })
+            .expect("spawn the cancelled world's worker"),
         }
     }
 
@@ -266,10 +303,10 @@ mod tests {
         let (release, wait) = std::sync::mpsc::channel();
         let loader = WorldLoader {
             cancelled: false,
-            handle: std::thread::spawn(move || {
+            handle: Handle::Thread(std::thread::spawn(move || {
                 wait.recv().unwrap();
                 Err("test world failure".into())
-            }),
+            })),
         };
         assert!(!loader.ready());
         release.send(()).unwrap();
@@ -284,10 +321,10 @@ mod tests {
         let (release, wait) = std::sync::mpsc::channel();
         let loader = WorldLoader {
             cancelled: false,
-            handle: std::thread::spawn(move || {
+            handle: Handle::Thread(std::thread::spawn(move || {
                 wait.recv().unwrap();
                 Err("cancelled test world".into())
-            }),
+            })),
         }
         .cancel();
         assert!(loader.cancelled);
@@ -303,7 +340,7 @@ mod tests {
     fn worker_panics_reach_the_client() {
         let loader = WorldLoader {
             cancelled: false,
-            handle: std::thread::spawn(|| panic!("broken world initialization")),
+            handle: Handle::Thread(std::thread::spawn(|| panic!("broken world initialization"))),
         };
         assert_eq!(
             loader.finish().err().unwrap().to_string(),

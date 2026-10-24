@@ -387,6 +387,10 @@ impl Graphics {
         // thread by default) each need one, and a pool that fills every core
         // starves them: the frame rate collapses to single digits while the
         // workers saturate the CPU and its memory bandwidth.
+        // The browser build has no threads: the frame does the work.
+        if cfg!(target_arch = "wasm32") {
+            return 1;
+        }
         let auto = std::thread::available_parallelism()
             .map_or(2, |n| n.get())
             .saturating_sub(2)

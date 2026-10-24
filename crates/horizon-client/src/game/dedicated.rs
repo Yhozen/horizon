@@ -168,7 +168,7 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
         }
     };
     if init_settings {
-        let abs = |p: &PathBuf| std::env::current_dir().map_or(p.clone(), |d| d.join(p));
+        let abs = |p: &PathBuf| horizon_core::fs::current_dir().map_or(p.clone(), |d| d.join(p));
         log(
             "INFO",
             &format!(
@@ -445,7 +445,9 @@ impl Game<'_> {
             .ok_or("dedicated server not prepared")?;
         // Main's WorldLoader: a new world's dimensions come from
         // server.properties before the server starts.
-        let world_dir = std::env::current_dir()?.join(&universe).join(&level_name);
+        let world_dir = horizon_core::fs::current_dir()?
+            .join(&universe)
+            .join(&level_name);
         let new_world = !world_dir.join("level.dat").exists_vfs();
         if new_world {
             self.write_world_gen(&world_dir, &props)?;

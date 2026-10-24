@@ -14,6 +14,22 @@ pub use web::*;
 
 use std::path::Path;
 
+/// The game folder: the working directory, or `/horizon` in the browser build.
+pub fn current_dir() -> std::io::Result<std::path::PathBuf> {
+    #[cfg(target_arch = "wasm32")]
+    return Ok(std::path::PathBuf::from(web::CURRENT_DIR));
+    #[cfg(not(target_arch = "wasm32"))]
+    std::env::current_dir()
+}
+
+/// The running executable, or `/horizon/horizon` in the browser build.
+pub fn current_exe() -> std::io::Result<std::path::PathBuf> {
+    #[cfg(target_arch = "wasm32")]
+    return Ok(Path::new(web::CURRENT_DIR).join("horizon"));
+    #[cfg(not(target_arch = "wasm32"))]
+    std::env::current_exe()
+}
+
 /// `exists`, `is_file` and `is_dir` that see the browser build's files.
 pub trait PathExt {
     fn exists_vfs(&self) -> bool;

@@ -318,7 +318,7 @@ fn usage(name: &str) -> String {
 fn absolute_paths(words: &mut [String]) {
     if words.first().map(String::as_str) == Some("screenshot")
         && let Some(path) = words.get_mut(1)
-        && let Ok(cwd) = std::env::current_dir()
+        && let Ok(cwd) = horizon_core::fs::current_dir()
     {
         *path = cwd.join(&*path).display().to_string();
     }

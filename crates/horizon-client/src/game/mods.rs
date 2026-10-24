@@ -91,7 +91,7 @@ pub(super) fn content_root(
 ) -> std::path::PathBuf {
     use horizon_client::mod_content::{self, ContentMod};
     use horizon_mods::{Capability, Content, Package};
-    let here = std::env::current_dir().unwrap_or_default();
+    let here = horizon_core::fs::current_dir().unwrap_or_default();
     let mut paths = horizon_mods::find(&here.join(mod_list::DIR));
     paths.retain(|p| !dev.contains(p));
     paths.extend(dev.iter().cloned());

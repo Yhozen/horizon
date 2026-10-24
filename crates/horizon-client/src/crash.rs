@@ -122,7 +122,7 @@ pub fn release_tag() -> Option<String> {
     if let Some(version) = horizon_core::release::RELEASE {
         return Some(format!("v{version}"));
     }
-    let exe = std::env::current_exe().ok()?;
+    let exe = horizon_core::fs::current_exe().ok()?;
     let folder = exe.parent()?.file_name()?.to_str()?;
     (folder.starts_with('v') && folder[1..].starts_with(|c: char| c.is_ascii_digit()))
         .then(|| folder.to_owned())

@@ -267,7 +267,7 @@ impl Game<'_> {
             log::warn!("Horizon: could not join server: {error}");
             if self.title.is_none() {
                 self.title = Some(horizon_client::title::Title::new(
-                    std::env::current_dir()?.join("saves"),
+                    horizon_core::fs::current_dir()?.join("saves"),
                     &self.options.resources,
                 ));
             }
@@ -491,7 +491,7 @@ impl Game<'_> {
         if let Some(r) = self.renderer.as_mut() {
             r.clear_sections();
         }
-        let saves = std::env::current_dir()?.join("saves");
+        let saves = horizon_core::fs::current_dir()?.join("saves");
         let mut title = horizon_client::title::Title::new(saves.clone(), &self.options.resources);
         title.last_server = self.settings.file.string("lastServer");
         if single_player && reason.is_none() {
@@ -1247,7 +1247,7 @@ impl Game<'_> {
         if self.integrated.is_some() {
             return;
         }
-        if let Ok(dir) = std::env::current_dir() {
+        if let Ok(dir) = horizon_core::fs::current_dir() {
             horizon_client::multiplayer::save_server_icon(
                 &dir.join("saves"),
                 &r.session.address,

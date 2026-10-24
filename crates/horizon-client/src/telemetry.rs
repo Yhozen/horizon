@@ -127,7 +127,7 @@ pub fn gpu_kind(device_type: &str) -> &'static str {
 /// This machine, with the GPU and the screen once the renderer knows them. The drive is the one
 /// under the game folder (the current folder).
 pub fn system() -> System {
-    let home = std::env::current_dir().ok();
+    let home = horizon_core::fs::current_dir().ok();
     let mut system = System::detect_in(home.as_deref());
     if let Some(gpu) = GPU.lock().unwrap_or_else(|e| e.into_inner()).clone() {
         system.vram_mb = match gpu.kind.as_str() {

@@ -277,7 +277,7 @@ fn run(control: &Control, setup: Setup) -> Result<PathBuf, String> {
             &[median as f64 / f64::from(1 << 20)],
         );
     }
-    if let Ok(meta) = std::env::current_exe().and_then(horizon_core::fs::metadata) {
+    if let Ok(meta) = horizon_core::fs::current_exe().and_then(horizon_core::fs::metadata) {
         report.metric("game.binary_bytes", &[meta.len() as f64]);
     }
     crate::telemetry::keep_benchmark(&crate::logging::game_home(), &report);

@@ -71,7 +71,9 @@ impl StartupMenu {
         self.root = root;
         if self.title.is_none() {
             let mut title = Title::new(
-                std::env::current_dir().unwrap_or_default().join("saves"),
+                horizon_core::fs::current_dir()
+                    .unwrap_or_default()
+                    .join("saves"),
                 &self.root,
             );
             title.last_server = settings.file.string("lastServer");

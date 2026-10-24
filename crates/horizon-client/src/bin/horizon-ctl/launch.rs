@@ -183,7 +183,7 @@ pub fn launch(socket: &Path, args: &[String]) -> Result<Value, Value> {
             "kind": "connection",
         }));
     }
-    let exe = std::env::current_exe().ok();
+    let exe = horizon_core::fs::current_exe().ok();
     let beside = exe.as_deref().and_then(Path::parent);
     let install = find(
         o.game.as_deref(),

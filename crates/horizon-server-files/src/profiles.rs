@@ -122,6 +122,7 @@ pub fn profile_key_keys(answer: &str) -> Result<Vec<RsaPublicKey>, &'static str>
 }
 
 /// MinecraftServicesDiscoveryService.getUrl(service, endpoint).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn endpoint(doc: &Json, service: &str, name: &str) -> Option<String> {
     doc.get("discovery")?
         .get(service)?

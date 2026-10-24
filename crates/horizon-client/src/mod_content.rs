@@ -1067,6 +1067,13 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>) -> Result<()> {
         };
         overlay.write(name, &bytes)
     };
+    // The browser build has no threads.
+    if cfg!(target_arch = "wasm32") {
+        for (name, _) in jobs.iter() {
+            table(name)?;
+        }
+        return Ok(());
+    }
     let next = std::sync::atomic::AtomicUsize::new(0);
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     std::thread::scope(|scope| {
@@ -1308,7 +1315,7 @@ fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
         ))
     };
     let mut parts = vec!["horizon mod content 1".to_owned()];
-    parts.push(meta(&std::env::current_exe()?)?);
+    parts.push(meta(&horizon_core::fs::current_exe()?)?);
     let base = std::path::absolute(base)?;
     parts.push(
         String::from_utf8_lossy(&fs::read(base.join("horizon-resources.json"))?).into_owned(),

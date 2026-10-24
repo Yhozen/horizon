@@ -389,6 +389,13 @@ impl HudAtlas {
         };
         let threads = std::thread::available_parallelism().map_or(2, |n| n.get());
         let chunk = files.len().div_ceil(threads).max(1);
+        // The browser build has no threads.
+        #[cfg(target_arch = "wasm32")]
+        let decoded: Vec<_> = {
+            let _ = chunk;
+            files.iter().filter_map(decode_one).collect()
+        };
+        #[cfg(not(target_arch = "wasm32"))]
         let decoded: Vec<_> = std::thread::scope(|scope| {
             let handles: Vec<_> = files
                 .chunks(chunk)
