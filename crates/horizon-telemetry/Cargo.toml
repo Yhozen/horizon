@@ -14,7 +14,13 @@ ruzstd = "0.9"
 # The random install ID and outbox file names.
 getrandom = "0.3"
 # Sending, for the launcher (and the game's "I'm playing" ping); the ingest server builds without it.
+
+# Not in the browser build (docs/web.md): it has no sockets.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [features]
 default = ["upload", "live"]

@@ -114,7 +114,7 @@ pub fn round(n: u64) -> u64 {
 }
 
 /// Sends `ping` to `endpoint` (`https://host`, without a trailing slash).
-#[cfg(feature = "live")]
+#[cfg(all(feature = "live", not(target_arch = "wasm32")))]
 pub fn send(endpoint: &str, ping: &Ping) -> Result<(), String> {
     agent()
         .post(&format!("{endpoint}/v1/live"))
@@ -125,7 +125,7 @@ pub fn send(endpoint: &str, ping: &Ping) -> Result<(), String> {
 }
 
 /// The live count at `endpoint`.
-#[cfg(feature = "live")]
+#[cfg(all(feature = "live", not(target_arch = "wasm32")))]
 pub fn fetch(endpoint: &str) -> Result<Count, String> {
     let body = agent()
         .get(&format!("{endpoint}/v1/live"))
@@ -136,7 +136,19 @@ pub fn fetch(endpoint: &str) -> Result<Count, String> {
     serde_json::from_str(&body).map_err(|e| e.to_string())
 }
 
-#[cfg(feature = "live")]
+/// The browser build has no sockets: nothing is sent.
+#[cfg(all(feature = "live", target_arch = "wasm32"))]
+pub fn send(_endpoint: &str, _ping: &Ping) -> Result<(), String> {
+    Err("no network in the browser build".into())
+}
+
+/// The browser build has no sockets: no count.
+#[cfg(all(feature = "live", target_arch = "wasm32"))]
+pub fn fetch(_endpoint: &str) -> Result<Count, String> {
+    Err("no network in the browser build".into())
+}
+
+#[cfg(all(feature = "live", not(target_arch = "wasm32")))]
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(5))

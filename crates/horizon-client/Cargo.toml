@@ -14,13 +14,16 @@ horizon-core = { path = "../horizon-core" }
 horizon-threads = { path = "../horizon-threads" }
 horizon-world = { path = "../horizon-world" }
 horizon-protocol = { path = "../horizon-protocol" }
+horizon-friends = { path = "../horizon-friends" }
+# HTTPS to the Minecraft services (online-mode session join). It builds for the browser too,
+# where every request fails (there are no sockets).
+ureq = { version = "2", default-features = false, features = ["tls"] }
 # server.properties, eula.txt and the user lists, shared with horizon-server.
 horizon-server-files = { path = "../horizon-server-files" }
-horizon-friends = { path = "../horizon-friends" }
 # Horizon mods: sandboxed WebAssembly components, off unless installed and turned on (docs/mods.md).
 # Their runtime is the `mods` feature.
 horizon-mods = { path = "../horizon-mods", default-features = false }
-wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl"] }
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl"] }
 winit = "0.30.13"
 pollster = "0.4"
 bytemuck = { version = "1.24", features = ["derive"] }
@@ -45,14 +48,29 @@ horizon-theme = { path = "../horizon-theme" }
 # the anonymous "I'm playing" ping the game sends itself (`heartbeat.rs`).
 horizon-telemetry = { path = "../horizon-telemetry", default-features = false, features = ["live"] }
 horizon-bench = { path = "../horizon-bench" }
-arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 # Controllers (evdev + libudev on Linux, IOKit on macOS, Windows.Gaming.Input); the `controllers` feature.
 gilrs = { version = "0.11", optional = true }
 # The DualSense's rumble, adaptive triggers and lights over HID (gilrs only reads it).
 horizon-dualsense = { path = "../horizon-dualsense", optional = true }
-# HTTPS to the Minecraft services (online-mode session join).
-ureq = { version = "2", default-features = false, features = ["tls"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = { version = "30.0.1", default-features = false, features = ["vulkan", "metal"] }
+arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
+
+# The browser build (docs/web.md): WebGPU, the canvas, the page's clock and fetch.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "30.0.1", default-features = false, features = ["webgpu"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+ring = { version = "0.17", features = ["wasm32_unknown_unknown_js"] }
+rustls-pki-types = { version = "1", features = ["web"] }
+chrono = { version = "0.4.42", default-features = false, features = ["wasmbind"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "Element", "console", "Performance"] }
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
 
 [target.'cfg(unix)'.dependencies]
 # The server thread's CPU time per tick (`HORIZON_SPIKES`, spans.rs).

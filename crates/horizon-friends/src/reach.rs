@@ -68,7 +68,11 @@ fn virtual_interface(name: &str) -> bool {
 /// IPv6. No link-local or unique-local; loopback on request.
 pub fn interface_addresses(loopback: bool) -> Vec<IpAddr> {
     let mut found: Vec<(u8, IpAddr)> = Vec::new();
-    for i in if_addrs::get_if_addrs().unwrap_or_default() {
+    #[cfg(target_arch = "wasm32")]
+    let interfaces: Vec<web_if::Interface> = Vec::new();
+    #[cfg(not(target_arch = "wasm32"))]
+    let interfaces = if_addrs::get_if_addrs().unwrap_or_default();
+    for i in interfaces {
         if virtual_interface(&i.name) {
             continue;
         }
@@ -357,5 +361,19 @@ mod tests {
     fn interface_addresses_skip_loopback_unless_asked() {
         assert!(interface_addresses(false).iter().all(|a| !a.is_loopback()));
         assert!(interface_addresses(true).contains(&IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    }
+}
+
+/// The browser build has no interfaces to list.
+#[cfg(target_arch = "wasm32")]
+mod web_if {
+    pub struct Interface {
+        pub name: String,
+        ip: std::net::IpAddr,
+    }
+    impl Interface {
+        pub fn ip(&self) -> std::net::IpAddr {
+            self.ip
+        }
     }
 }
