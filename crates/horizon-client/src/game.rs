@@ -12284,7 +12284,10 @@ impl Progress {
 /// Harness and dedicated runs keep the fully-synchronous startup so their
 /// output stays byte-identical; only an ordinary launch shows the window first.
 fn synchronous_startup(options: &Options) -> bool {
-    options.frames.is_some()
+    // The browser has no worker threads, so it always uses the synchronous
+    // path (Loading would spawn the resource loader and miss canvas#horizon).
+    cfg!(target_arch = "wasm32")
+        || options.frames.is_some()
         || options.world_frames.is_some()
         || options.benchmark.is_some()
         || options.control.is_some()
@@ -12957,6 +12960,17 @@ impl Loading {
         let attributes = Window::default_attributes()
             .with_title("Horizon")
             .with_window_icon(horizon_client::window::icon());
+        // The browser build draws on the page's canvas#horizon.
+        #[cfg(target_arch = "wasm32")]
+        let attributes = {
+            use wasm_bindgen::JsCast;
+            use winit::platform::web::WindowAttributesExtWebSys;
+            let canvas = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.get_element_by_id("horizon"))
+                .and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok());
+            attributes.with_canvas(canvas)
+        };
         // Wayland names the window by its app id, which the horizon.desktop entry matches.
         #[cfg(target_os = "linux")]
         let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
@@ -13264,27 +13278,36 @@ fn run_loading(
         progress,
         receiver,
         loaded: None,
-        handle: Some(loader),
+        handle: loader,
         shown: false,
         menu,
         error: None,
     };
     let mut app = App::Loading(Box::new(loading));
-    EventLoop::new()?.run_app(&mut app)?;
-    match app {
-        App::Ready(mut game) => {
-            write_report(&game)?;
-            if let Some(e) = game.error.take() {
-                return Err(e);
-            }
-        }
-        App::Loading(loading) => {
-            if let Some(e) = loading.error {
-                return Err(e);
-            }
-        }
+    #[cfg(target_arch = "wasm32")]
+    {
+        use winit::platform::web::EventLoopExtWebSys;
+        EventLoop::new()?.spawn_app(app);
+        return Ok(());
     }
-    Ok(())
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        EventLoop::new()?.run_app(&mut app)?;
+        match app {
+            App::Ready(mut game) => {
+                write_report(&game)?;
+                if let Some(e) = game.error.take() {
+                    return Err(e);
+                }
+            }
+            App::Loading(loading) => {
+                if let Some(e) = loading.error {
+                    return Err(e);
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 pub fn run() -> Result<()> {

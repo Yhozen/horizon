@@ -73,7 +73,10 @@ arguments by default:
 ```
 
 To pass others, add `?args=` with the arguments separated by spaces (URL-encoded), for example
-`?args=--world%20W%20--creative%20--render-distance%202%20--in-frame`. `--in-frame` is required.
+`?args=--world%20W%20--creative%20--test-terrain%20--render-distance%202%20--in-frame`.
+`--in-frame` is required. The browser always uses the synchronous startup path (no resource-loader
+thread), and both `Game::resumed` and `Loading::resumed` bind winit to `canvas#horizon`, so a short
+`?args=` list without `--world-frames` still draws on the page canvas.
 `window.horizonStatus` shows what the page is doing. Every two seconds the console prints a progress line
 (`Horizon web: frame … chunks … meshed … player …`).
 
