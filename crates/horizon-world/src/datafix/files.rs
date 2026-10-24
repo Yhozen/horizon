@@ -10,7 +10,9 @@ use super::{CURRENT, update};
 use crate::compression::Compression;
 use crate::nbt::{self, Compound, JavaString, Limits, NamedTag, Tag};
 use crate::region::{ChunkRecord, RegionFile, RegionWriter};
-use std::fs;
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -96,11 +98,11 @@ fn resolve(base: &Path, relative: &str) -> PathBuf {
 /// the target exists.
 fn move_file(base: &Path, from: &str, to: &str) -> io::Result<()> {
     let from = resolve(base, from);
-    if !from.exists() {
+    if !from.exists_vfs() {
         return Ok(());
     }
     let to = resolve(base, to);
-    if to.exists() {
+    if to.exists_vfs() {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             format!(
@@ -119,7 +121,7 @@ fn move_file(base: &Path, from: &str, to: &str) -> io::Result<()> {
 /// `FileFixUtil.deleteFileOrEmptyDirectory`.
 fn delete(base: &Path, relative: &str) -> io::Result<()> {
     let path = resolve(base, relative);
-    if path.is_dir() {
+    if path.is_dir_vfs() {
         let entries: Vec<_> = fs::read_dir(&path)?.collect::<Result<_, _>>()?;
         if entries.len() == 1 && entries[0].file_name() == ".DS_Store" {
             let _ = fs::remove_file(entries[0].path());
@@ -128,7 +130,7 @@ fn delete(base: &Path, relative: &str) -> io::Result<()> {
             return Ok(());
         }
         fs::remove_dir(&path)
-    } else if path.exists() {
+    } else if path.exists_vfs() {
         fs::remove_file(&path)
     } else {
         Ok(())
@@ -140,7 +142,7 @@ fn subdirectories(path: &Path) -> Vec<PathBuf> {
         .map(|r| {
             r.filter_map(Result::ok)
                 .map(|e| e.path())
-                .filter(|p| p.is_dir())
+                .filter(|p| p.is_dir_vfs())
                 .collect()
         })
         .unwrap_or_default();
@@ -156,7 +158,7 @@ fn dimensions(base: &Path) -> Vec<PathBuf> {
             .map(|d| base.join("dimensions/minecraft").join(d))
             .to_vec()
     };
-    if !root.exists() {
+    if !root.exists_vfs() {
         return defaults();
     }
     let found: Vec<PathBuf> = subdirectories(&root)
@@ -307,7 +309,7 @@ fn fix_4772(base: &Path) -> io::Result<()> {
 
 /// `RegexMove` over the files of a folder.
 fn regex_move(folder: &Path, rename: impl Fn(&str) -> Option<String>) -> io::Result<()> {
-    if !folder.is_dir() {
+    if !folder.is_dir_vfs() {
         return Ok(());
     }
     let mut names: Vec<String> = fs::read_dir(folder)?
@@ -655,7 +657,7 @@ fn files_with_suffix(folder: &Path, suffix: &str) -> Vec<PathBuf> {
         .map(|r| {
             r.filter_map(Result::ok)
                 .map(|e| e.path())
-                .filter(|p| p.is_file() && p.to_string_lossy().ends_with(suffix))
+                .filter(|p| p.is_file_vfs() && p.to_string_lossy().ends_with(suffix))
                 .collect()
         })
         .unwrap_or_default();
@@ -699,7 +701,7 @@ fn upgrade_regions(folder: &Path, mut fix: impl FnMut(&mut Tag)) -> io::Result<(
 
 /// `SavedDataStorage.readTagFromDisk` over every known file of a data folder.
 fn upgrade_saved_data(data: &Path) -> io::Result<()> {
-    if !data.is_dir() {
+    if !data.is_dir_vfs() {
         return Ok(());
     }
     let mut files = Vec::new();
@@ -707,7 +709,7 @@ fn upgrade_saved_data(data: &Path) -> io::Result<()> {
     while let Some(dir) = stack.pop() {
         for entry in fs::read_dir(&dir)?.filter_map(Result::ok) {
             let p = entry.path();
-            if p.is_dir() {
+            if p.is_dir_vfs() {
                 stack.push(p);
             } else if p.to_string_lossy().ends_with(".dat") {
                 files.push(p);

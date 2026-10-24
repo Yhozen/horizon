@@ -548,7 +548,7 @@ pub fn json_text(v: &serde_json::Value, lang: &Language) -> String {
 
 /// en_us.json from the prepared resources.
 pub fn load_language(resources: &std::path::Path) -> Language {
-    std::fs::read(resources.join("assets/minecraft/lang/en_us.json"))
+    horizon_core::fs::read(resources.join("assets/minecraft/lang/en_us.json"))
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default()

@@ -8,9 +8,12 @@ use crate::{
     item_data::{self, Levels},
     items::{ItemStack, Items},
 };
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
-use std::{fs, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc};
 
 /// Everything the workstation menus read, loaded once with the resources.
 pub struct StationData {
@@ -895,7 +898,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
-        if !root.join("items.json").exists() {
+        if !root.join("items.json").exists_vfs() {
             return;
         }
         let items = Items::tags_only(&root).unwrap();

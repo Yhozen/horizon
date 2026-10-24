@@ -313,10 +313,10 @@ impl Downloader {
             .join(&digest);
         let (url, send) = (url.to_owned(), self.send.clone());
         std::thread::spawn(move || {
-            let bytes = std::fs::read(&file).ok().or_else(|| {
+            let bytes = horizon_core::fs::read(&file).ok().or_else(|| {
                 let body = http_get(&url)?;
-                let _ = std::fs::create_dir_all(file.parent()?);
-                let _ = std::fs::write(&file, &body);
+                let _ = horizon_core::fs::create_dir_all(file.parent()?);
+                let _ = horizon_core::fs::write(&file, &body);
                 Some(body)
             });
             let image = bytes

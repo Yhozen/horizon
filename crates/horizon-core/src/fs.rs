@@ -65,6 +65,8 @@ mod web {
     use std::path::{Component, Path, PathBuf};
     use std::sync::{Arc, Mutex};
 
+    pub use std::fs::{FileTimes, Permissions, TryLockError};
+
     #[derive(Clone)]
     enum Node {
         File(Arc<Vec<u8>>),
@@ -79,7 +81,12 @@ mod web {
     fn key(path: &Path) -> String {
         let mut parts: Vec<String> = Vec::new();
         if path.is_relative() {
-            parts.extend(CURRENT_DIR.split('/').filter(|p| !p.is_empty()).map(str::to_owned));
+            parts.extend(
+                CURRENT_DIR
+                    .split('/')
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_owned),
+            );
         }
         for c in path.components() {
             match c {
@@ -94,12 +101,19 @@ mod web {
     }
 
     fn not_found(path: &Path) -> io::Error {
-        io::Error::new(io::ErrorKind::NotFound, format!("{}: not found", path.display()))
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{}: not found", path.display()),
+        )
     }
 
     fn parent_key(key: &str) -> Option<String> {
         let i = key.rfind('/')?;
-        Some(if i == 0 { "/".to_owned() } else { key[..i].to_owned() })
+        Some(if i == 0 {
+            "/".to_owned()
+        } else {
+            key[..i].to_owned()
+        })
     }
 
     fn make_parents(tree: &mut BTreeMap<String, Node>, key: &str) {
@@ -186,7 +200,10 @@ mod web {
         let k = key(path.as_ref());
         let mut tree = TREE.lock().unwrap();
         if let Some(Node::File(_)) = tree.get(&k) {
-            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "a file is there"));
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "a file is there",
+            ));
         }
         make_parents(&mut tree, &k);
         tree.insert(k, Node::Dir);
@@ -240,6 +257,10 @@ mod web {
         let n = data.len() as u64;
         put(to.as_ref(), data);
         Ok(n)
+    }
+
+    pub fn hard_link<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Result<()> {
+        copy(from, to).map(drop)
     }
 
     pub fn canonicalize<P: AsRef<Path>>(path: P) -> io::Result<PathBuf> {
@@ -357,10 +378,16 @@ mod web {
         let tree = TREE.lock().unwrap();
         match tree.get(&k) {
             Some(Node::Dir) => {}
-            Some(Node::File(_)) => return Err(io::Error::new(io::ErrorKind::NotADirectory, "a file")),
+            Some(Node::File(_)) => {
+                return Err(io::Error::new(io::ErrorKind::NotADirectory, "a file"));
+            }
             None => return Err(not_found(path)),
         }
-        let prefix = if k == "/" { "/".to_owned() } else { format!("{k}/") };
+        let prefix = if k == "/" {
+            "/".to_owned()
+        } else {
+            format!("{k}/")
+        };
         let entries: Vec<io::Result<DirEntry>> = tree
             .range(prefix.clone()..)
             .take_while(|(name, _)| name.starts_with(&prefix))
@@ -397,7 +424,11 @@ mod web {
             OpenOptions::new().read(true).open(path)
         }
         pub fn create<P: AsRef<Path>>(path: P) -> io::Result<File> {
-            OpenOptions::new().write(true).create(true).truncate(true).open(path)
+            OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(path)
         }
         pub fn create_new<P: AsRef<Path>>(path: P) -> io::Result<File> {
             OpenOptions::new().write(true).create_new(true).open(path)
@@ -476,7 +507,10 @@ mod web {
     impl Write for File {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             if !self.write {
-                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "opened for reading"));
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "opened for reading",
+                ));
             }
             let end = self.pos + buf.len();
             if self.data.len() < end {

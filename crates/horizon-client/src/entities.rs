@@ -7,6 +7,8 @@ use crate::{
     items::ItemStack,
     world::World,
 };
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::block_collision::BlockCollisionRegistry;
 
@@ -801,7 +803,7 @@ mod fire_environment_tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
-        if !root.join("items.json").exists() {
+        if !root.join("items.json").exists_vfs() {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();

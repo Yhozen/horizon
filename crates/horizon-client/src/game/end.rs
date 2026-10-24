@@ -738,7 +738,7 @@ impl Game<'_> {
         if self.end.exits.is_none() {
             let path = horizon_client::save::dimension_dir(&self.world_root, "minecraft:the_end")
                 .join(GATEWAY_FILE);
-            let parsed: Option<Vec<([i32; 3], [i32; 3], bool)>> = std::fs::read(&path)
+            let parsed: Option<Vec<([i32; 3], [i32; 3], bool)>> = horizon_core::fs::read(&path)
                 .ok()
                 .and_then(|b| serde_json::from_slice(&b).ok());
             self.end.exits = Some(
@@ -760,8 +760,8 @@ impl Game<'_> {
             .map(|(g, (e, x))| (*g, *e, *x))
             .collect();
         let dir = horizon_client::save::dimension_dir(&self.world_root, "minecraft:the_end");
-        std::fs::create_dir_all(&dir)?;
-        std::fs::write(dir.join(GATEWAY_FILE), serde_json::to_vec(&list)?)?;
+        horizon_core::fs::create_dir_all(&dir)?;
+        horizon_core::fs::write(dir.join(GATEWAY_FILE), serde_json::to_vec(&list)?)?;
         Ok(())
     }
 

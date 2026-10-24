@@ -11,11 +11,11 @@ use crate::{
     registry::{BlockRegistry, BlockStateId, BlockTableFile},
     worldgen::tags::TagDefinitions,
 };
+use horizon_core::fs::{self, File};
 use horizon_core::geometry::{Aabb, Direction, ShapeOp, Vec3, VoxelShape};
 use serde_json::Value;
 use std::{
     collections::HashMap,
-    fs::{self, File},
     io::{self, BufReader},
     path::Path,
     sync::Arc,

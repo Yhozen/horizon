@@ -1190,7 +1190,7 @@ impl ParticleEngine {
         };
         let dir = root.join("assets/minecraft/particles");
         for &ty in ParticleType::ALL {
-            let Ok(bytes) = std::fs::read(dir.join(format!("{}.json", ty.name()))) else {
+            let Ok(bytes) = horizon_core::fs::read(dir.join(format!("{}.json", ty.name()))) else {
                 continue;
             };
             let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {

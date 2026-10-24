@@ -6,9 +6,9 @@ use crate::{
     compression::{Compression, invalid},
     nbt::{self, Limits, NamedTag},
 };
+use horizon_core::fs::{self, File, OpenOptions};
 use horizon_core::position::ChunkPos;
 use std::{
-    fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},

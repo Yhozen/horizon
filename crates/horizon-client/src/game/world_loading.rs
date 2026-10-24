@@ -1,5 +1,7 @@
 //! Prepare local worlds without blocking the window's event loop.
 use super::*;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 
 pub(super) struct WorldRequest {
     pub save_root: PathBuf,
@@ -109,7 +111,7 @@ impl WorldRequest {
         growth::install_live_features(res, pack, options);
 
         // Persist new metadata on the worker too, before publishing the world.
-        if !save_root.join("level.dat").exists() {
+        if !save_root.join("level.dat").exists_vfs() {
             level.write(&save_root)?;
         }
         Ok(PreparedWorld {

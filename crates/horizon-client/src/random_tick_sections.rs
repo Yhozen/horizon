@@ -5,6 +5,8 @@ use crate::{
     chunk::{Chunk, MIN_Y, SECTIONS, Section},
     fast_hash::FxHashMap,
 };
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_world::registry::BlockStateId;
 use std::sync::{Arc, Weak};
 
@@ -269,7 +271,7 @@ mod tick_parity {
                 let local = manifest
                     .join("../../.local/horizon-client")
                     .join(horizon_core::VANILLA_VERSION);
-                if local.join("gameplay-facts.json").exists() {
+                if local.join("gameplay-facts.json").exists_vfs() {
                     local
                 } else {
                     // The branch worktree lives below the main checkout.
@@ -278,7 +280,7 @@ mod tick_parity {
                         .join(horizon_core::VANILLA_VERSION)
                 }
             });
-        if !root.join("gameplay-facts.json").exists() {
+        if !root.join("gameplay-facts.json").exists_vfs() {
             eprintln!(
                 "skipping resource-backed random-tick parity: {}",
                 root.display()

@@ -2,8 +2,11 @@
 //! contents as built by the game's own display generators
 //! (`creative-inventory.json`), a 9x5 scrolling grid and the search tab.
 use crate::{Result, items::ItemStack};
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, path::Path};
 
 #[derive(Clone, Debug)]
 pub struct Tab {
@@ -133,7 +136,7 @@ impl Creative {
     /// prepared before it fall back to `creative-tabs.json`'s item ids.
     pub fn load(root: &Path) -> Result<Self> {
         let path = root.join("creative-inventory.json");
-        if path.exists() {
+        if path.exists_vfs() {
             Self::from_json(&serde_json::from_slice(&fs::read(path)?)?)
         } else {
             Self::from_legacy(&serde_json::from_slice(&fs::read(

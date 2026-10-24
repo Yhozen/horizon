@@ -1,5 +1,7 @@
 //! The playable game loop: streaming world, player simulation at 20 ticks/s,
 //! block interaction, inventory and HUD.
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 mod advancements;
 mod advancements_screen;
 mod agent;
@@ -309,7 +311,7 @@ impl Options {
             .ok_or("missing executable directory")?
             .join("resources");
         let mut o = Self {
-            resources: if sibling.join("horizon-resources.json").exists() {
+            resources: if sibling.join("horizon-resources.json").exists_vfs() {
                 sibling
             } else {
                 std::path::Path::new(".local/horizon-client").join(horizon_core::VANILLA_VERSION)
@@ -12320,7 +12322,7 @@ fn load_resources(
     log::info!("load assets: {:.2}s", started.elapsed().as_secs_f32());
     progress.set(1);
     let behaviour_json: serde_json::Value = serde_json::from_reader(std::io::BufReader::new(
-        std::fs::File::open(root.join("block-behaviours.json"))?,
+        horizon_core::fs::File::open(root.join("block-behaviours.json"))?,
     ))?;
     // The block facts, the biomes and the environment are independent reads:
     // run them together, within the worker budget the settings allow.
@@ -12836,7 +12838,7 @@ fn write_report(game: &Game<'_>) -> Result<()> {
             "player": game.player.as_ref().map(|p| [p.position.x, p.position.y, p.position.z]),
             "error": game.error.as_ref().map(|e| e.to_string()),
         });
-        std::fs::write(path, serde_json::to_vec_pretty(&report)?)?;
+        horizon_core::fs::write(path, serde_json::to_vec_pretty(&report)?)?;
     }
     Ok(())
 }
@@ -13325,8 +13327,8 @@ mod startup_cpu_tests {
     #[test]
     fn worker_prepares_owned_models_and_inventory_before_handoff() {
         let root = std::env::temp_dir().join(format!("horizon-startup-cpu-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
+        horizon_core::fs::create_dir_all(&root).unwrap();
+        horizon_core::fs::write(
             root.join("entity-models.json"),
             r#"{
             "minecraft:end_crystal#main": {}, "minecraft:ender_dragon#main": {},
@@ -13335,7 +13337,7 @@ mod startup_cpu_tests {
         }"#,
         )
         .unwrap();
-        std::fs::write(
+        horizon_core::fs::write(
             root.join("creative-tabs.json"),
             r#"[{
             "id":"minecraft:building_blocks", "items":["minecraft:stone"]
@@ -13349,7 +13351,7 @@ mod startup_cpu_tests {
         .join()
         .unwrap()
         .unwrap();
-        std::fs::remove_dir_all(&root).unwrap();
+        horizon_core::fs::remove_dir_all(&root).unwrap();
         assert!(prepared.crystal_model.is_some());
         assert!(prepared.dragon_model.is_some());
         assert!(prepared.arrow_model.is_some());

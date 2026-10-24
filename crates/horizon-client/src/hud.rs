@@ -2,9 +2,11 @@
 //! textures, and a batch of textured quads in GUI pixels (vanilla's automatic
 //! GUI scale is applied when drawing).
 use crate::Result;
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use std::{
     collections::HashMap,
-    fs,
     path::{Path, PathBuf},
 };
 use wgpu::util::DeviceExt;
@@ -121,7 +123,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        if path.is_dir_vfs() {
             walk(&path, out);
         } else if path.extension().is_some_and(|e| e == "png") {
             out.push(path);

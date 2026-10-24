@@ -877,8 +877,8 @@ impl Game<'_> {
             trace.push('\n');
             self.trace_function(&f.id, &lines, 0, &mut trace);
         }
-        let written = std::fs::create_dir_all(&dir)
-            .and_then(|()| std::fs::write(dir.join(&output), trace))
+        let written = horizon_core::fs::create_dir_all(&dir)
+            .and_then(|()| horizon_core::fs::write(dir.join(&output), trace))
             .is_ok();
         if !written {
             self.command_failure(Text::translate("commands.debug.function.traceFailed", &[]));
@@ -948,8 +948,8 @@ impl Game<'_> {
         });
         let written = path
             .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&path, report.to_string()));
+            .map_or(Ok(()), horizon_core::fs::create_dir_all)
+            .and_then(|()| horizon_core::fs::write(&path, report.to_string()));
         if let Err(e) = written {
             return Err(tr_error(
                 "commands.jfr.dump.failed",

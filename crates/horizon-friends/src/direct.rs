@@ -4,6 +4,7 @@
 //! destination let the two SYNs cross: TCP simultaneous open).
 #[cfg(not(target_arch = "wasm32"))]
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+#[cfg_attr(target_arch = "wasm32", allow(unused_imports))]
 use std::{
     io::{self, Read, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream},

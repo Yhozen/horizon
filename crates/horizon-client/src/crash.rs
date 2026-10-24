@@ -98,9 +98,9 @@ impl Report {
     /// Writes the report in `home/crash-reports` and returns its path.
     pub fn save(&self, home: &Path) -> std::io::Result<PathBuf> {
         let dir = crate::logging::crash_reports_dir(home);
-        std::fs::create_dir_all(&dir)?;
+        horizon_core::fs::create_dir_all(&dir)?;
         let path = dir.join(file_name(&self.time, self.side));
-        std::fs::write(&path, self.text())?;
+        horizon_core::fs::write(&path, self.text())?;
         Ok(path)
     }
 }
@@ -138,7 +138,7 @@ fn command_output(program: &str, args: &[&str]) -> Option<String> {
 }
 
 fn read(path: &str) -> Option<String> {
-    std::fs::read_to_string(path).ok()
+    horizon_core::fs::read_to_string(path).ok()
 }
 
 /// `PRETTY_NAME` of /etc/os-release and the kernel, or the system's own version string.
@@ -633,7 +633,7 @@ mod tests {
         assert!(text.contains("\tCPU: "));
         let home = std::env::temp_dir().join(format!("horizon-crash-save-{}", std::process::id()));
         let path = report.save(&home).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        assert_eq!(horizon_core::fs::read_to_string(&path).unwrap(), text);
         assert!(
             path.file_name()
                 .unwrap()
@@ -641,6 +641,6 @@ mod tests {
                 .unwrap()
                 .ends_with("-client.txt")
         );
-        let _ = std::fs::remove_dir_all(&home);
+        let _ = horizon_core::fs::remove_dir_all(&home);
     }
 }

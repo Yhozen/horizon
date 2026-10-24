@@ -1520,7 +1520,7 @@ mod tests {
     fn icon_arrows_join_and_move_servers() {
         let dir = std::env::temp_dir().join(format!("horizon-mp-arrows-{}", std::process::id()));
         let saves = dir.join("saves");
-        std::fs::create_dir_all(&saves).unwrap();
+        horizon_core::fs::create_dir_all(&saves).unwrap();
         let file = servers_file(&saves);
         let names = ["a", "b", "c"];
         let list: Vec<ServerEntry> = names
@@ -1569,14 +1569,14 @@ mod tests {
             Outcome::Connect(address) => assert_eq!(address, list[2].ip),
             _ => panic!("the join arrow connects"),
         }
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = horizon_core::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn delete_asks_before_removing_the_server() {
         let dir = std::env::temp_dir().join(format!("horizon-mp-delete-{}", std::process::id()));
         let saves = dir.join("saves");
-        std::fs::create_dir_all(&saves).unwrap();
+        horizon_core::fs::create_dir_all(&saves).unwrap();
         let file = servers_file(&saves);
         let list = vec![
             ServerEntry::new("Keep", "127.0.0.1:2"),
@@ -1635,6 +1635,6 @@ mod tests {
             matches!(&screen, Screen::List { selected: None, servers, .. } if servers.len() == 1)
         );
         assert_eq!(names(), ["Keep"]);
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = horizon_core::fs::remove_dir_all(&dir);
     }
 }

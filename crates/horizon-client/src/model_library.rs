@@ -1,7 +1,10 @@
 //! Parsed resource models for one startup or resource-pack reload.
 use crate::Result;
 use horizon_assets::{model::CuboidModel, resolve::ModelLibrary};
-use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
+use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 #[derive(Default)]
 pub(crate) struct ParsedModels {
@@ -29,8 +32,8 @@ impl ParsedModels {
                     // The entry's own type saves a stat per file; a link
                     // (content roots link into the base) is followed.
                     let is_dir = match e.file_type() {
-                        Ok(t) if !t.is_symlink() => t.is_dir(),
-                        _ => path.is_dir(),
+                        Ok(t) if !t.is_symlink() => t.is_dir_vfs(),
+                        _ => path.is_dir_vfs(),
                     };
                     if is_dir {
                         stack.push(path);

@@ -5,6 +5,7 @@ use crate::{
     collisions::SceneCollisions,
     motion::{MotionEvent, MotionWorld},
 };
+use horizon_core::fs;
 use horizon_core::{
     geometry::{Aabb, Vec3, VoxelShape},
     position::BlockPos,
@@ -23,7 +24,7 @@ use horizon_world::{
     movement_properties::MovementProperties,
     registry::BlockStateId,
 };
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, path::Path};
 
 pub fn load(root: &Path, properties: &MovementProperties<'_>) -> Result<BlockLandingRegistry> {
     let raw: BTreeMap<String, serde_json::Value> =

@@ -10,6 +10,8 @@ use crate::{
     sprites::SpriteAnimation,
 };
 use glam::{DVec3, Mat4, Vec3, Vec4};
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use web_time::Instant;
 use wgpu::util::DeviceExt;
@@ -4145,7 +4147,7 @@ impl Renderer {
         }
         buffer.unmap();
         let mut encoder = png::Encoder::new(
-            std::io::BufWriter::new(std::fs::File::create(path)?),
+            std::io::BufWriter::new(horizon_core::fs::File::create(path)?),
             width,
             height,
         );
@@ -4319,7 +4321,7 @@ mod tests {
     #[test]
     fn shaders_translate_to_hlsl_for_directx_12() {
         fn wgsl_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-            for entry in std::fs::read_dir(dir).unwrap() {
+            for entry in horizon_core::fs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
                 if path.is_dir() {
                     wgsl_files(&path, out);
@@ -4335,7 +4337,7 @@ mod tests {
         );
         assert!(files.len() >= 10, "{files:?}");
         for path in files {
-            let text = std::fs::read_to_string(&path).unwrap();
+            let text = horizon_core::fs::read_to_string(&path).unwrap();
             // entity.wgsl comes after the overlay's constants (entity_shader).
             let module = naga::front::wgsl::parse_str(&text)
                 .or_else(|_| {
@@ -4504,7 +4506,7 @@ mod sprite_upload_tests {
             .join(horizon_core::VANILLA_VERSION);
         if !root
             .join("assets/minecraft/textures/block/rail.png")
-            .exists()
+            .exists_vfs()
         {
             return;
         }

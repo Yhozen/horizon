@@ -6,8 +6,11 @@
 //! unless the equipment asset's `trim_overrides` pick another texture or
 //! palette (iron armour with an iron trim uses `trim/iron_darker`).
 use horizon_assets::palette::apply_palette;
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, path::Path};
 
 /// An RGBA image: width, height, pixels.
 pub type Image = (u32, u32, Vec<u8>);
@@ -315,7 +318,7 @@ mod tests {
     #[test]
     fn vanilla_trims_are_recoloured() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3");
-        if !root.join("assets/minecraft/textures/trims").is_dir() {
+        if !root.join("assets/minecraft/textures/trims").is_dir_vfs() {
             return;
         }
         let registry = TrimRegistry::load(&root);

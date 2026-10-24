@@ -4,11 +4,13 @@
 //! value/attribute effect components (`LevelBasedValue`, `EnchantmentValueEffect`
 //! and the loot-condition subset that enchantment requirements use).
 use crate::items::{ItemStack, Items};
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    fs,
     path::Path,
     sync::Arc,
 };
@@ -89,7 +91,7 @@ fn read_tag_dir(dir: &Path) -> HashMap<String, Vec<String>> {
         };
         for e in entries.flatten() {
             let p = e.path();
-            if p.is_dir() {
+            if p.is_dir_vfs() {
                 walk(&p, base, out);
             } else if p.extension().is_some_and(|x| x == "json")
                 && let Ok(rel) = p.strip_prefix(base)

@@ -9,6 +9,8 @@
 //! path ends in `.json`, the game listens on a random localhost TCP port and
 //! writes `{"transport":"tcp","port":N,"token":"..."}` to the path, readable
 //! only by its user; a client's first line must then be `auth TOKEN`.
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use std::{
     io::{self, BufRead, BufReader, Read, Write},
     net::{Ipv4Addr, TcpListener, TcpStream},
@@ -81,7 +83,7 @@ pub fn uses_tcp(path: &Path) -> bool {
 
 /// The TCP endpoint file: (port, token).
 fn read_endpoint(path: &Path) -> io::Result<(u16, String)> {
-    let text = std::fs::read_to_string(path)?;
+    let text = horizon_core::fs::read_to_string(path)?;
     let bad = || io::Error::new(io::ErrorKind::InvalidData, "not a control endpoint file");
     let v: serde_json::Value = serde_json::from_str(&text).map_err(|_| bad())?;
     let port = v["port"]
@@ -133,7 +135,7 @@ fn random_token() -> String {
 
 /// Write the endpoint file so that only this user can read it.
 fn write_private(path: &Path, text: &str) -> io::Result<()> {
-    let mut options = std::fs::OpenOptions::new();
+    let mut options = horizon_core::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
@@ -179,8 +181,8 @@ pub fn default_path() -> PathBuf {
 impl Server {
     pub fn start(path: &Path) -> io::Result<Self> {
         // An endpoint left by a crashed game refuses connections; replace it.
-        if path.exists() && connect(path).is_err() {
-            std::fs::remove_file(path)?;
+        if path.exists_vfs() && connect(path).is_err() {
+            horizon_core::fs::remove_file(path)?;
         }
         let (sender, requests) = mpsc::channel();
         let local = sender.clone();
@@ -337,7 +339,7 @@ impl Drop for Server {
             #[cfg(not(unix))]
             None => {}
         }
-        let _ = std::fs::remove_file(&self.path);
+        let _ = horizon_core::fs::remove_file(&self.path);
     }
 }
 
@@ -373,7 +375,7 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("horizon-ctl-test-{}.json", std::process::id()));
         let server = Server::start(&path).unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
+        let text = horizon_core::fs::read_to_string(&path).unwrap();
         assert!(text.contains("\"tcp\""));
         let mut client = connect(&path).unwrap();
         writeln!(client, "status").unwrap();
@@ -389,7 +391,7 @@ mod tests {
         BufReader::new(client).read_line(&mut reply).unwrap();
         assert_eq!(reply.trim(), r#"{"ok":true}"#);
         drop(server);
-        assert!(!path.exists());
+        assert!(!path.exists_vfs());
     }
 
     #[test]

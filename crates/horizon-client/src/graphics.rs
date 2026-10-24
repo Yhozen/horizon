@@ -2,7 +2,8 @@
 //! `horizon-graphics.txt` next to `options.txt` so that file stays exactly
 //! vanilla's. Every default reproduces vanilla's rendering; only choices the
 //! player makes here depart from it.
-use std::{fs, path::Path};
+use horizon_core::fs;
+use std::path::Path;
 
 pub const FILE: &str = "horizon-graphics.txt";
 

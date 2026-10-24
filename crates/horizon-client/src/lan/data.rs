@@ -2,6 +2,8 @@
 //! network order, with their data for clients that do not know the vanilla
 //! pack) and the tags of every registry, loaded from the prepared resources
 //! (`data/minecraft/...`) and the registries report.
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_protocol::{
     packets::configuration::{RegistryData, RegistryEntry, RegistryTags, TagEntry, UpdateTags},
     registry::{Builtin, Dynamic},
@@ -73,16 +75,16 @@ pub struct SyncData {
 
 /// Every `*.json` under `dir`, as (path without extension relative to dir, value), sorted.
 fn walk(dir: &Path, prefix: &str, out: &mut BTreeMap<String, Value>) {
-    let Ok(read) = std::fs::read_dir(dir) else {
+    let Ok(read) = horizon_core::fs::read_dir(dir) else {
         return;
     };
     for entry in read.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
-        if path.is_dir() {
+        if path.is_dir_vfs() {
             walk(&path, &format!("{prefix}{name}/"), out);
         } else if let Some(stem) = name.strip_suffix(".json")
-            && let Ok(text) = std::fs::read_to_string(&path)
+            && let Ok(text) = horizon_core::fs::read_to_string(&path)
             && let Ok(value) = serde_json::from_str::<Value>(&text)
         {
             out.insert(format!("{prefix}{stem}"), value);
@@ -231,7 +233,7 @@ impl SyncData {
         keys.sort();
         for key in keys {
             let dir = tag_root.join(key.trim_start_matches("minecraft:"));
-            if !dir.is_dir() {
+            if !dir.is_dir_vfs() {
                 continue;
             }
             let mut files = BTreeMap::new();

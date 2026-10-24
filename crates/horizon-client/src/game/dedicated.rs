@@ -21,6 +21,8 @@ use horizon_client::{
     },
     text::Text,
 };
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_protocol::text::translatable;
 use horizon_world::nbt::{JavaString, Tag};
 use std::{
@@ -144,7 +146,7 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
             "serverId" | "pidFile" => {
                 let value = it.next().ok_or("missing value")?;
                 if name == "pidFile" {
-                    std::fs::write(value, std::process::id().to_string())?;
+                    horizon_core::fs::write(value, std::process::id().to_string())?;
                 }
             }
             _ => return Err(format!("{arg} is not a recognized option").into()),
@@ -232,7 +234,7 @@ impl Lists {
         warn("operators list", l.ops.load());
         warn("white-list", l.white.load());
         let _ = l.ops.save();
-        if !l.white.file.exists() {
+        if !l.white.file.exists_vfs() {
             let _ = l.white.save();
         }
         l
@@ -444,7 +446,7 @@ impl Game<'_> {
         // Main's WorldLoader: a new world's dimensions come from
         // server.properties before the server starts.
         let world_dir = std::env::current_dir()?.join(&universe).join(&level_name);
-        let new_world = !world_dir.join("level.dat").exists();
+        let new_world = !world_dir.join("level.dat").exists_vfs();
         if new_world {
             self.write_world_gen(&world_dir, &props)?;
         }
@@ -575,7 +577,7 @@ impl Game<'_> {
             gate_lists.lock().unwrap().can_login(address, &user)
         });
         let bypass_lists = lists.clone();
-        let favicon = std::fs::read("server-icon.png")
+        let favicon = horizon_core::fs::read("server-icon.png")
             .ok()
             .filter(|b| png_size(b) == Some((64, 64)));
         let net = NetConfig {

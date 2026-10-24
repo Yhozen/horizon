@@ -25,6 +25,8 @@ use horizon_client::{
     tab_list::SPECTATOR,
     world::World,
 };
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_core::{
     geometry::Vec3,
     paletted::{PalettedContainer, Strategy},

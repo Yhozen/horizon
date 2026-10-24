@@ -8,6 +8,8 @@ use super::{
     living::wrap,
 };
 use crate::mesher::Vertex;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_core::geometry::trig::Mth;
 use std::f32::consts::PI;
 
@@ -1285,7 +1287,7 @@ mod tests {
     fn villager_layers_name_textures_that_exist() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client/26.3");
-        if !root.join("entity-models.json").exists() {
+        if !root.join("entity-models.json").exists_vfs() {
             return;
         }
         let types = super::super::MobTypes::load(&root).unwrap();
@@ -1308,7 +1310,7 @@ mod tests {
                         for layer in layers {
                             let png = root
                                 .join(format!("assets/minecraft/textures/{}.png", layer.texture));
-                            assert!(png.is_file(), "missing {}", png.display());
+                            assert!(png.is_file_vfs(), "missing {}", png.display());
                         }
                     }
                 }
@@ -1320,7 +1322,7 @@ mod tests {
     fn sulfur_cube_opaque_core_is_submitted_before_its_translucent_shell() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client/26.3");
-        if !root.join("entity-models.json").exists() {
+        if !root.join("entity-models.json").exists_vfs() {
             return;
         }
         let mut types = super::super::MobTypes::load(&root).unwrap();

@@ -10,6 +10,7 @@ use horizon_assets::{
         choice::CompiledChoices,
     },
 };
+use horizon_core::fs;
 use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, position_seed},
@@ -21,7 +22,6 @@ use horizon_world::{
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
     path::Path,
 };
 

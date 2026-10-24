@@ -4,7 +4,10 @@
 //!
 //! It is the `noAi` line of the game's `horizon-extras.txt`, in the game's home (the folder
 //! with `options.txt`). Missing means off: AI features are available. See docs/agent-control.md.
-use std::{fs, io, path::Path};
+use crate::fs;
+#[allow(unused_imports)]
+use crate::fs::PathExt as _;
+use std::{io, path::Path};
 
 /// The game's extras file, beside `options.txt`.
 pub const FILE: &str = "horizon-extras.txt";
@@ -81,7 +84,7 @@ mod tests {
         let home = std::env::temp_dir().join(format!("horizon-no-ai-{}", std::process::id()));
         let _ = fs::remove_dir_all(&home);
         set(&home, false).unwrap();
-        assert!(!home.join(FILE).exists(), "off needs no file");
+        assert!(!home.join(FILE).exists_vfs(), "off needs no file");
         assert!(check(&home).is_ok());
         set(&home, true).unwrap();
         assert!(is_on(&home));

@@ -4,9 +4,12 @@
 //! `replace` and `subtitle` fields, files that do not exist being dropped, and
 //! `WeighedSoundEvents.getSound` drawing `nextInt(totalWeight)` from the sound
 //! instance's random.
+use horizon_core::fs;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 use horizon_core::random::RandomSource;
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, path::Path};
 
 /// `SoundManager.EMPTY_SOUND_LOCATION`.
 pub const EMPTY: &str = "minecraft:empty";
@@ -241,7 +244,7 @@ impl SoundRegistry {
             let Ok(text) = fs::read(assets.join(&namespace).join("sounds.json")) else {
                 continue;
             };
-            let exists = |ns: &str, path: &str| assets.join(ns).join(path).is_file();
+            let exists = |ns: &str, path: &str| assets.join(ns).join(path).is_file_vfs();
             registry.add_file(&namespace, &text, &exists);
         }
         registry

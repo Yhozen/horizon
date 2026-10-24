@@ -4,6 +4,8 @@
 //! at each block.
 use crate::{blocks::BlockFacts, hud::Rect, mesher::Vertex, world::World};
 use glam::DVec3;
+#[allow(unused_imports)]
+use horizon_core::fs::PathExt as _;
 
 /// Vanilla renderer shadow radius and strength for an entity type id.
 pub fn shadow_params(entity: &str) -> (f32, f32) {
@@ -141,7 +143,7 @@ mod tests {
                     .join("../../.local/horizon-client")
                     .join(horizon_core::VANILLA_VERSION)
             });
-        if !root.join("gameplay-facts.json").exists() {
+        if !root.join("gameplay-facts.json").exists_vfs() {
             eprintln!("skipping resource-backed shadow check: {}", root.display());
             return;
         }
