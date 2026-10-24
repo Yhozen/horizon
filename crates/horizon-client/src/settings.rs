@@ -203,7 +203,14 @@ impl Default for Settings {
             fullscreen: false,
             smooth_lighting: true,
             clouds: "true".into(),
-            cloud_range: 128,
+            // 🤖 Agent: vanilla's 128 chunks (2048 blocks) is ~37k cloud quads a
+            // frame; the browser build defaults to 32 (512 blocks; clouds fade
+            // out towards the range, so the edge stays soft). Options still apply.
+            cloud_range: if cfg!(target_arch = "wasm32") {
+                32
+            } else {
+                128
+            },
             particles: 0,
             entity_distance: 1.0,
             entity_shadows: true,
