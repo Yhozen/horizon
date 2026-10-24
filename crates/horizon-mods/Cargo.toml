@@ -7,7 +7,7 @@ rust-version = "1.86"
 description = "Horizon's mod runtime: sandboxed WebAssembly components (docs/mods.md)"
 
 [dependencies]
-# std::time on native; the page clock in the browser build (docs/web.md), where std's panics.
+# std::time on native; the page clock in the browser build (WEB.md), where std's panics.
 web-time = "1.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

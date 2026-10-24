@@ -7,7 +7,7 @@ rust-version.workspace = true
 description = "Horizon's Minecraft Java Edition 26.3 network protocol (version 777)"
 
 [dependencies]
-# std::time on native; the page clock in the browser build (docs/web.md), where std's panics.
+# std::time on native; the page clock in the browser build (WEB.md), where std's panics.
 web-time = "1.1"
 horizon-core = { path = "../horizon-core" }
 horizon-world = { path = "../horizon-world" }

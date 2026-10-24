@@ -1,4 +1,4 @@
-//! The browser build's entry (docs/web.md): the page fetches the prepared resources
+//! The browser build's entry (WEB.md): the page fetches the prepared resources
 //! as one archive and calls [`start`] with it and the game's arguments. The archive
 //! goes into the in-memory file system, the WebGPU device opens, and the game starts
 //! as `game::run` does on the desktop, its event loop driven by the page's frames.

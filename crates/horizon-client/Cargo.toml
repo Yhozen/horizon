@@ -8,7 +8,7 @@ rust-version = "1.90"
 description = "Horizon native development client"
 
 [dependencies]
-# std::time on native; the page clock in the browser build (docs/web.md), where std's panics.
+# std::time on native; the page clock in the browser build (WEB.md), where std's panics.
 web-time = "1.1"
 horizon-assets = { path = "../horizon-assets" }
 horizon-core = { path = "../horizon-core" }
@@ -60,7 +60,7 @@ horizon-dualsense = { path = "../horizon-dualsense", optional = true }
 wgpu = { version = "30.0.1", default-features = false, features = ["vulkan", "metal"] }
 arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
 
-# The browser build (docs/web.md): WebGPU, the canvas, the page's clock and fetch.
+# The browser build (WEB.md): WebGPU, the canvas, the page's clock and fetch.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = { version = "30.0.1", default-features = false, features = ["webgpu"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }

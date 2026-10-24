@@ -6,7 +6,7 @@ license = "MIT"
 description = "Play with friends: invite codes, the relay protocol, the end-to-end encrypted tunnel between a host's integrated server and its guests"
 
 [dependencies]
-# std::time on native; the page clock in the browser build (docs/web.md), where std's panics.
+# std::time on native; the page clock in the browser build (WEB.md), where std's panics.
 web-time = "1.1"
 # The key exchange keyed by the code's secret, then the frames.
 spake2 = { version = "0.4", features = ["getrandom"] }
@@ -17,7 +17,7 @@ getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.151"
 
-# The browser build (docs/web.md) has no sockets: these are native only.
+# The browser build (WEB.md) has no sockets: these are native only.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # SO_REUSEADDR/SO_REUSEPORT for the direct socket (TCP simultaneous open).
 socket2 = { version = "0.5", features = ["all"] }

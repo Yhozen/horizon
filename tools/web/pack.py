@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Packs prepared resources (horizon-prepare's .local/horizon-client/<version>) into the
-browser build's data archive (docs/web.md): repeated records of a little-endian u32 path
+browser build's data archive (WEB.md): repeated records of a little-endian u32 path
 length, the UTF-8 path (relative, '/'-separated), a u32 data length and the data. The game
 mounts it with horizon_core::fs::mount_archive.
 
@@ -10,7 +10,7 @@ and is never committed or published.
   tools/web/pack.py [--resources DIR] [--out FILE] [--only LIST]
 
 --only LIST keeps the files LIST names (one path per line, absolute or relative to the
-resources), for example the files a desktop run opened (see docs/web.md); every top-level
+resources), for example the files a desktop run opened (see WEB.md); every top-level
 file is kept as well. Without it, everything but the export logs and class dumps is packed.
 """
 import argparse

@@ -458,7 +458,7 @@ mod tests {
     }
 }
 
-/// The browser build (docs/web.md) has no system clipboard here: only the game's own.
+/// The browser build (WEB.md) has no system clipboard here: only the game's own.
 #[cfg(target_arch = "wasm32")]
 mod arboard {
     pub enum Error {

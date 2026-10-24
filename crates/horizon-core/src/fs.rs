@@ -1,5 +1,5 @@
 //! The file system the game reads and writes through: `std::fs` on native builds, and an
-//! in-memory tree in the browser build (docs/web.md), where `std::fs` fails every call. The
+//! in-memory tree in the browser build (WEB.md), where `std::fs` fails every call. The
 //! page fills the tree with the prepared resources before the game starts ([`mount_archive`]);
 //! what the game writes (options, saves) lives until the tab closes.
 //!
