@@ -5,7 +5,7 @@ length, the UTF-8 path (relative, '/'-separated), a u32 data length and the data
 mounts it with horizon_core::fs::mount_archive.
 
 The archive holds Mojang's game files: it stays in a gitignored folder (web/dist by default)
-and is never committed or published.
+and is never committed or published publicly. WEB.md describes the restricted private preview.
 
   tools/web/pack.py [--resources DIR] [--out FILE] [--only LIST]
 

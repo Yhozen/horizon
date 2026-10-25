@@ -334,7 +334,9 @@ impl Game<'_> {
     /// below 260 frames per second, sleeping then spin-waiting until the
     /// frame's slot ends (not in scripted frame-count runs).
     pub(super) fn limit_frame(&mut self) {
-        if self.options.frames.is_some() {
+        // Browser redraws are scheduled by winit's animation-frame loop. Blocking
+        // this thread would stall the page, and std::thread::sleep panics on wasm.
+        if cfg!(target_arch = "wasm32") || self.options.frames.is_some() {
             return;
         }
         let limit = self.framerate_limit();
