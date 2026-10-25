@@ -7,7 +7,7 @@
 What it does: the page downloads the prepared resources, mounts them in an in-memory file system,
 opens the WebGPU device, creates a fresh single-player world, ticks it on the page's own frame loop
 (`--in-frame`), streams and meshes chunks on the main thread, and draws terrain on `<canvas id="horizon">`.
-Choppy is expected: one thread does everything.
+Everything runs on the page's main thread.
 
 ## 1. Toolchain
 
@@ -61,8 +61,14 @@ page). A clean build takes about 2 minutes, an incremental one under a minute.
 ## 4. Serve and open
 
 ```sh
-cd web && python3 -m http.server 8080 --bind 127.0.0.1
+python3 tools/web/serve.py --port 8080          # serves web/ on 127.0.0.1
 ```
+
+`tools/web/serve.py` is a plain static server that also sends `Cross-Origin-Opener-Policy: same-origin`,
+`Cross-Origin-Embedder-Policy: require-corp` (cross-origin isolation, which `SharedArrayBuffer` and so
+any future wasm threads need), `Cache-Control: no-cache` and the `application/wasm` type. The current
+build is single-threaded and does not need the headers, so `cd web && python3 -m http.server 8080
+--bind 127.0.0.1` still works; use `serve.py` anyway so the page keeps working once threads land.
 
 Open <http://127.0.0.1:8080/> in desktop Chrome (113 or later, WebGPU on). The page passes these game
 arguments by default:
@@ -77,6 +83,8 @@ To pass others, add `?args=` with the arguments separated by spaces (URL-encoded
 `--in-frame` is required. The browser always uses the synchronous startup path (no resource-loader
 thread), and both `Game::resumed` and `Loading::resumed` bind winit to `canvas#horizon`, so a short
 `?args=` list without `--world-frames` still draws on the page canvas.
+`--spawn-radius N` overrides the `respawn_radius` rule for the first spawn (`0` = exactly the world
+spawn), so a fixed `--seed` and `--look` give the same scene every run (for benchmarks).
 `window.horizonStatus` shows what the page is doing. Every two seconds the console prints a progress line
 (`Horizon web: frame … chunks … meshed … player …`).
 
@@ -108,6 +116,8 @@ the game.
 
 | Area | Browser build |
 |---|---|
+| Frame loop | `ControlFlow::Wait` between frames on wasm (the game redraws from `requestAnimationFrame`); native keeps `Poll`. winit's web `Poll` re-posts a `scheduler.postTask` + `AbortController` every turn and kept the main thread ~97% busy doing nothing |
+| Defaults | cloud range 32 chunks on wasm (vanilla's 128 is ~37k cloud quads every frame); options still override it |
 | Rendering | wgpu `webgpu` backend; device opened before the game (`gfx::open_web_gpu`); `rgba8unorm` canvas; texture arrays split at 256 layers; per-frame mapped-at-creation staging buffers instead of `StagingBelt` (`gfx/upload.rs`) |
 | World | single player, `--in-frame` only; generation, lighting and meshing run as inline jobs each frame (`Streaming::pump_inline`, 40 ms budget); world loading runs inline (`world_loading::Handle`) |
 | Files | `horizon_core::fs`: an in-memory store on wasm (the data archive is mounted read-write; saves live until the tab closes) |
@@ -123,11 +133,29 @@ the game.
   reworked yet. Avoid them on the web.
 - Clicking into the game asks for pointer lock; Chrome refuses it without a user gesture (a
   harmless `NotAllowedError` in automated runs).
-- About 8 frames a second under SwiftShader at render distance 4 (546 frames in ~65 s).
+- Frame rate under SwiftShader (CPU WebGPU, 8 vCPU VM, 1280x720, render distance 4, fixed scene, see
+  below): about 14 fps on a fixed heavy view (11.5 before the frame-loop and cloud changes, +23%), 17.6 fps on a lighter view (12.6 before, +39%); chunks at render distance 4 load in ~4–5 s. On SwiftShader the frame is bound by the GPU process (software rasterising),
+  not by the game's CPU work: at 320x180 the same build runs at ~32 fps (before the changes), and with
+  every GPU command removed the page reaches the 60 fps vsync cap. What is left per frame, measured by
+  removing one GPU part at a time: the animated-sprite compute pass (~30 ms at 1280x720), the terrain
+  draws, and the clouds. A real GPU is far faster.
+
+### Benchmark
+
+The numbers above come from a Puppeteer harness (not in the repo) that opens
+`/?args=--world WebWorld --creative --test-terrain --render-distance 4 --in-frame --world-frames
+18446744073709551615 --timeout-seconds 1000000000 --name WebPlayer --seed 1 --time 6000 --weather clear
+--look 0,10 --spawn-radius 0` at 1280x720 in Chrome with the SwiftShader flags above, waits for
+`horizonStatus` to say Running, warms up 45 s (the chunk load ends after ~4–6 s), then counts
+`getCurrentTexture` calls for 45 s.
 - The page is ~140–160 MB to download before the game starts. Nothing is cached yet.
 
 ## Next steps
 
-Web Workers with `SharedArrayBuffer` (cross-origin isolation) for the chunk pool and the integrated
-server; OPFS for saves; a WebSocket↔TCP proxy for multiplayer; Web Audio for sound; caching the data
+Web Workers with `SharedArrayBuffer` (cross-origin isolation, `tools/web/serve.py` already sends the
+headers) for the chunk pool and the integrated server. They help the chunk load (~4–6 s at render
+distance 4 here) more than the steady frame rate, which SwiftShader's GPU work bounds; they need nightly
+Rust (`-Z build-std`, `+atomics,+bulk-memory`) and care with locks on the main thread, where a blocking
+wait traps. Cheaper animated sprites (fewer texels written per tick on the web); a lower default
+resolution scale on CPU adapters; OPFS for saves; a WebSocket↔TCP proxy for multiplayer; Web Audio for sound; caching the data
 archive (Cache API) and trimming it.
