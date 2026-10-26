@@ -42,6 +42,10 @@ pub fn data_dir() -> PathBuf {
     } else if let Some(h) = &home {
         return h.join(".local/share");
     }
+    // The browser build has no environment or temp folder (`temp_dir` panics there).
+    #[cfg(target_arch = "wasm32")]
+    return horizon_core::fs::current_dir().unwrap_or_default();
+    #[cfg(not(target_arch = "wasm32"))]
     std::env::temp_dir()
 }
 
