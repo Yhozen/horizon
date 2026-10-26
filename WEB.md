@@ -7,7 +7,7 @@
 What it does: the page downloads the prepared resources, mounts them in an in-memory file system,
 opens the WebGPU device, creates a fresh single-player world, ticks it on the page's own frame loop
 (`--in-frame`), streams and meshes chunks on the main thread, and draws terrain on `<canvas id="horizon">`.
-Everything runs on the page's main thread.
+Choppy is expected: one thread does everything.
 
 ## 1. Toolchain
 
@@ -43,8 +43,8 @@ files a desktop run opened (`strace -f -e trace=openat -o open.trace target/fast
 then keep the paths under the resources folder). That trimmed the archive to ~139 MB here; it is
 optional.
 
-`web/dist/` is gitignored. The archive holds Mojang's files: keep it on your machine and do not publish
-it.
+`web/dist/` and `web/.build/` are gitignored. The archive holds Mojang's files: never commit it or
+publish it publicly. The private preview below stores it in an R2 bucket behind an email allowlist.
 
 ## 3. Build
 
@@ -61,14 +61,11 @@ page). A clean build takes about 2 minutes, an incremental one under a minute.
 ## 4. Serve and open
 
 ```sh
-python3 tools/web/serve.py --port 8080          # serves web/ on 127.0.0.1
+cd web
+pnpm install --frozen-lockfile
+pnpm package --archive dist/horizon-data.bin
+pnpm serve
 ```
-
-`tools/web/serve.py` is a plain static server that also sends `Cross-Origin-Opener-Policy: same-origin`,
-`Cross-Origin-Embedder-Policy: require-corp` (cross-origin isolation, which `SharedArrayBuffer` and so
-any future wasm threads need), `Cache-Control: no-cache` and the `application/wasm` type. The current
-build is single-threaded and does not need the headers, so `cd web && python3 -m http.server 8080
---bind 127.0.0.1` still works; use `serve.py` anyway so the page keeps working once threads land.
 
 Open <http://127.0.0.1:8080/> in desktop Chrome (113 or later, WebGPU on). The page passes these game
 arguments by default:
@@ -83,10 +80,82 @@ To pass others, add `?args=` with the arguments separated by spaces (URL-encoded
 `--in-frame` is required. The browser always uses the synchronous startup path (no resource-loader
 thread), and both `Game::resumed` and `Loading::resumed` bind winit to `canvas#horizon`, so a short
 `?args=` list without `--world-frames` still draws on the page canvas.
-`--spawn-radius N` overrides the `respawn_radius` rule for the first spawn (`0` = exactly the world
-spawn), so a fixed `--seed` and `--look` give the same scene every run (for benchmarks).
 `window.horizonStatus` shows what the page is doing. Every two seconds the console prints a progress line
 (`Horizon web: frame … chunks … meshed … player …`).
+
+## 5. Private Cloudflare preview
+
+The deployment project is `web/`; the marketing website is a separate project. Node 24+, pnpm, the
+Rust wasm target, clang on Linux, and the matching wasm-bindgen CLI are required. Alchemy dependencies
+are pinned in the pnpm lockfile.
+
+The `HorizonWeb` stack in stage `preview` references the existing bucket owned by
+`HorizonCloudflare/live_vercel-sandbox/Bucket`. It never recreates or deletes that bucket. The source
+object is `horizon-data.bin`; bucket coordinates and the preview's email allowlist are in
+`web/scripts/config.mjs`.
+
+Enable Cloudflare Zero Trust/Access for the account first. Configure credentials in Alchemy's stored
+`default` profile (Workers, R2 and Access permissions), using its interactive prompts:
+
+```sh
+cd web
+pnpm alchemy profile edit --profile default --add Cloudflare
+pnpm alchemy profile show --profile default
+```
+
+The stack provisions a One-time PIN identity provider for emailed sign-in codes. If your account
+already has one managed elsewhere, reference that provider instead of creating or adopting it.
+
+Build and review:
+
+```sh
+pnpm build
+pnpm test
+pnpm check
+pnpm alchemy plan --stage preview --profile default
+```
+
+The browser tests use `/usr/bin/google-chrome`; set `CHROME_PATH` to your Chrome executable when it
+is installed elsewhere.
+
+`pnpm build` reads the archive from the private bucket using the stored profile, pins its ETag while
+downloading, builds WASM, and generates `.build/site/release.json` and immutable local objects. To use
+an archive already on your machine, pass `pnpm build --archive /absolute/path/horizon-data.bin`.
+`pnpm package` packages existing wasm-bindgen output without rebuilding Rust.
+
+Review the plan, then run:
+
+```sh
+pnpm alchemy deploy --stage preview --profile default
+```
+
+Inherited Cloudflare environment credentials take precedence in Alchemy's CLI. When present, remove
+those overrides from the command's environment so the reviewed `default` profile is used. The archive
+fetch command explicitly uses the stored profile.
+
+The publish Action verifies or uploads each immutable object before the Worker release can deploy.
+Uploads stream through the R2 API (300 MB per-object limit); generated files never enter Git. Old
+objects remain available for rollback. A failed upload does not publish the new Worker release.
+
+Packaging embeds the small HTML shell, loader modules and manifest in the Worker bundle. This deliberately
+avoids Cloudflare Static Assets: its internal router does not forward `ctx.access` to the user Worker
+([Cloudflare's documented limitation](https://developers.cloudflare.com/workers/configuration/cloudflare-access/#ctxaccess-limitations)).
+The Worker serves HTML and the manifest with `no-store`. Every public request first passes Cloudflare
+Access and an uncached gateway that checks the platform's authenticated identity. The gateway then
+calls an internal asset entrypoint with Workers Cache enabled across versions. It streams R2 objects
+and converts their browser cache policy to `private, max-age=31536000, immutable`. The R2 bucket and
+its `r2.dev` URL remain private, and Worker version preview URLs are disabled. The
+`X-Horizon-Asset-Cache` response header reports the internal entrypoint's cache status.
+
+The browser verifies SHA-256 and size before storing the WASM and resource archive in Cache Storage.
+Hashes depend on each file's bytes, independently: changing game code does not change the resource
+URL. Successful startup retains the current and previous release's browser entries. Quota failures
+fall back to normal downloads; clearing browser data or storage eviction can require downloading
+again. This caches assets, not world saves, and does not provide an offline app shell.
+
+Before calling a release live, check an authenticated cold start, a reload and browser restart, then
+an anonymous request to the same warm asset URL. Check the internal edge-cache header independently
+of the browser cache. Keep later update/rollback checks local unless another deployment is approved.
 
 ### Chrome flags
 
@@ -116,46 +185,75 @@ the game.
 
 | Area | Browser build |
 |---|---|
-| Frame loop | `ControlFlow::Wait` between frames on wasm (the game redraws from `requestAnimationFrame`); native keeps `Poll`. winit's web `Poll` re-posts a `scheduler.postTask` + `AbortController` every turn and kept the main thread ~97% busy doing nothing |
-| Defaults | cloud range 32 chunks on wasm (vanilla's 128 is ~37k cloud quads every frame); options still override it |
-| Rendering | wgpu `webgpu` backend; device opened before the game (`gfx::open_web_gpu`); `rgba8unorm` canvas; texture arrays split at 256 layers; per-frame mapped-at-creation staging buffers instead of `StagingBelt` (`gfx/upload.rs`) |
+| Rendering | wgpu `webgpu` backend; device opened before the game (`gfx::open_web_gpu`); `rgba8unorm` canvas; one block-sprite array, packing a grid of sprites per layer where the adapter has too few layers (`gfx::sprite_grid`); sections drawn flat, one draw per arena page (`gfx/flat.rs`); animated sprites blended on the CPU and written through the queue (`gfx/animate.rs`); per-frame mapped-at-creation staging buffers instead of `StagingBelt` (`gfx/upload.rs`) |
 | World | single player, `--in-frame` only; generation, lighting and meshing run as inline jobs each frame (`Streaming::pump_inline`, 40 ms budget); world loading runs inline (`world_loading::Handle`) |
 | Files | `horizon_core::fs`: an in-memory store on wasm (the data archive is mounted read-write; saves live until the tab closes) |
-| Time | `web-time` everywhere `Instant`/`SystemTime` were used |
+| Time | `web-time` everywhere `Instant`/`SystemTime` were used; browser animation frames replace the blocking native frame limiter |
 | Threads | none: `thread::Builder::spawn` returns an error on wasm, which callers that already handled a failed spawn (`.ok()`) absorb; the places that panicked (`thread::spawn`/`thread::scope`) run inline on wasm: streaming workers, world loading, HUD sprite decode, mod-content tables. Other spawn sites (region writer, LOD, saving) are not audited for the web yet |
 | Off | audio, controllers, mods (wasmtime), networking (multiplayer, LAN, friends/relay, HTTPS), clipboard, telemetry upload, LOD/distant terrain, persistence |
 
+## Frame rate
+
+`pnpm bench` (in `web/`, after `pnpm package`) serves `.build/`, opens the page in headless Chrome and
+reads the game's two-second status lines (frames and chunks, then the mean CPU and GPU frame times
+with `--verbose`). It prints the frame rate over the last `--tail N` lines (15) of a `--seconds N` run
+(60). `--args="..."` passes game arguments, `--shot FILE` saves the last frame (read back through
+WebGPU, which headless Chrome without a GPU cannot composite), `--profile FILE` records a main-thread
+CPU profile, `--trace FILE` a Chrome trace, and `--release FILE` serves another `release.json` (its
+objects copied into `.build/objects`) for A/B runs. Without `--gpu` WebGPU runs on SwiftShader. For a
+scene that repeats exactly, fix the spawn, view and time:
+
+```
+--world W --creative --test-terrain --render-distance 4 --in-frame --name WebPlayer --weather clear
+--spawn-radius 0 --look 30,15 --time 6000      # --time 0 for dawn, the time a new world starts at
+--world-frames 18446744073709551615 --timeout-seconds 1000000000
+```
+
+What limited the frame rate, measured on a 4-vCPU VM with SwiftShader (frames a second over 30 s,
+the original build and this one run alternately):
+
+| Scene | Before | After |
+|---|---|---|
+| noon (`--time 6000`) | 1.73 | 5.67 (3.3×) |
+| dawn (`--time 0`) | 1.44 | 5.35 (3.7×) |
+
+- **The page's main thread spun.** `ControlFlow::Poll` makes winit's web loop queue a
+  `scheduler.postTask` (and an `AbortController`) back to back: ~70% of the main thread, with the
+  animation frames it waits for starved. The browser now waits (`game.rs`'s `FRAME_FLOW`); the redraw
+  request already schedules the next frame.
+- **Multi-draw is emulated.** wgpu replays it on WebGPU as one validated `drawIndexedIndirect` per
+  section group, each a command to the GPU process; flat draws (one per arena page) are on for the
+  browser as for Metal, and arena pages fit a storage binding.
+- **Sprites in several arrays.** WebGPU guarantees 256 texture layers; split across 6 arrays, every
+  terrain fragment chose its array in a `switch` and sampled with explicit gradients, doubling the
+  terrain's shading. The split now follows the adapter's limit (2048 on desktop GPUs: one array), and
+  where it is lower a grid of sprites shares each layer (`tiled_sprite`, the tile worked out per vertex).
+- **Branches cost both sides on a software rasterizer.** SwiftShader runs every side of a branch
+  for every pixel, masked: the sunrise fan's 16 ray–triangle tests (now geometry, as vanilla draws it),
+  the entity shader's End portal and glint code (now left out, through a pipeline constant, of the runs
+  of quads without them), and the clouds going through the 11-output entity shader (now a shader of
+  their own).
+- **Overdraw.** The sky draws after solid terrain at the far plane, so only uncovered pixels shade it.
+- **Per-quad cost.** Clouds out of view are left out of the cloud index list.
+- **Animated sprites** went through a compute pass per mip level; the browser blends them on the CPU
+  and writes them through `queue.write_texture` (no staging buffer).
+
+On a GPU-less machine the canvas is read back for compositing, so a frame takes the CPU time plus the
+GPU time. What remains is mostly shading: terrain about half of the frame, then the sky, the
+hand, clouds and water. Horizon's resolution scale (0.25–2) trades sharpness for speed.
+
 ## Known issues
 
-- One thread: a frame that generates chunks takes up to ~40 ms more. Expect low frame rates with
-  SwiftShader.
+- One thread: a frame that generates chunks takes up to ~40 ms more.
 - `thread::sleep`, `recv_timeout` and blocking `device.poll(Wait)` paths (screenshots, F2, LOD) are not
   reworked yet. Avoid them on the web.
 - Clicking into the game asks for pointer lock; Chrome refuses it without a user gesture (a
   harmless `NotAllowedError` in automated runs).
-- Frame rate under SwiftShader (CPU WebGPU, 8 vCPU VM, 1280x720, render distance 4, fixed scene, see
-  below): about 14 fps on a fixed heavy view (11.5 before the frame-loop and cloud changes, +23%), 17.6 fps on a lighter view (12.6 before, +39%); chunks at render distance 4 load in ~4–5 s. On SwiftShader the frame is bound by the GPU process (software rasterising),
-  not by the game's CPU work: at 320x180 the same build runs at ~32 fps (before the changes), and with
-  every GPU command removed the page reaches the 60 fps vsync cap. What is left per frame, measured by
-  removing one GPU part at a time: the animated-sprite compute pass (~30 ms at 1280x720), the terrain
-  draws, and the clouds. A real GPU is far faster.
-
-### Benchmark
-
-The numbers above come from a Puppeteer harness (not in the repo) that opens
-`/?args=--world WebWorld --creative --test-terrain --render-distance 4 --in-frame --world-frames
-18446744073709551615 --timeout-seconds 1000000000 --name WebPlayer --seed 1 --time 6000 --weather clear
---look 0,10 --spawn-radius 0` at 1280x720 in Chrome with the SwiftShader flags above, waits for
-`horizonStatus` to say Running, warms up 45 s (the chunk load ends after ~4–6 s), then counts
-`getCurrentTexture` calls for 45 s.
-- The page is ~140–160 MB to download before the game starts. Nothing is cached yet.
+- The first visit downloads the resource archive and WASM before the game starts. Later visits reuse
+  verified browser-cache entries while they remain available.
 
 ## Next steps
 
-Web Workers with `SharedArrayBuffer` (cross-origin isolation, `tools/web/serve.py` already sends the
-headers) for the chunk pool and the integrated server. They help the chunk load (~4–6 s at render
-distance 4 here) more than the steady frame rate, which SwiftShader's GPU work bounds; they need nightly
-Rust (`-Z build-std`, `+atomics,+bulk-memory`) and care with locks on the main thread, where a blocking
-wait traps. Cheaper animated sprites (fewer texels written per tick on the web); a lower default
-resolution scale on CPU adapters; OPFS for saves; a WebSocket↔TCP proxy for multiplayer; Web Audio for sound; caching the data
-archive (Cache API) and trimming it.
+Web Workers with `SharedArrayBuffer` (cross-origin isolation) for the chunk pool and the integrated
+server; OPFS for saves; a WebSocket↔TCP proxy for multiplayer; Web Audio for sound; trimming or splitting
+the data archive.

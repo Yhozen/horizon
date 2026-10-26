@@ -329,6 +329,7 @@ pub struct Renderer {
     cull: Option<cull::Cull>,
     cull_on: bool,
     sky: wgpu::RenderPipeline,
+    sunrise: wgpu::RenderPipeline,
     dark_disc: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
     /// Gizmo lines (`RenderTypes.linesTranslucentNoDepthWrite`) and the
@@ -342,6 +343,7 @@ pub struct Renderer {
     crosshair_group: wgpu::BindGroup,
     crosshair_globals: wgpu::Buffer,
     entity_pipeline: wgpu::RenderPipeline,
+    plain_entity_pipeline: wgpu::RenderPipeline,
     weather: weather::Weather,
     crumbling_pipeline: wgpu::RenderPipeline,
     shadow_blob_pipeline: wgpu::RenderPipeline,
@@ -351,6 +353,9 @@ pub struct Renderer {
     cloud_mesh: crate::clouds::Mesh,
     cloud_buffer: wgpu::Buffer,
     cloud_capacity: u64,
+    /// This frame's cloud quads in view, and their index buffer.
+    cloud_indices: Vec<u32>,
+    cloud_index_buffer: wgpu::Buffer,
     cloud_uniform: wgpu::Buffer,
     cloud_group: wgpu::BindGroup,
     additive_pipeline: wgpu::RenderPipeline,
@@ -406,6 +411,8 @@ pub struct Renderer {
     /// Whether `lightmap` holds `lightmap_pixels` yet.
     lightmap_uploaded: bool,
     sprite_minimum_size: u32,
+    /// `sprite_grid`: sprites along a layer's edge.
+    sprite_grid: u32,
     indices: wgpu::Buffer,
     index_quads: u32,
     instances: wgpu::Buffer,
@@ -492,17 +499,66 @@ pub(crate) const SPRITE_SPLIT: u32 = 2048;
 /// [`SPRITE_SPLIT`], or a smaller split from `HORIZON_SPRITE_SPLIT` (dev
 /// only: vanilla's sprites drawn from several arrays must look the same).
 fn sprite_split() -> u32 {
-    // WebGPU gives 256 texture layers by default.
-    let default = if cfg!(target_arch = "wasm32") {
-        256
-    } else {
-        SPRITE_SPLIT
-    };
+    // WebGPU guarantees 256 texture layers; desktop GPUs give 2048, which
+    // holds vanilla's sprites in one array (one sample per fragment).
+    #[cfg(target_arch = "wasm32")]
+    let default = WEB_LAYERS
+        .load(std::sync::atomic::Ordering::Relaxed)
+        .clamp(256, SPRITE_SPLIT);
+    #[cfg(not(target_arch = "wasm32"))]
+    let default = SPRITE_SPLIT;
     std::env::var("HORIZON_SPRITE_SPLIT")
         .ok()
         .and_then(|v| v.parse().ok())
         .filter(|&n| (1..=SPRITE_SPLIT).contains(&n))
         .unwrap_or(default)
+}
+/// Sprites along each edge of a layer. Where the adapter has too few layers
+/// for one array (WebGPU guarantees 256), the browser build packs a grid of
+/// sprites into each layer: one array, so a fragment samples it once instead
+/// of choosing among arrays (terrain.wgsl's `tiled_sprite`). Each tile keeps
+/// its sprite's own mip chain, and nearest filtering never reads past a
+/// tile's edge. The desktop keeps one sprite per layer.
+fn sprite_grid(layers: u32, split: u32, size: u32) -> u32 {
+    if cfg!(target_arch = "wasm32") {
+        tile_grid(layers, split, size)
+    } else {
+        1
+    }
+}
+/// The smallest grid that holds `layers` sprites of `size` in `split`
+/// layers within WebGPU's guaranteed 8192-pixel textures (1: none).
+fn tile_grid(layers: u32, split: u32, size: u32) -> u32 {
+    let grid = (1..)
+        .find(|g| g * g * split >= layers)
+        .expect("a grid holds every layer");
+    if grid * size <= 8192 { grid } else { 1 }
+}
+/// Mip chains of `sprites` layers (layer major, as `mip_chain` makes them)
+/// packed `grid` by `grid` into layers `grid` times as large, layer major.
+fn tile_chains(chains: &[u8], size: u32, levels: u32, sprites: u32, grid: u32) -> Vec<u8> {
+    let per = grid * grid;
+    let level_bytes = |level: u32| ((size >> level) * (size >> level) * 4) as usize;
+    let chain_bytes: usize = (0..levels).map(level_bytes).sum();
+    let layers = sprites.div_ceil(per) as usize;
+    let mut out = vec![0; layers * per as usize * chain_bytes];
+    let mut source = 0;
+    for n in 0..sprites {
+        let (layer, tile) = ((n / per) as usize, n % per);
+        let mut target = layer * per as usize * chain_bytes;
+        for level in 0..levels {
+            let edge = (size >> level) as usize;
+            let row = edge * 4;
+            let (x, y) = ((tile % grid) as usize * edge, (tile / grid) as usize * edge);
+            for r in 0..edge {
+                let at = target + ((y + r) * edge * grid as usize + x) * 4;
+                out[at..at + row].copy_from_slice(&chains[source..source + row]);
+                source += row;
+            }
+            target += level_bytes(level) * per as usize;
+        }
+    }
+    out
 }
 /// Sprite arrays terrain.wgsl binds (`sprites`, `sprites_1`...).
 const SPRITE_ARRAYS: u32 = 8;
@@ -572,6 +628,8 @@ fn terrain_group(
 /// construction so the temporary mip chains are released after GPU upload.
 pub struct PreparedTextures {
     sprites: Vec<(Vec<u8>, u32)>,
+    /// `sprite_grid`: sprites along a layer's edge.
+    grid: u32,
     forcefield: (Vec<u8>, u32),
 }
 impl PreparedTextures {
@@ -594,7 +652,17 @@ impl PreparedTextures {
         split: u32,
     ) -> Self {
         let layer_bytes = (size * size * 4) as usize;
+        let grid = sprite_grid(layers, split, size);
+        if grid > 1 {
+            let (chains, levels) = mip_chain(pixels, size, settings, 0, layers);
+            return Self {
+                sprites: vec![(tile_chains(&chains, size, levels, layers, grid), levels)],
+                grid,
+                forcefield: mip_chain(forcefield.0, forcefield.1, &[], 0, 1),
+            };
+        }
         Self {
+            grid,
             sprites: (0..layers.div_ceil(split).max(1))
                 .map(|array| {
                     let first = array * split;
@@ -779,6 +847,10 @@ thread_local! {
     static WEB_GPU: std::cell::RefCell<Option<(wgpu::Instance, wgpu::Adapter, wgpu::Device, wgpu::Queue)>> =
         const { std::cell::RefCell::new(None) };
 }
+/// The browser's adapter's `max_texture_array_layers` (the device asks for
+/// the adapter's limits), from [`open_web_gpu`].
+#[cfg(target_arch = "wasm32")]
+static WEB_LAYERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(256);
 /// Opens the page's WebGPU adapter and device, for [`open_device`].
 #[cfg(target_arch = "wasm32")]
 pub async fn open_web_gpu() -> Result<()> {
@@ -812,6 +884,10 @@ pub async fn open_web_gpu() -> Result<()> {
         })
         .await
         .map_err(|e| format!("no WebGPU device: {e}"))?;
+    WEB_LAYERS.store(
+        device.limits().max_texture_array_layers,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     WEB_GPU.with(|slot| *slot.borrow_mut() = Some((instance, adapter, device, queue)));
     Ok(())
 }
@@ -1006,10 +1082,11 @@ impl Renderer {
         api: GraphicsApi,
     ) -> Result<Self> {
         let split = sprite_split();
-        if layers > split * SPRITE_ARRAYS {
+        let grid = sprite_grid(layers, split, sprite_size);
+        if layers > split * SPRITE_ARRAYS * grid * grid {
             return Err(format!(
                 "{layers} block textures; Horizon draws at most {}",
-                split * SPRITE_ARRAYS
+                split * SPRITE_ARRAYS * grid * grid
             )
             .into());
         }
@@ -1111,13 +1188,14 @@ impl Renderer {
             view_dimension: wgpu::TextureViewDimension::D2Array,
             multisampled: false,
         };
-        let sprite_arrays = layers.div_ceil(split).max(1);
+        let sprite_arrays = layers.div_ceil(split * grid * grid).max(1);
         if sprite_arrays > 1 {
             log::info!("Horizon: {layers} block textures in {sprite_arrays} arrays");
         }
         let sprite_constants = [
             ("SPRITE_ARRAYS", f64::from(sprite_arrays)),
             ("SPRITE_SPLIT", f64::from(split)),
+            ("SPRITE_GRID", f64::from(grid)),
         ];
         let bindings = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Horizon terrain bindings"),
@@ -1216,7 +1294,11 @@ impl Renderer {
                 vertex: wgpu::VertexState {
                     module: &shader,
                     entry_point: Some(vertex),
-                    compilation_options: Default::default(),
+                    // terrain_vertex works out the sprite's tile (sprite_tile).
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &sprite_constants,
+                        ..Default::default()
+                    },
                     buffers,
                 },
                 primitive: wgpu::PrimitiveState {
@@ -1298,16 +1380,17 @@ impl Renderer {
             true,
             Some(alpha_blend),
         );
-        let sky = pipeline(
-            "Sky",
-            "vs_sky",
-            "fs_sky",
+        let sky = pipeline("Sky", "vs_sky", "fs_sky", &[], tri, None, false, true, None);
+        let sunrise = pipeline(
+            "Sunrise",
+            "vs_sunrise",
+            "fs_sunrise",
             &[],
             tri,
             None,
             false,
-            false,
-            None,
+            true,
+            Some(alpha_blend),
         );
         let dark_disc = pipeline(
             "Dark disc",
@@ -1317,7 +1400,7 @@ impl Renderer {
             tri,
             None,
             false,
-            false,
+            true,
             Some(alpha_blend),
         );
         let lines = pipeline(
@@ -1374,6 +1457,7 @@ impl Renderer {
         let prepared = prepared.unwrap_or_else(|| {
             PreparedTextures::new(sprite_pixels, sprite_size, layers, sprite_mips, forcefield)
         });
+        debug_assert_eq!(prepared.grid, grid);
         let mut mip_levels = 1;
         let sprite_textures: Vec<wgpu::Texture> = prepared
             .sprites
@@ -1381,15 +1465,19 @@ impl Renderer {
             .enumerate()
             .map(|(array, (mips, levels))| {
                 let first = array as u32 * split;
-                let count = layers.saturating_sub(first).clamp(1, split);
+                let count = if grid > 1 {
+                    layers.div_ceil(grid * grid)
+                } else {
+                    layers.saturating_sub(first).clamp(1, split)
+                };
                 mip_levels = levels;
                 device.create_texture_with_data(
                     &queue,
                     &wgpu::TextureDescriptor {
                         label: Some("Block sprites"),
                         size: wgpu::Extent3d {
-                            width: sprite_size,
-                            height: sprite_size,
+                            width: sprite_size * grid,
+                            height: sprite_size * grid,
                             depth_or_array_layers: count,
                         },
                         mip_level_count: levels,
@@ -1413,6 +1501,7 @@ impl Renderer {
             sprite_mips,
             &sprite_textures,
             split,
+            grid,
         );
         let sprite_unused = device
             .create_texture(&wgpu::TextureDescriptor {
@@ -1681,6 +1770,12 @@ impl Renderer {
             bind_group_layouts: &[Some(&entity_bindings), Some(&cloud_bindings)],
             ..Default::default()
         });
+        let cloud_index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Cloud indices"),
+            size: 4096,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let cloud_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Cloud vertices"),
             size: 4 * std::mem::size_of::<Vertex>() as u64,
@@ -1702,7 +1797,8 @@ impl Renderer {
                                     blend,
                                     clouds,
                                     fragment: &str,
-                                    write_mask| {
+                                    write_mask,
+                                    constants: &[(&str, f64)]| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(if clouds {
@@ -1731,7 +1827,10 @@ impl Renderer {
                 fragment: Some(wgpu::FragmentState {
                     module: &entity_shader,
                     entry_point: Some(fragment),
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants,
+                        ..Default::default()
+                    },
                     targets: &[Some(wgpu::ColorTargetState {
                         format: config.format.remove_srgb_suffix(),
                         blend: Some(blend),
@@ -1753,6 +1852,7 @@ impl Renderer {
                 clouds,
                 "fs_entity",
                 wgpu::ColorWrites::ALL,
+                &[],
             )
         };
         // RenderPipelines.WATER_MASK: the boat's water patch writes depth only.
@@ -1766,6 +1866,7 @@ impl Renderer {
             false,
             "fs_water_mask",
             wgpu::ColorWrites::empty(),
+            &[],
         );
         let crumbling_pipeline = entity_pipeline(
             "Breaking cracks",
@@ -1800,7 +1901,7 @@ impl Renderer {
             alpha_blend,
             false,
         );
-        let cloud_pipeline = entity_pipeline(
+        let cloud_pipeline = entity_pipeline_with(
             "Clouds",
             Some(wgpu::Face::Back),
             true,
@@ -1808,6 +1909,9 @@ impl Renderer {
             Default::default(),
             alpha_blend,
             true,
+            "fs_cloud",
+            wgpu::ColorWrites::ALL,
+            &[],
         );
         // RenderPipelines.TEXT_SEE_THROUGH: translucent, no depth test or writes.
         let see_through_pipeline = entity_pipeline(
@@ -1827,6 +1931,20 @@ impl Renderer {
             Default::default(),
             alpha_blend,
             false,
+        );
+        // The same without the special overlays' code (entity.wgsl's
+        // SPECIAL_OVERLAYS), for the runs of quads without them.
+        let plain_entity_pipeline = entity_pipeline_with(
+            "Entities (no special overlays)",
+            None,
+            true,
+            wgpu::CompareFunction::GreaterEqual,
+            Default::default(),
+            alpha_blend,
+            false,
+            "fs_entity",
+            wgpu::ColorWrites::ALL,
+            &[("SPECIAL_OVERLAYS", 0.0)],
         );
         let lightning_attributes = wgpu::vertex_attr_array![6=>Float32x3];
         let lightning_vertex = [
@@ -1898,7 +2016,7 @@ impl Renderer {
             layout: Some(&entity_layout),
             vertex: wgpu::VertexState {
                 module: &entity_shader,
-                entry_point: Some("vs_entity"),
+                entry_point: Some("vs_celestial"),
                 compilation_options: Default::default(),
                 buffers: &entity_vertex,
             },
@@ -1909,7 +2027,7 @@ impl Renderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Always),
+                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -2301,6 +2419,7 @@ impl Renderer {
             cull,
             flat,
             sky,
+            sunrise,
             dark_disc,
             lines,
             debug_lines,
@@ -2310,6 +2429,7 @@ impl Renderer {
             crosshair_group,
             crosshair_globals,
             entity_pipeline,
+            plain_entity_pipeline,
             weather,
             crumbling_pipeline,
             shadow_blob_pipeline,
@@ -2318,6 +2438,8 @@ impl Renderer {
             cloud_mesh: Default::default(),
             cloud_buffer,
             cloud_capacity: 4,
+            cloud_indices: Vec::new(),
+            cloud_index_buffer,
             cloud_uniform,
             cloud_group,
             additive_pipeline,
@@ -2360,6 +2482,7 @@ impl Renderer {
             section_copy_bytes: 0,
             lightmap_uploaded: false,
             sprite_minimum_size,
+            sprite_grid: grid,
             indices,
             index_quads,
             instances,
@@ -2695,6 +2818,34 @@ impl Renderer {
     /// Consecutive draws in one arena page share a vertex buffer binding,
     /// keeping the list's order (translucent sections go back to front).
     /// `indirect` holds the list's draws from `base`.
+    /// Draws `vertices` (whole quads, from `base_vertex` of the entity
+    /// buffer) in order, each run of quads without entity.wgsl's special
+    /// overlays (6 to 12) through the pipeline that leaves their code out.
+    /// The index buffer is bound.
+    fn draw_entity_runs(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        vertices: &[Vertex],
+        base_vertex: i32,
+    ) {
+        let quads = vertices.as_chunks::<4>().0;
+        let mut start = 0;
+        while start < quads.len() {
+            let special = (6..=12).contains(&quads[start][0].layer);
+            let run = quads[start..]
+                .iter()
+                .take_while(|q| (6..=12).contains(&q[0].layer) == special)
+                .count();
+            pass.set_pipeline(if special {
+                &self.entity_pipeline
+            } else {
+                &self.plain_entity_pipeline
+            });
+            let (first, end) = (start as u32 * 6, (start + run) as u32 * 6);
+            pass.draw_indexed(first..end, base_vertex, 0..1);
+            start += run;
+        }
+    }
     fn draw_sections(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
@@ -2817,7 +2968,7 @@ impl Renderer {
     pub fn set_mipmap_levels(&mut self, levels: u32) {
         let levels = sprite_mipmap_limit(
             levels,
-            self.sprite_textures[0].width(),
+            self.sprite_textures[0].width() / self.sprite_grid,
             self.sprite_minimum_size,
             self.mip_levels,
         );
@@ -2927,7 +3078,8 @@ impl Renderer {
         self.lightmap_uploaded = true;
     }
     fn animate(&mut self, encoder: &mut wgpu::CommandEncoder, tick: u64) {
-        self.animations.animate(encoder, &mut self.uploads, tick);
+        self.animations
+            .animate(encoder, &mut self.uploads, &self.queue, tick);
     }
     pub fn render(&mut self, frame: &Frame) -> Result<bool> {
         let rendered = self.draw_frame(frame);
@@ -3482,7 +3634,29 @@ impl Renderer {
                 0,
                 bytemuck::bytes_of(&uniform),
             );
-            (vertices / 4) as u32
+            // Most of the cloud range is out of view, and each quad costs
+            // vertex work however few pixels it covers.
+            self.cloud_mesh.visible_indices(
+                &uniform,
+                |min, max| view.intersects(min, max),
+                &mut self.cloud_indices,
+            );
+            let bytes = std::mem::size_of_val(self.cloud_indices.as_slice()) as u64;
+            if bytes > self.cloud_index_buffer.size() {
+                self.cloud_index_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Cloud indices"),
+                    size: bytes.next_power_of_two(),
+                    usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            self.uploads.buffer(
+                &mut encoder,
+                &self.cloud_index_buffer,
+                0,
+                bytemuck::cast_slice(&self.cloud_indices),
+            );
+            (self.cloud_indices.len() / 6) as u32
         } else {
             0
         };
@@ -3536,7 +3710,6 @@ impl Renderer {
             );
         }
         let max_quads = (world_quads + additive_quads + hand_quads + see_through_quads)
-            .max(cloud_quads)
             .max(if frame.lightning.bolts.is_empty() {
                 0
             } else {
@@ -3724,40 +3897,9 @@ impl Renderer {
                 ..Default::default()
             });
             pass.set_bind_group(0, &self.group, &[]);
-            // LevelRenderer: no sky inside lava or powder snow (sky fog ends within 2 blocks).
-            let sky_visible = match frame.fog {
-                Some(f) => f.sky_end > 2.0,
-                None => !frame.underwater,
-            };
-            if frame.title || (sky_visible && (frame.skybox || frame.end_sky)) {
-                if !frame.title && frame.skybox {
-                    pass.set_pipeline(&self.sky);
-                    pass.draw(0..3, 0..1);
-                }
-                if frame.title {
-                    self.panorama.draw(&mut pass);
-                    pass.set_bind_group(0, &self.group, &[]);
-                } else if celestial_vertices > 0 || frame.end_sky {
-                    pass.set_pipeline(&self.celestial_pipeline);
-                    pass.set_bind_group(0, &self.entity_group, &[]);
-                    pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    if frame.end_sky {
-                        self.end_sky.draw(&mut pass);
-                    }
-                    if celestial_vertices > 0 {
-                        pass.set_vertex_buffer(0, self.celestial_buffer.slice(..));
-                        pass.draw_indexed(0..(celestial_vertices as u32 / 4) * 6, 0, 0..1);
-                    }
-                    pass.set_bind_group(0, &self.group, &[]);
-                }
-                if !frame.title && frame.stars.is_some() {
-                    self.stars.draw(&mut pass);
-                    pass.set_bind_group(0, &self.group, &[]);
-                }
-                if !frame.title && frame.dark_disc {
-                    pass.set_pipeline(&self.dark_disc);
-                    pass.draw(0..3, 0..1);
-                }
+            if frame.title {
+                self.panorama.draw(&mut pass);
+                pass.set_bind_group(0, &self.group, &[]);
             }
             match self.flat.as_ref().filter(|_| flat_frame) {
                 Some(flat) => {
@@ -3816,11 +3958,50 @@ impl Renderer {
                     }
                 }
             }
+            // LevelRenderer: no sky inside lava or powder snow (sky fog ends within 2 blocks).
+            let sky_visible = match frame.fog {
+                Some(f) => f.sky_end > 2.0,
+                None => !frame.underwater,
+            };
+            // The sky after solid terrain rather than before: at the far
+            // plane, the depth test keeps it to the pixels terrain left
+            // uncovered, which it would have drawn over, so only those shade.
+            if !frame.title && sky_visible && (frame.skybox || frame.end_sky) {
+                if frame.skybox {
+                    pass.set_pipeline(&self.sky);
+                    pass.draw(0..3, 0..1);
+                    if frame.sky.sunrise_color[3] > 0.001 {
+                        pass.set_pipeline(&self.sunrise);
+                        pass.draw(0..48, 0..1);
+                    }
+                }
+                if celestial_vertices > 0 || frame.end_sky {
+                    pass.set_pipeline(&self.celestial_pipeline);
+                    pass.set_bind_group(0, &self.entity_group, &[]);
+                    pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    if frame.end_sky {
+                        self.end_sky.draw(&mut pass);
+                    }
+                    if celestial_vertices > 0 {
+                        pass.set_vertex_buffer(0, self.celestial_buffer.slice(..));
+                        pass.draw_indexed(0..(celestial_vertices as u32 / 4) * 6, 0, 0..1);
+                    }
+                    pass.set_bind_group(0, &self.group, &[]);
+                }
+                if frame.stars.is_some() {
+                    self.stars.draw(&mut pass);
+                    pass.set_bind_group(0, &self.group, &[]);
+                }
+                if frame.dark_disc {
+                    pass.set_pipeline(&self.dark_disc);
+                    pass.draw(0..3, 0..1);
+                }
+            }
             if entity_quads > 0 {
-                pass.set_pipeline(&self.entity_pipeline);
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
+                let entities = &self.entity_batch.combined[..entity_quads as usize * 4];
+                self.draw_entity_runs(&mut pass, entities, 0);
                 pass.set_bind_group(0, &self.group, &[]);
             }
             self.weather.draw(&mut pass, &self.entity_group);
@@ -3941,7 +4122,9 @@ impl Renderer {
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 pass.set_bind_group(1, &self.cloud_group, &[]);
                 pass.set_vertex_buffer(0, self.cloud_buffer.slice(..));
+                pass.set_index_buffer(self.cloud_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..cloud_quads * 6, 0, 0..1);
+                pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             }
             // LevelRenderer.executeSeeThrough, after the rest of the world.
             if see_through_quads > 0 {
@@ -3981,14 +4164,13 @@ impl Renderer {
                 }),
                 ..Default::default()
             });
-            pass.set_pipeline(&self.entity_pipeline);
             pass.set_bind_group(0, &self.hand_group, &[]);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-            pass.draw_indexed(
-                0..hand_quads * 6,
+            self.draw_entity_runs(
+                &mut pass,
+                frame.hand,
                 ((world_quads + additive_quads) * 4) as i32,
-                0..1,
             );
         }
         if !frame.screen.is_empty() {
@@ -4695,6 +4877,59 @@ mod sprite_upload_tests {
             assert_eq!(actual, expected.0);
             assert_eq!(prepared.forcefield, mip_chain(&border, size, &[], 0, 1));
         }
+    }
+
+    #[test]
+    fn tile_grids_hold_every_sprite_in_one_array() {
+        assert_eq!(tile_grid(200, 256, 16), 1);
+        assert_eq!(tile_grid(256, 256, 16), 1);
+        assert_eq!(tile_grid(257, 256, 16), 2);
+        assert_eq!(tile_grid(1291, 256, 16), 3);
+        assert_eq!(tile_grid(1291, 256, 64), 3);
+        // Past WebGPU's 8192-pixel textures: one sprite per layer.
+        assert_eq!(tile_grid(1291, 256, 4096), 1);
+    }
+
+    #[test]
+    fn tiled_chains_place_each_sprite_level_in_its_tile() {
+        let (size, sprites, grid) = (4, 6, 2);
+        let pixels: Vec<u8> = (0..size * size * sprites)
+            .flat_map(|i| [i as u8, (i / 7) as u8, 99, 255])
+            .collect();
+        let (chains, levels) = mip_chain(&pixels, size, &[], 0, sprites);
+        let tiled = tile_chains(&chains, size, levels, sprites, grid);
+        let chain_bytes = chains.len() / sprites as usize;
+        // Two layers of four tiles; the second's last two are empty.
+        assert_eq!(tiled.len(), 2 * 4 * chain_bytes);
+        let layer_bytes = 4 * chain_bytes;
+        for n in 0..sprites {
+            let layer = &tiled[(n / 4) as usize * layer_bytes..][..layer_bytes];
+            let (mut source, mut level_start) = (n as usize * chain_bytes, 0);
+            for level in 0..levels {
+                let edge = (size >> level) as usize;
+                let (x, y) = (
+                    (n % 4 % grid) as usize * edge,
+                    (n % 4 / grid) as usize * edge,
+                );
+                for r in 0..edge {
+                    let at = level_start + ((y + r) * edge * grid as usize + x) * 4;
+                    assert_eq!(
+                        layer[at..at + edge * 4],
+                        chains[source..source + edge * 4],
+                        "sprite {n} level {level} row {r}"
+                    );
+                    source += edge * 4;
+                }
+                level_start += edge * edge * 16;
+            }
+        }
+        assert!(
+            tiled[layer_bytes..]
+                .chunks(4)
+                .filter(|p| *p == [0; 4])
+                .count()
+                > 0
+        );
     }
 
     #[test]

@@ -139,10 +139,20 @@ impl Input<'_> {
     }
 }
 
+impl Uniform {
+    /// Where the mesh's origin is, camera-relative.
+    pub(crate) fn offset(&self) -> glam::Vec3 {
+        glam::Vec3::from_slice(&self.offset[..3])
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Mesh {
     key: Option<MeshKey>,
     pub vertices: Vec<crate::mesher::Vertex>,
+    /// Each cell with faces: its corner in the mesh and its first quad, in
+    /// build order (the cell's quads run to the next one's first).
+    cells: Vec<(f32, f32, u32)>,
 }
 
 impl Mesh {
@@ -154,6 +164,7 @@ impl Mesh {
             return (false, uniform);
         }
         self.vertices.clear();
+        self.cells.clear();
         let (w, h, cells) = input.texture;
         let (w, h) = (i64::from(*w), i64::from(*h));
         let (cell_x, cell_z, radius) = (key.cell_x, key.cell_z, key.radius);
@@ -168,6 +179,7 @@ impl Mesh {
             }
             let x0 = dx as f32 * 12.0;
             let z0 = dz as f32 * 12.0;
+            self.cells.push((x0, z0, (self.vertices.len() / 4) as u32));
             let (x1, z1, y0, y1) = (x0 + 12.0, z0 + 12.0, 0.0, 4.0);
             let mut quad = |p: [[f32; 3]; 4], shade: u32| {
                 for v in p {
@@ -214,6 +226,30 @@ impl Mesh {
         }
         self.key = Some(key);
         (true, uniform)
+    }
+    /// The quad indices of the cells whose camera-relative boxes `visible`
+    /// keeps, in build order: the cells out of view draw no pixels, and the
+    /// others keep their order, so the picture is the whole mesh's.
+    pub fn visible_indices(
+        &self,
+        uniform: &Uniform,
+        visible: impl Fn(glam::Vec3, glam::Vec3) -> bool,
+        out: &mut Vec<u32>,
+    ) {
+        out.clear();
+        let offset = uniform.offset();
+        let quads = (self.vertices.len() / 4) as u32;
+        for (i, &(x0, z0, first)) in self.cells.iter().enumerate() {
+            let min = offset + glam::Vec3::new(x0, 0.0, z0);
+            if !visible(min, min + glam::Vec3::new(12.0, 4.0, 12.0)) {
+                continue;
+            }
+            let end = self.cells.get(i + 1).map_or(quads, |c| c.2);
+            out.extend((first..end).flat_map(|q| {
+                let b = q * 4;
+                [b, b + 1, b + 2, b, b + 2, b + 3]
+            }));
+        }
     }
 }
 
@@ -286,6 +322,45 @@ mod tests {
         assert!(reloaded.prepare(&input).0);
         assert!(reloaded.vertices.is_empty());
         assert!(!reloaded.prepare(&input).0);
+    }
+
+    #[test]
+    fn culled_indices_keep_every_box_that_holds_a_quad_in_build_order() {
+        let texture = (8, 8, (0..64).map(|i| i % 3 != 0).collect());
+        let input = Input {
+            texture: &texture,
+            uv: [0.5; 2],
+            camera: glam::DVec3::new(1.0, 100.0, 1.0),
+            time: 0,
+            partial_tick: 0.0,
+            range: 3,
+            fast: false,
+            color: [1.0; 4],
+        };
+        let mut mesh = Mesh::default();
+        let (_, uniform) = mesh.prepare(&input);
+        let quads = (mesh.vertices.len() / 4) as u32;
+        let mut all = Vec::new();
+        mesh.visible_indices(&uniform, |_, _| true, &mut all);
+        let whole: Vec<u32> = (0..quads)
+            .flat_map(|q| [q * 4, q * 4 + 1, q * 4 + 2, q * 4, q * 4 + 2, q * 4 + 3])
+            .collect();
+        assert_eq!(all, whole);
+        // Keep the boxes east of the camera: the quads drawn lie east of it,
+        // the others within a box's width of it, and the order holds.
+        let offset = uniform.offset();
+        let east = |min: glam::Vec3, _: glam::Vec3| min.x >= 0.0;
+        let mut kept = Vec::new();
+        mesh.visible_indices(&uniform, east, &mut kept);
+        assert!(!kept.is_empty() && kept.len() < all.len());
+        assert!(kept.windows(2).all(|w| w[0] / 4 <= w[1] / 4));
+        let vertices = &mesh.vertices;
+        let x = |q: u32| (0..4).map(move |i| vertices[(q * 4 + i) as usize].pos[0] + offset.x);
+        for q in 0..quads {
+            let drawn = kept.contains(&(q * 4));
+            assert!(!drawn || x(q).all(|x| x >= -1e-3), "quad {q}");
+            assert!(drawn || x(q).all(|x| x <= 12.0 + 1e-3), "quad {q}");
+        }
     }
 
     #[test]

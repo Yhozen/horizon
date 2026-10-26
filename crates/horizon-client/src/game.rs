@@ -252,6 +252,15 @@ pub fn set_web_args(args: Vec<String>) {
     let _ = WEB_ARGS.set(args);
 }
 
+/// The event loop's flow between frames. The desktop polls; in the browser the
+/// redraw request already schedules the next animation frame, and polling would
+/// spin winit's `scheduler.postTask` loop, starving the frames it waits for.
+const FRAME_FLOW: ControlFlow = if cfg!(target_arch = "wasm32") {
+    ControlFlow::Wait
+} else {
+    ControlFlow::Poll
+};
+
 #[derive(Clone)]
 struct Options {
     resources: PathBuf,
@@ -268,8 +277,8 @@ struct Options {
     report: Option<PathBuf>,
     world: Option<String>,
     look: Option<(f32, f32)>,
-    /// `--spawn-radius N`: the respawn radius a new player spawns within,
-    /// instead of the `respawn_radius` game rule (0: the world spawn; repeatable benchmarks).
+    /// `--spawn-radius N`: the first spawn's fuzz instead of the respawn_radius rule
+    /// (0 spawns every run at the same place, for benchmarks).
     spawn_radius: Option<i32>,
     time: Option<i64>,
     weather: Option<String>,
@@ -10726,17 +10735,6 @@ impl Game<'_> {
         }
     }
 }
-/// The control flow after a frame. Native polls; 🤖 Agent: the browser waits, because
-/// `request_redraw` already schedules the next frame on `requestAnimationFrame`, and
-/// winit's web `Poll` re-posts a task (`scheduler.postTask` + an `AbortController`)
-/// back to back, which kept the page's main thread 100% busy between frames.
-fn poll_flow() -> ControlFlow {
-    if cfg!(target_arch = "wasm32") {
-        ControlFlow::Wait
-    } else {
-        ControlFlow::Poll
-    }
-}
 impl ApplicationHandler for Game<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -11635,7 +11633,7 @@ impl ApplicationHandler for Game<'_> {
                 w.request_redraw();
             }
         }
-        event_loop.set_control_flow(poll_flow());
+        event_loop.set_control_flow(FRAME_FLOW);
     }
     /// The application is ending. On macOS, Quit (Cmd+Q) ends it through
     /// applicationWillTerminate without a CloseRequested; vanilla's GLFW
@@ -11665,6 +11663,24 @@ impl Game<'_> {
             return;
         }
         LAST.with(|last| last.set(Some(now)));
+        thread_local! {
+            static SEEN: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+        }
+        // Mean CPU and GPU frame times since the last line.
+        let (cpu, gpu) = (self.frame_stats.cpu_millis(), self.frame_stats.gpu_millis());
+        let (seen_cpu, seen_gpu) = SEEN.with(|s| s.replace((cpu.len(), gpu.len())));
+        let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len().max(1) as f32;
+        if let Some(r) = &self.renderer {
+            log::info!(
+                "Horizon web: cpu {:.1} ms gpu {:.1} ms ({} timed) sections {} draw calls {} flat {}",
+                mean(&cpu[seen_cpu.min(cpu.len())..]),
+                mean(&gpu[seen_gpu.min(gpu.len())..]),
+                gpu.len() - seen_gpu.min(gpu.len()),
+                r.drawn_sections,
+                r.section_draw_calls,
+                r.flat_draws(),
+            );
+        }
         log::info!(
             "Horizon web: frame {} screen {:?} title {} paused {} stages {:?} chunks {} generated {} meshed {} loading {} entry {} player {:?}",
             self.frames,
@@ -13083,7 +13099,7 @@ impl Loading {
                 w.request_redraw();
             }
         }
-        event_loop.set_control_flow(poll_flow());
+        event_loop.set_control_flow(FRAME_FLOW);
     }
     fn draw(&mut self) {
         let Some(size) = self

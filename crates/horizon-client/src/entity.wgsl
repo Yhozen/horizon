@@ -110,6 +110,15 @@ fn entity_vertex(position: vec3<f32>, uv: vec2<f32>,
     @location(2) overlay: u32, @location(3) color: vec4<f32>, @location(4) light: vec4<u32>, @location(5) normal: vec4<f32>) -> Out {
     return entity_vertex(position, uv, overlay, color, light, normal);
 }
+// Celestial bodies and the End sky, drawn with the rest of the sky after solid
+// terrain: at the far plane (0 in reversed depth), so the depth test keeps
+// them to the pixels terrain left uncovered, as if drawn first and covered.
+@vertex fn vs_celestial(@location(0) position: vec3<f32>, @location(1) uv: vec2<f32>,
+    @location(2) overlay: u32, @location(3) color: vec4<f32>, @location(4) light: vec4<u32>, @location(5) normal: vec4<f32>) -> Out {
+    var out = entity_vertex(position, uv, overlay, color, light, normal);
+    out.clip.z = 0.0;
+    return out;
+}
 // Retained bolt-local geometry, translated using the same f64 camera
 // subtraction as the former CPU path before adding each local f32 position.
 @vertex fn vs_lightning(@location(0) position: vec3<f32>, @location(1) uv: vec2<f32>,
@@ -122,9 +131,28 @@ struct CloudInfo {
     colors: array<vec4<f32>, 4>,
 }
 @group(1) @binding(0) var<uniform> cloud: CloudInfo;
+// Clouds carry only what clouds.fsh reads: tens of thousands of vertices a
+// frame, unlit, with no overlay and no back faces (back_color is color).
+struct CloudOut {
+    @builtin(position) clip: vec4<f32>,
+    // The atlas texel times the face's shade.
+    @location(0) color: vec4<f32>,
+    @location(1) spherical: f32,
+}
 @vertex fn vs_cloud(@location(0) position: vec3<f32>, @location(1) uv: vec2<f32>,
-    @location(2) overlay: u32, @location(3) color: vec4<f32>, @location(4) light: vec4<u32>, @location(5) normal: vec4<f32>) -> Out {
-    return entity_vertex(position + cloud.offset.xyz, uv, overlay, cloud.colors[light.x], light, normal);
+    @location(2) overlay: u32, @location(3) color: vec4<f32>, @location(4) light: vec4<u32>, @location(5) normal: vec4<f32>) -> CloudOut {
+    let p = position + cloud.offset.xyz;
+    var out: CloudOut;
+    out.clip = globals.view_proj * vec4(p, 1.0);
+    // Every cloud vertex has the same uv: a fragment's sample (no
+    // derivatives, so level 0) is the vertex's.
+    out.color = textureSampleLevel(atlas, atlas_sampler, uv, 0.0) * cloud.colors[light.x];
+    out.spherical = length(p);
+    return out;
+}
+@fragment fn fs_cloud(in: CloudOut) -> @location(0) vec4<f32> {
+    // clouds.fsh: alpha fades out towards the cloud fog end.
+    return vec4(in.color.rgb, in.color.a * (1.0 - linear_fog(in.spherical, 0.0, globals.fog_ends.y)));
 }
 // rendertype_end_portal.fsh: the layer colours.
 const PORTAL_COLORS = array<vec3<f32>, 16>(
@@ -166,15 +194,21 @@ fn linear_fog(d: f32, start: f32, end: f32) -> f32 {
     if d >= end { return 1.0; }
     return (d - start) / (end - start);
 }
+// Whether the pipeline draws beacon beams (overlay 6), the glint (7, 8), the
+// End portal (9, 10) and breaking cracks (11, 12). gfx.rs draws runs of quads
+// without them through a pipeline that leaves their code out: a software
+// rasterizer (SwiftShader) runs both sides of every branch, masked, and paid
+// for them on every entity pixel.
+override SPECIAL_OVERLAYS: bool = true;
 @fragment fn fs_entity(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     var uv = in.uv;
-    if in.overlay == 6u { uv.y = in.wrap.x + fract(in.uv.y) * in.wrap.y; }
-    if in.overlay == 11u || in.overlay == 12u {
+    if SPECIAL_OVERLAYS && in.overlay == 6u { uv.y = in.wrap.x + fract(in.uv.y) * in.wrap.y; }
+    if SPECIAL_OVERLAYS && (in.overlay == 11u || in.overlay == 12u) {
         // Each crack's stage sprite origin comes in its light bytes (breaking::stage_light).
         uv = in.wrap + fract(in.uv) * globals.crumbling_sprite.zw;
     }
     var color = textureSample(atlas, atlas_sampler, uv) * select(in.back_color, in.color, front);
-    if in.overlay == 9u || in.overlay == 10u {
+    if SPECIAL_OVERLAYS && (in.overlay == 9u || in.overlay == 10u) {
         // rendertype_end_portal: end_sky and PORTAL_LAYERS (15 for portals, 16
         // for gateways) layers of end_portal.png projected from the screen.
         let layers = select(15, 16, in.overlay == 10u);
@@ -183,16 +217,13 @@ fn linear_fog(d: f32, start: f32, end: f32) -> f32 {
             c += portal_sample(globals.end_portal_sprites[1], portal_layer(in.proj, f32(i + 1))) * PORTAL_COLORS[i];
         }
         color = vec4(c, 1.0);
-    } else if in.overlay == 4u {
-        // clouds.fsh: alpha fades out towards the cloud fog end.
-        return vec4(color.rgb, color.a * (1.0 - linear_fog(in.spherical, 0.0, globals.fog_ends.y)));
     }
     if color.a < 0.1 { discard; }
     // entity.fsh calculateFinalColor: the overlay (hurt red, TNT white) over the
     // lit texture, then the lightmap, then the glint and fog.
     color = vec4(mix(in.overlay_color.rgb, color.rgb, in.overlay_color.a), color.a);
     color *= in.light_color;
-    if in.overlay == 7u || in.overlay == 8u {
+    if SPECIAL_OVERLAYS && (in.overlay == 7u || in.overlay == 8u) {
         // Enchantment glint (overlay 7, 8 with the hurt tint): the purple
         // enchanted_glint sheen drifting diagonally over the item's shape.
         let px = in.uv * vec2<f32>(textureDimensions(atlas));
@@ -200,8 +231,8 @@ fn linear_fog(d: f32, start: f32, end: f32) -> f32 {
         let band = sin((px.x + px.y) * 0.9 - t * 6.0) * 0.5 + 0.5;
         let band2 = sin((px.x - px.y) * 0.6 + t * 4.0) * 0.5 + 0.5;
         let shimmer = pow(band * 0.6 + band2 * 0.4, 2.0);
-        let glint = vec3(0.50, 0.25, 0.80) * (0.25 + 0.75 * shimmer);
-        color = vec4(min(color.rgb + glint * 0.6, vec3(1.0)), color.a);
+        let sheen = vec3(0.50, 0.25, 0.80) * (0.25 + 0.75 * shimmer);
+        color = vec4(min(color.rgb + sheen * 0.6, vec3(1.0)), color.a);
     }
     let f = max(linear_fog(in.spherical, globals.fog.x, globals.fog.y),
                 linear_fog(in.cylindrical, globals.fog.z, globals.fog.w));

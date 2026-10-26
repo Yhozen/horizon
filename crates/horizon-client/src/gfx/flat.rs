@@ -117,7 +117,16 @@ pub fn wanted(adapter: &wgpu::Adapter, device: &wgpu::Device) -> bool {
         Ok("1") => return supported(adapter, device),
         _ => {}
     }
-    adapter.get_info().backend == wgpu::Backend::Metal && supported(adapter, device)
+    emulates_multi_draw(adapter) && supported(adapter, device)
+}
+
+/// Metal, and WebGPU, where wgpu replays a multi-draw as one validated
+/// `drawIndexedIndirect` per entry, each its own command to the GPU process.
+fn emulates_multi_draw(adapter: &wgpu::Adapter) -> bool {
+    matches!(
+        adapter.get_info().backend,
+        wgpu::Backend::Metal | wgpu::Backend::BrowserWebGpu
+    )
 }
 
 fn supported(adapter: &wgpu::Adapter, device: &wgpu::Device) -> bool {
@@ -125,7 +134,7 @@ fn supported(adapter: &wgpu::Adapter, device: &wgpu::Device) -> bool {
     let limits = device.limits();
     flags.contains(wgpu::DownlevelFlags::VERTEX_STORAGE | wgpu::DownlevelFlags::COMPUTE_SHADERS)
         && limits.max_storage_buffers_per_shader_stage >= 3
-        && limits.max_storage_buffer_binding_size >= super::arena::PAGE_BYTES
+        && limits.max_storage_buffer_binding_size >= super::arena::page_bytes(&limits)
 }
 
 fn storage(binding: u32, stage: wgpu::ShaderStages, read_only: bool) -> wgpu::BindGroupLayoutEntry {
@@ -337,7 +346,10 @@ impl Flat {
             calls: Vec::new(),
             phase1_calls: 0,
             solid_calls: 0,
-            min_draws: if std::env::var("HORIZON_FLAT_DRAWS").as_deref() == Ok("1") {
+            // A browser's draw calls cost far more than a native driver's.
+            min_draws: if std::env::var("HORIZON_FLAT_DRAWS").as_deref() == Ok("1")
+                || cfg!(target_arch = "wasm32")
+            {
                 0
             } else {
                 MIN_DRAWS
