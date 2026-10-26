@@ -7,8 +7,12 @@ struct Stars {
 }
 @group(0) @binding(0) var<uniform> stars: Stars;
 
+// At the far plane: the sky draws after solid terrain, kept by the depth test
+// to the pixels terrain left uncovered (gfx.rs's draw_sky).
 @vertex fn vs_stars(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
-    return stars.clip_from_sky * vec4(position, 1.0);
+    var clip = stars.clip_from_sky * vec4(position, 1.0);
+    clip.z = 0.0;
+    return clip;
 }
 
 @fragment fn fs_stars() -> @location(0) vec4<f32> {

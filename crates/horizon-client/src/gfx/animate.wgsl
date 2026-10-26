@@ -4,6 +4,8 @@
 // sprite array layer. One invocation per texel; the job is the z coordinate.
 struct Job {
     layer: u32,
+    // Its sprite's tile in the layer's GRID by GRID sprites (gfx.rs's sprite_grid).
+    tile: u32,
     // Word offsets of the two frames' mip chains in `frames`.
     current: u32,
     next: u32,
@@ -15,6 +17,7 @@ struct Job {
 @group(0) @binding(0) var<storage, read> frames: array<u32>;
 @group(0) @binding(1) var<storage, read> jobs: array<Job>;
 @group(0) @binding(2) var level: texture_storage_2d_array<rgba8unorm, write>;
+override GRID: u32 = 1u;
 
 fn channels(rgba: u32) -> vec4<u32> {
     return vec4(rgba & 0xffu, (rgba >> 8u) & 0xffu, (rgba >> 16u) & 0xffu, rgba >> 24u);
@@ -22,11 +25,12 @@ fn channels(rgba: u32) -> vec4<u32> {
 
 @compute @workgroup_size(8, 8)
 fn animate(@builtin(global_invocation_id) id: vec3<u32>) {
-    let size = textureDimensions(level).x;
+    let size = textureDimensions(level).x / GRID;
     if id.x >= size || id.y >= size {
         return;
     }
     let job = jobs[id.z];
+    let origin = vec2(job.tile % GRID, job.tile / GRID) * size;
     // mipmap::generate: the levels at least as large as the chain's first
     // repeat it by whole pixels, the smaller ones are the chain's own.
     var texel: u32;
@@ -44,5 +48,5 @@ fn animate(@builtin(global_invocation_id) id: vec3<u32>) {
         let next = channels(frames[job.next + texel]);
         color = (color * (1000u - job.millis) + next * job.millis + 500u) / 1000u;
     }
-    textureStore(level, id.xy, job.layer, vec4<f32>(color) / 255.0);
+    textureStore(level, origin + id.xy, job.layer, vec4<f32>(color) / 255.0);
 }

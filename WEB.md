@@ -185,22 +185,70 @@ the game.
 
 | Area | Browser build |
 |---|---|
-| Rendering | wgpu `webgpu` backend; device opened before the game (`gfx::open_web_gpu`); `rgba8unorm` canvas; texture arrays split at 256 layers; per-frame mapped-at-creation staging buffers instead of `StagingBelt` (`gfx/upload.rs`) |
+| Rendering | wgpu `webgpu` backend; device opened before the game (`gfx::open_web_gpu`); `rgba8unorm` canvas; one block-sprite array, packing a grid of sprites per layer where the adapter has too few layers (`gfx::sprite_grid`); sections drawn flat, one draw per arena page (`gfx/flat.rs`); animated sprites blended on the CPU and written through the queue (`gfx/animate.rs`); per-frame mapped-at-creation staging buffers instead of `StagingBelt` (`gfx/upload.rs`) |
 | World | single player, `--in-frame` only; generation, lighting and meshing run as inline jobs each frame (`Streaming::pump_inline`, 40 ms budget); world loading runs inline (`world_loading::Handle`) |
 | Files | `horizon_core::fs`: an in-memory store on wasm (the data archive is mounted read-write; saves live until the tab closes) |
 | Time | `web-time` everywhere `Instant`/`SystemTime` were used; browser animation frames replace the blocking native frame limiter |
 | Threads | none: `thread::Builder::spawn` returns an error on wasm, which callers that already handled a failed spawn (`.ok()`) absorb; the places that panicked (`thread::spawn`/`thread::scope`) run inline on wasm: streaming workers, world loading, HUD sprite decode, mod-content tables. Other spawn sites (region writer, LOD, saving) are not audited for the web yet |
 | Off | audio, controllers, mods (wasmtime), networking (multiplayer, LAN, friends/relay, HTTPS), clipboard, telemetry upload, LOD/distant terrain, persistence |
 
+## Frame rate
+
+`pnpm bench` (in `web/`, after `pnpm package`) serves `.build/`, opens the page in headless Chrome and
+reads the game's two-second status lines (frames and chunks, then the mean CPU and GPU frame times
+with `--verbose`). It prints the frame rate over the last `--tail N` lines (15) of a `--seconds N` run
+(60). `--args="..."` passes game arguments, `--shot FILE` saves the last frame (read back through
+WebGPU, which headless Chrome without a GPU cannot composite), `--profile FILE` records a main-thread
+CPU profile, `--trace FILE` a Chrome trace, and `--release FILE` serves another `release.json` (its
+objects copied into `.build/objects`) for A/B runs. Without `--gpu` WebGPU runs on SwiftShader. For a
+scene that repeats exactly, fix the spawn, view and time:
+
+```
+--world W --creative --test-terrain --render-distance 4 --in-frame --name WebPlayer --weather clear
+--spawn-radius 0 --look 30,15 --time 6000      # --time 0 for dawn, the time a new world starts at
+--world-frames 18446744073709551615 --timeout-seconds 1000000000
+```
+
+What limited the frame rate, measured on a 4-vCPU VM with SwiftShader (frames a second over 30 s,
+the original build and this one run alternately):
+
+| Scene | Before | After |
+|---|---|---|
+| noon (`--time 6000`) | 1.73 | 5.67 (3.3×) |
+| dawn (`--time 0`) | 1.44 | 5.35 (3.7×) |
+
+- **The page's main thread spun.** `ControlFlow::Poll` makes winit's web loop queue a
+  `scheduler.postTask` (and an `AbortController`) back to back: ~70% of the main thread, with the
+  animation frames it waits for starved. The browser now waits (`game.rs`'s `FRAME_FLOW`); the redraw
+  request already schedules the next frame.
+- **Multi-draw is emulated.** wgpu replays it on WebGPU as one validated `drawIndexedIndirect` per
+  section group, each a command to the GPU process; flat draws (one per arena page) are on for the
+  browser as for Metal, and arena pages fit a storage binding.
+- **Sprites in several arrays.** WebGPU guarantees 256 texture layers; split across 6 arrays, every
+  terrain fragment chose its array in a `switch` and sampled with explicit gradients, doubling the
+  terrain's shading. The split now follows the adapter's limit (2048 on desktop GPUs: one array), and
+  where it is lower a grid of sprites shares each layer (`tiled_sprite`, the tile worked out per vertex).
+- **Branches cost both sides on a software rasterizer.** SwiftShader runs every side of a branch
+  for every pixel, masked: the sunrise fan's 16 ray–triangle tests (now geometry, as vanilla draws it),
+  the entity shader's End portal and glint code (now left out, through a pipeline constant, of the runs
+  of quads without them), and the clouds going through the 11-output entity shader (now a shader of
+  their own).
+- **Overdraw.** The sky draws after solid terrain at the far plane, so only uncovered pixels shade it.
+- **Per-quad cost.** Clouds out of view are left out of the cloud index list.
+- **Animated sprites** went through a compute pass per mip level; the browser blends them on the CPU
+  and writes them through `queue.write_texture` (no staging buffer).
+
+On a GPU-less machine the canvas is read back for compositing, so a frame takes the CPU time plus the
+GPU time. What remains is mostly shading: terrain about half of the frame, then the sky, the
+hand, clouds and water. Horizon's resolution scale (0.25–2) trades sharpness for speed.
+
 ## Known issues
 
-- One thread: a frame that generates chunks takes up to ~40 ms more. Expect low frame rates with
-  SwiftShader.
+- One thread: a frame that generates chunks takes up to ~40 ms more.
 - `thread::sleep`, `recv_timeout` and blocking `device.poll(Wait)` paths (screenshots, F2, LOD) are not
   reworked yet. Avoid them on the web.
 - Clicking into the game asks for pointer lock; Chrome refuses it without a user gesture (a
   harmless `NotAllowedError` in automated runs).
-- About 8 frames a second under SwiftShader at render distance 4 (546 frames in ~65 s).
 - The first visit downloads the resource archive and WASM before the game starts. Later visits reuse
   verified browser-cache entries while they remain available.
 

@@ -42,7 +42,13 @@ struct Globals {
 // which then samples exactly as before.
 override SPRITE_ARRAYS: u32 = 1u;
 override SPRITE_SPLIT: u32 = 2048u;
-fn sprite(uv: vec2<f32>, layer: u32) -> vec4<f32> {
+// Sprites along each edge of a layer (gfx.rs's sprite_grid): 1 but where the
+// browser's adapter has too few layers for one sprite each.
+override SPRITE_GRID: u32 = 1u;
+fn sprite(uv: vec2<f32>, layer: u32, tile: vec3<f32>) -> vec4<f32> {
+    if SPRITE_GRID > 1u {
+        return tiled_sprite(uv, tile);
+    }
     if SPRITE_ARRAYS == 1u {
         return textureSample(sprites, sprite_sampler, uv, i32(layer));
     }
@@ -61,6 +67,27 @@ fn sprite(uv: vec2<f32>, layer: u32) -> vec4<f32> {
         default: { return textureSampleGrad(sprites_7, sprite_sampler, uv, l, dx, dy); }
     }
 }
+// A sprite in its tile (`sprite_tile`) of one layer of the one array: the
+// sampler's Repeat addressing, within the tile, and its level of detail, from
+// the sprite's own size and coordinates (the tile's would jump where they wrap).
+fn tiled_sprite(uv: vec2<f32>, tile: vec3<f32>) -> vec4<f32> {
+    let size = f32(textureDimensions(sprites).x) / f32(SPRITE_GRID);
+    let dx = dpdx(uv) * size;
+    let dy = dpdy(uv) * size;
+    let lod = 0.5 * log2(max(dot(dx, dx), dot(dy, dy)));
+    // Kept off the far edge, where rounding could reach the next tile.
+    let wrapped = min(uv - floor(uv), vec2(1.0 - 0.5 / size));
+    return textureSampleLevel(sprites, sprite_sampler, (tile.xy + wrapped) / f32(SPRITE_GRID),
+        i32(tile.z), lod);
+}
+// Sprite `n`'s tile in its layer and the layer (x, y, layer), for
+// `tiled_sprite`: worked out once a vertex, as the layer is the primitive's,
+// rather than with integer divisions at every fragment.
+fn sprite_tile(n: u32) -> vec3<f32> {
+    let per = SPRITE_GRID * SPRITE_GRID;
+    let t = n % per;
+    return vec3(f32(t % SPRITE_GRID), f32(t / SPRITE_GRID), f32(n / per));
+}
 
 struct TerrainOut {
     @builtin(position) clip: vec4<f32>,
@@ -69,6 +96,7 @@ struct TerrainOut {
     @location(2) color: vec4<f32>,
     @location(3) spherical: f32,
     @location(4) cylindrical: f32,
+    @location(5) @interpolate(flat) tile: vec3<f32>,
 }
 // Horizon Extras' dynamic lights (dynamic_light.rs): the block light, in the vertex's units
 // (16 per level), a vertex at camera-relative `pos` gets from the frame's light sources, one
@@ -120,6 +148,7 @@ fn terrain_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color: vec4<f3
     out.clip = globals.view_proj * vec4(pos, 1.0);
     out.uv = uv;
     out.layer = layer;
+    out.tile = sprite_tile(layer & 0x7fffu);
     let block = max(f32(light.y), dynamic_block_light(pos));
     out.color = color * sample_lightmap(f32(light.x) / 16.0, block / 16.0);
     out.spherical = length(pos);
@@ -138,12 +167,12 @@ fn apply_fog(color: vec4<f32>, spherical: f32, cylindrical: f32) -> vec4<f32> {
 }
 @fragment fn fs_solid(in: TerrainOut) -> @location(0) vec4<f32> {
     // Bit 15 of the layer marks opaque leaves (forceOpaque): no alpha cutout.
-    let color = sprite(in.uv, in.layer & 0x7fffu) * in.color;
+    let color = sprite(in.uv, in.layer & 0x7fffu, in.tile) * in.color;
     if color.a < 0.5 && (in.layer & 0x8000u) == 0u { discard; }
     return apply_fog(vec4(color.rgb, 1.0), in.spherical, in.cylindrical);
 }
 @fragment fn fs_translucent(in: TerrainOut) -> @location(0) vec4<f32> {
-    let color = sprite(in.uv, in.layer & 0x7fffu) * in.color;
+    let color = sprite(in.uv, in.layer & 0x7fffu, in.tile) * in.color;
     if color.a < 0.01 { discard; }
     return apply_fog(color, in.spherical, in.cylindrical);
 }
@@ -156,35 +185,36 @@ fn apply_fog(color: vec4<f32>, spherical: f32, cylindrical: f32) -> vec4<f32> {
 // it; the dark disc (y = -4) below the horizon when the camera is low.
 struct SkyOut {
     @builtin(position) clip: vec4<f32>,
-    @location(0) ndc: vec2<f32>,
+    // The view ray through the pixel, unnormalized: linear in the screen
+    // position (the triangle's w is 1), so interpolating it is exact.
+    @location(0) ray: vec3<f32>,
 }
 @vertex fn vs_sky(@builtin(vertex_index) i: u32) -> SkyOut {
     let p = vec2(f32(i32(i & 1u) * 4 - 1), f32(i32(i >> 1u) * 4 - 1));
     var out: SkyOut;
     out.clip = vec4(p, 0.0, 1.0);
-    out.ndc = p;
+    out.ray = (globals.inverse_view * vec4(p.x * globals.misc.z * globals.misc.w,
+        p.y * globals.misc.w, -1.0, 0.0)).xyz;
     return out;
-}
-fn view_ray(ndc: vec2<f32>) -> vec3<f32> {
-    return normalize((globals.inverse_view * vec4(ndc.x * globals.misc.z * globals.misc.w,
-        ndc.y * globals.misc.w, -1.0, 0.0)).xyz);
 }
 const PI: f32 = 3.14159265;
 // Interpolated (spherical, cylindrical) distance where the ray meets a disc
-// fan at height y, or negative when it misses.
+// fan at height y, or negative when it misses. The fan is an octagon: the
+// edge of the sector a point is in lies at the apothem along the sector's
+// middle, and that middle is the one of the eight edge normals (22.5 degrees
+// plus multiples of 45) the point has the largest component along.
 fn disc_distance(d: vec3<f32>, y: f32) -> vec2<f32> {
     if d.y * y <= 0.0 { return vec2(-1.0); }
-    let p = d * (y / d.y);
-    let h = length(p.xz);
-    let phi = atan2(p.z, p.x);
-    let sector = PI / 4.0;
-    let delta = phi - (floor(phi / sector) * sector + sector * 0.5);
-    let edge = 512.0 * cos(sector * 0.5) / cos(delta);
-    if h > edge { return vec2(-1.0); }
-    let s = h / edge;
+    let p = abs((d * (y / d.y)).xz);
+    let c = 0.92387953; // cos(pi / 8)
+    let s = 0.38268343; // sin(pi / 8)
+    let apothem = 512.0 * c;
+    let along = max(p.x * c + p.y * s, p.x * s + p.y * c);
+    if along > apothem { return vec2(-1.0); }
+    let t = along / apothem;
     let ay = abs(y);
     let rim = sqrt(512.0 * 512.0 + y * y);
-    return vec2(ay + s * (rim - ay), ay + s * (512.0 - ay));
+    return vec2(ay + t * (rim - ay), ay + t * (512.0 - ay));
 }
 fn sky_fog(color: vec3<f32>, dist: vec2<f32>) -> vec3<f32> {
     let end = globals.fog_ends.x;
@@ -192,56 +222,50 @@ fn sky_fog(color: vec3<f32>, dist: vec2<f32>) -> vec3<f32> {
     return mix(color, globals.fog_color.rgb, f * globals.fog_color.a);
 }
 fn rotate_x90(v: vec3<f32>) -> vec3<f32> { return vec3(v.x, -v.z, v.y); }
-// Weight of the fan centre where the ray crosses the sunrise fan (0 when missed).
-fn sunrise_weight(d: vec3<f32>) -> f32 {
+// SkyRenderer.renderSunriseAndSunset: the 16-triangle fan blended over the
+// sky, its centre in the sunrise colour and its rim transparent, drawn as
+// geometry so only the pixels it covers are shaded. Its vertices sit in the
+// sky's camera-relative directions and project as `view_ray` unprojects.
+struct SunriseOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) weight: f32,
+}
+@vertex fn vs_sunrise(@builtin(vertex_index) vertex: u32) -> SunriseOut {
     let alpha = globals.sunrise.a;
-    if alpha <= 0.001 { return 0.0; }
     // sin(sunAngle) < 0 flips the fan to the other horizon; sun.z = -sin(sunAngle).
     let flip = select(0.0, 180.0, -globals.sun.z < 0.0);
     let theta = radians(flip + 90.0);
     let c = cos(theta);
     let s = sin(theta);
-    var best = 0.0;
-    let apex = rotate_x90(vec3(-100.0 * s, 100.0 * c, 0.0));
-    for (var i = 0; i < 16; i++) {
-        let a0 = f32(i) * 2.0 * PI / 16.0;
-        let a1 = f32(i + 1) * 2.0 * PI / 16.0;
-        let l0 = vec3(sin(a0) * 120.0, cos(a0) * 120.0, -cos(a0) * 40.0 * alpha);
-        let l1 = vec3(sin(a1) * 120.0, cos(a1) * 120.0, -cos(a1) * 40.0 * alpha);
-        let r0 = rotate_x90(vec3(l0.x * c - l0.y * s, l0.x * s + l0.y * c, l0.z));
-        let r1 = rotate_x90(vec3(l1.x * c - l1.y * s, l1.x * s + l1.y * c, l1.z));
-        // Moller-Trumbore from the origin along d.
-        let e1 = r0 - apex;
-        let e2 = r1 - apex;
-        let pv = cross(d, e2);
-        let det = dot(e1, pv);
-        if abs(det) < 1e-6 { continue; }
-        let tv = -apex;
-        let u = dot(tv, pv) / det;
-        let qv = cross(tv, e1);
-        let v = dot(d, qv) / det;
-        let t = dot(e2, qv) / det;
-        if u >= 0.0 && v >= 0.0 && u + v <= 1.0 && t > 0.0 {
-            best = max(best, 1.0 - u - v);
-        }
+    let corner = vertex % 3u;
+    var local = vec3(0.0, 100.0, 0.0);
+    if corner != 0u {
+        let a = f32(vertex / 3u + corner - 1u) * 2.0 * PI / 16.0;
+        local = vec3(sin(a) * 120.0, cos(a) * 120.0, -cos(a) * 40.0 * alpha);
     }
-    return best;
+    let p = rotate_x90(vec3(local.x * c - local.y * s, local.x * s + local.y * c, local.z));
+    // The view's rotation is the transpose of inverse_view's.
+    let v = transpose(mat3x3(globals.inverse_view[0].xyz, globals.inverse_view[1].xyz,
+        globals.inverse_view[2].xyz)) * p;
+    var out: SunriseOut;
+    out.clip = vec4(v.x / (globals.misc.z * globals.misc.w), v.y / globals.misc.w, 0.0, -v.z);
+    out.weight = select(0.0, 1.0, corner == 0u);
+    return out;
+}
+@fragment fn fs_sunrise(in: SunriseOut) -> @location(0) vec4<f32> {
+    return vec4(globals.sunrise.rgb, in.weight * globals.sunrise.a);
 }
 @fragment fn fs_sky(in: SkyOut) -> @location(0) vec4<f32> {
-    let d = view_ray(in.ndc);
+    let d = normalize(in.ray);
     var color = globals.fog_color.rgb;
     let dist = disc_distance(d, 16.0);
     if dist.x >= 0.0 {
         color = sky_fog(globals.sky_color.rgb, dist);
     }
-    let w = sunrise_weight(d);
-    if w > 0.0 {
-        color = mix(color, globals.sunrise.rgb, w * globals.sunrise.a);
-    }
     return vec4(color, 1.0);
 }
 @fragment fn fs_dark_disc(in: SkyOut) -> @location(0) vec4<f32> {
-    let d = view_ray(in.ndc);
+    let d = normalize(in.ray);
     let dist = disc_distance(d, -4.0);
     if dist.x < 0.0 { discard; }
     return vec4(sky_fog(vec3(0.0), dist), 1.0);

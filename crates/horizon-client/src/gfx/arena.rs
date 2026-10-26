@@ -8,6 +8,18 @@ pub const GRAIN: u64 = 256;
 /// The largest page, in bytes.
 pub const PAGE_BYTES: u64 = 256 << 20;
 
+/// 256 MiB pages, or less where the device's buffers are smaller. In the
+/// browser, also no larger than a storage binding (WebGPU guarantees
+/// 128 MiB), so flat draws (gfx/flat.rs) can read a page whole.
+pub fn page_bytes(limits: &wgpu::Limits) -> u64 {
+    let bytes = limits.max_buffer_size.min(PAGE_BYTES);
+    if cfg!(target_arch = "wasm32") {
+        bytes.min(limits.max_storage_buffer_binding_size)
+    } else {
+        bytes
+    }
+}
+
 /// Free vertex ranges: start -> length, never adjacent.
 #[derive(Debug, PartialEq)]
 struct FreeList(BTreeMap<u64, u64>);
@@ -83,8 +95,7 @@ impl Arena {
         capacity: u64,
         usage: wgpu::BufferUsages,
     ) -> Self {
-        // 256 MiB pages, or less where the device's buffers are smaller.
-        let bytes = device.limits().max_buffer_size.min(PAGE_BYTES);
+        let bytes = page_bytes(&device.limits());
         let page_limit = (bytes / stride) / GRAIN * GRAIN;
         let capacity = capacity.next_multiple_of(GRAIN).min(page_limit);
         Self {
