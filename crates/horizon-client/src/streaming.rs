@@ -165,6 +165,19 @@ enum Job {
     /// off the main thread like vanilla's IOWorker.
     Save(Vec<((i32, i32), Proto)>),
 }
+impl Job {
+    /// The kind of job and where, for logs.
+    fn describe(&self) -> String {
+        match self {
+            Job::Generate(x, z) => format!("generate {x},{z}"),
+            Job::Decorate(x, z, _) => format!("decorate {x},{z}"),
+            Job::Finish(_) => "finish".to_owned(),
+            Job::Light(x, z, ..) => format!("light {x},{z}"),
+            Job::Mesh(x, y, z, ..) => format!("mesh {x},{y},{z}"),
+            Job::Save(protos) => format!("save {} protos", protos.len()),
+        }
+    }
+}
 pub enum Done {
     Generated(Chunk),
     /// A proto chunk, and whether it was decorated (loaded so from the save).
@@ -836,7 +849,14 @@ impl Streaming {
             let Some(job) = self.shared.queue.lock().unwrap().pop() else {
                 break;
             };
+            let what = job.job.describe();
+            let at = web_time::Instant::now();
             let _ = send.send(run(job.job));
+            // A job runs whole inside the frame: name the ones long enough to show as a hitch.
+            let took = at.elapsed();
+            if took > std::time::Duration::from_millis(100) {
+                log::info!("Horizon web: {what} took {} ms in the frame", took.as_millis());
+            }
         }
     }
     /// Advance streaming: collect finished work, then schedule more.
