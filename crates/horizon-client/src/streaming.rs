@@ -155,6 +155,8 @@ struct MeshSettings {
     cutout_leaves: bool,
     cull_leaves: bool,
 }
+/// Proto chunks per save job in the browser (`Streaming::save_checked_out`).
+const SAVE_BATCH: usize = 16;
 enum Job {
     Generate(i32, i32),
     Decorate(i32, i32, Box<[Proto; 9]>),
@@ -703,11 +705,20 @@ impl Streaming {
             .into_iter()
             .filter_map(|k| Some((k, self.protos.get_mut(&k)?.take()?)))
             .collect();
-        if !protos.is_empty() {
+        // The browser runs each job whole inside a frame: ~100 protos took
+        // 120–190 ms there. In batches the frame budget spreads them out.
+        let batch = if cfg!(target_arch = "wasm32") {
+            SAVE_BATCH
+        } else {
+            usize::MAX
+        };
+        let mut protos = protos;
+        while !protos.is_empty() {
+            let rest = protos.split_off(protos.len().min(batch));
             self.saving += 1;
             // Ahead of every other job: a column generated again meanwhile
             // would not find them saved.
-            self.submit(i64::MIN, Job::Save(protos));
+            self.submit(i64::MIN, Job::Save(std::mem::replace(&mut protos, rest)));
         }
     }
     fn receive_generated(&mut self, mut chunk: Chunk, world: &mut World) {
