@@ -10,11 +10,17 @@ const say = (text) => {
 };
 window.horizonStatus = "loading";
 const params = new URLSearchParams(location.search);
+const playerName = params.get("name") || `Web${crypto.getRandomValues(new Uint32Array(1))[0].toString(16)}`;
+document.getElementById("player-name").value = playerName;
+document.getElementById("multiplayer-note").hidden = params.get("mode") !== "multiplayer";
 const args = params.has("args")
   ? params.get("args").split(" ").filter(Boolean)
   : ["--world", "Web World", "--creative", "--test-terrain", "--render-distance", "4",
     "--in-frame", "--world-frames", "18446744073709551615", "--timeout-seconds", "1000000000",
-    "--name", "WebPlayer"];
+    "--name", playerName];
+if (!params.has("args") && params.get("mode") === "multiplayer") {
+  args.splice(args.indexOf("--world"), 2, "--server", "server");
+}
 
 try {
   if (!navigator.gpu) throw new Error("This browser has no WebGPU support");
@@ -34,7 +40,7 @@ try {
   await start(new Uint8Array(data), args);
   window.horizonStarted = true;
   window.horizonRelease = release.id;
-  say("Running: " + args.join(" "));
+  say(args.includes("--server") ? "Multiplayer is starting…" : "Single player is running.");
   await retainRelease(release);
 } catch (error) {
   say("Failed: " + (error?.message ?? error));

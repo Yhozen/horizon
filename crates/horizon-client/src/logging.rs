@@ -48,6 +48,11 @@ pub fn data_dir() -> PathBuf {
 /// Where the launcher runs the game and keeps its saves: `HORIZON_HOME`, else `horizon` in the
 /// platform data folder (launcher/src/backend.rs `game_home`).
 pub fn game_home() -> PathBuf {
+    if cfg!(target_arch = "wasm32") {
+        // Leaving a browser server also finalizes performance stats. There is no OS
+        // home or temporary directory; keep that path inside the mounted memory FS.
+        return fs::current_dir().unwrap_or_else(|_| PathBuf::from("/horizon"));
+    }
     match std::env::var_os("HORIZON_HOME").filter(|h| !h.is_empty()) {
         Some(h) => PathBuf::from(h),
         None => data_dir().join("horizon"),
