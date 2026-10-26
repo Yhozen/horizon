@@ -325,9 +325,13 @@ impl Game<'_> {
         streaming.radius = self.settings.render_distance;
         self.streaming = streaming;
         self.world = World::new(self.res.facts().air, 0);
-        self.save = Arc::new(SaveDir::new(
-            std::env::temp_dir().join("horizon-remote-unused"),
-        ));
+        // Remote worlds never save locally. std::env::temp_dir panics on wasm;
+        // its placeholder belongs to the browser's in-memory filesystem instead.
+        #[cfg(target_arch = "wasm32")]
+        let unused_save = horizon_core::fs::current_dir()?.join(".horizon-cache/remote-unused");
+        #[cfg(not(target_arch = "wasm32"))]
+        let unused_save = std::env::temp_dir().join("horizon-remote-unused");
+        self.save = Arc::new(SaveDir::new(unused_save));
         self.inventory = vec![None; 36];
         self.armor = [None, None, None, None];
         self.craft_grid = vec![None; 9];

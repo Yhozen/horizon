@@ -42,7 +42,21 @@ export default Alchemy.Stack("HorizonWeb", {
     },
     cache: { enabled: true, crossVersionCache: true },
     entrypoints: { default: { cache: { enabled: false } }, Assets: { cache: { enabled: true } } },
-    env: { BUCKET: bucket, ALLOWED_EMAILS: allowedEmails.join(","), RELEASE_ID: published.releaseId },
+    env: {
+      BUCKET: bucket, ALLOWED_EMAILS: allowedEmails.join(","), RELEASE_ID: published.releaseId,
+      MINECRAFT: Cloudflare.Container("Minecraft", {
+        className: "Minecraft",
+        image: "docker.io/itzg/minecraft-server@sha256:0501cb2609925a658432eb31b4a64452c3f37761893f5873ec60df80c91e434e",
+        instanceType: "standard-2", instances: 0, maxInstances: 1,
+        observability: { logs: { enabled: true } },
+        env: {
+          EULA: "TRUE", TYPE: "VANILLA", VERSION: "26.3", ONLINE_MODE: "FALSE",
+          ENFORCE_SECURE_PROFILE: "FALSE", MEMORY: "1536M", VIEW_DISTANCE: "4",
+          SIMULATION_DISTANCE: "4", MODE: "creative", DIFFICULTY: "peaceful",
+          MAX_PLAYERS: "10", SPAWN_PROTECTION: "0", ENABLE_RCON: "FALSE", ENABLE_WHITELIST: "FALSE",
+        },
+      }),
+    },
     observability: { enabled: true },
   });
   return { url: game.url, bucketName: bucket.bucketName, releaseId: published.releaseId };

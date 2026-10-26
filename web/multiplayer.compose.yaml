@@ -1,0 +1,30 @@
+# Local test server only; use a fresh temporary directory for each run.
+services:
+  minecraft:
+    image: itzg/minecraft-server@sha256:0501cb2609925a658432eb31b4a64452c3f37761893f5873ec60df80c91e434e
+    ports:
+      - "127.0.0.1:25565:25565"
+    environment:
+      EULA: "TRUE"
+      TYPE: VANILLA
+      VERSION: "26.3"
+      MEMORY: 1536M
+      ONLINE_MODE: "FALSE"
+      ENFORCE_SECURE_PROFILE: "FALSE"
+      ENABLE_WHITELIST: "FALSE"
+      MODE: creative
+      DIFFICULTY: peaceful
+      LEVEL_TYPE: flat
+      VIEW_DISTANCE: "3"
+      SIMULATION_DISTANCE: "3"
+      SPAWN_PROTECTION: "0"
+      # Offline UUIDs of BrowserOne and BrowserTwo, solely for --operators tests.
+      OPS: 857a3356-2d5c-37a6-87b0-55fd8f566fbd,0ce26e61-6d9c-3898-9620-01ac20cb61ed
+      HORIZON_HOME: /tmp/horizon-game
+      HORIZON_LAUNCHER_HOME: /tmp/horizon-launcher
+      XDG_DATA_HOME: /tmp/horizon-data
+      XDG_CONFIG_HOME: /tmp/horizon-config
+      HORIZON_LAUNCHER_NO_SELF_UPDATE: "1"
+      HORIZON_NO_AUDIO: "1"
+    volumes:
+      - "${HORIZON_MULTIPLAYER_DATA:?Set this to a fresh mktemp directory}:/data"
