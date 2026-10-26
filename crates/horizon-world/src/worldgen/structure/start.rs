@@ -510,6 +510,53 @@ impl StructureRegistry {
             _ => &NONE,
         }
     }
+    /// How far from the origin, in chunks, no start of `possible_sets` can
+    /// depend on the concentric-ring positions: closer chunks never need the
+    /// ring search (`f64::INFINITY` without ring sets). The first ring lies at
+    /// least 2.75 `distance` out (generateRingPositions: 4 `distance` minus up
+    /// to 1.25 `distance` of jitter); the biome search moves a position at
+    /// most 7.5 chunks on each axis, and an exclusion zone or `avoid` naming a
+    /// ring set reaches further by its range (all ranges added, so zones of
+    /// zones are covered).
+    pub fn ring_free_radius(&self, possible_sets: &[usize]) -> f64 {
+        let rings: Vec<(&str, i32, i32)> = possible_sets
+            .iter()
+            .filter_map(|&i| match self.sets[i].placement {
+                Placement::ConcentricRings {
+                    distance, count, ..
+                } => Some((self.sets[i].name.as_str(), distance, count)),
+                _ => None,
+            })
+            .collect();
+        let Some(nearest) = rings
+            .iter()
+            .filter(|(_, _, count)| *count > 0)
+            .map(|(_, distance, _)| 2.75 * f64::from(*distance))
+            .reduce(f64::min)
+        else {
+            return f64::INFINITY;
+        };
+        let is_ring = |name: &str| rings.iter().any(|(n, _, _)| *n == name);
+        let names_ring = self.sets.iter().any(|set| {
+            set.exclusion.as_ref().is_some_and(|(other, _)| is_ring(other))
+                || set
+                    .avoid
+                    .as_ref()
+                    .is_some_and(|a| a.sets.iter().any(|o| is_ring(o)))
+        });
+        let reach: f64 = if names_ring {
+            self.sets
+                .iter()
+                .map(|set| {
+                    f64::from(set.exclusion.as_ref().map_or(0, |(_, r)| (*r).max(0)))
+                        + f64::from(set.avoid.as_ref().map_or(0, |a| a.chunk_count.max(0)))
+                })
+                .sum()
+        } else {
+            0.0
+        };
+        (nearest - 12.0 - reach).max(0.0)
+    }
     /// RandomSpreadStructurePlacement.getPotentialStructureChunk et al.
     /// RandomSpreadStructurePlacement.getPotentialStructureChunk for the
     /// sector holding chunk (`x`, `z`); `None` for other placements.

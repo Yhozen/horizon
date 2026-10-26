@@ -37,6 +37,9 @@ pub(super) struct StructureState {
     rings: Arc<OnceLock<Rings>>,
     /// Their biome searches while they are computed.
     ring_work: OnceLock<RingWork>,
+    /// Start chunks nearer the origin than this (in chunks) do not depend on
+    /// the rings (`StructureRegistry::ring_free_radius`).
+    ring_free_radius: f64,
 }
 
 /// generateRingPositions' biome searches, shared out. Vanilla runs each as
@@ -181,7 +184,7 @@ impl StructureState {
             StructureRegistry::new(&raw.structures, &raw.sets, raw.pools.clone(), &|value| {
                 biome_set(data, value)
             })?;
-        let possible_sets = registry
+        let possible_sets: Vec<usize> = registry
             .sets
             .iter()
             .enumerate()
@@ -209,6 +212,7 @@ impl StructureState {
         {
             bindings = bindings.with_block_properties(&blocks.properties)?;
         }
+        let ring_free_radius = registry.ring_free_radius(&possible_sets);
         Ok(Some(Self {
             registry,
             resources: resources.clone(),
@@ -217,12 +221,21 @@ impl StructureState {
             by_step,
             starts: StartCache::new(),
             start_work: ChunkWork::new(),
+            ring_free_radius,
             rings,
             ring_work: OnceLock::new(),
         }))
     }
-    /// Concentric ring positions of a structure set, once the first start
-    /// lookup has computed them.
+    /// Concentric ring positions of a structure set, computing them first.
+    pub(super) fn ring_positions(
+        &self,
+        context: &mut impl StartContext,
+        set: &str,
+    ) -> Option<Vec<ChunkPos>> {
+        self.rings(context).get(set).cloned()
+    }
+    /// Concentric ring positions of a structure set, once a start lookup
+    /// past `ring_free_radius`, `/locate` or `ring_positions` computed them.
     pub(super) fn cached_rings(&self, set: &str) -> Option<Vec<ChunkPos>> {
         self.rings.get().and_then(|rings| rings.get(set).cloned())
     }
@@ -263,7 +276,16 @@ impl StructureState {
         }
         // Ring searches enlist other workers and wait for them: never hold a
         // chunk-work lock while helping, even when this chunk has no starts.
-        let rings = self.rings(context);
+        // Chunks too near the origin for any ring position skip the ring search
+        // (seconds at world entry, on one thread in the browser) until a
+        // farther chunk, `/locate` or an ender eye needs it.
+        static NO_RINGS: Rings = Rings::new();
+        let near = f64::from(chunk.x).hypot(f64::from(chunk.z)) < self.ring_free_radius;
+        let rings = match self.rings.get() {
+            Some(rings) => rings,
+            None if near => &NO_RINGS,
+            None => self.rings(context),
+        };
         let work = self.start_work.at((chunk.x, chunk.z));
         let _work = work.lock().unwrap();
         if let Some(found) = self.starts.get((chunk.x, chunk.z)) {
