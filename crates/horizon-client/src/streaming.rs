@@ -882,6 +882,12 @@ impl Streaming {
     /// The browser build: run queued jobs in the frame for up to `budget`.
     #[cfg(target_arch = "wasm32")]
     pub fn pump_inline(&mut self, budget: std::time::Duration) {
+        self.run_inline(budget, true);
+    }
+    /// Run queued jobs on this thread for up to `budget`; with `idle`, a
+    /// step of idle work when nothing is queued.
+    #[cfg(target_arch = "wasm32")]
+    fn run_inline(&mut self, budget: std::time::Duration, idle: bool) {
         let started = web_time::Instant::now();
         let Some((run, send)) = self.inline.as_mut() else {
             return;
@@ -897,7 +903,7 @@ impl Streaming {
         while started.elapsed() < budget {
             let Some(job) = self.shared.queue.lock().unwrap().pop() else {
                 // Nothing queued: one step of idle work.
-                if self.idle_work && self.quiet_frames >= IDLE_AFTER_QUIET_FRAMES {
+                if idle && self.idle_work && self.quiet_frames >= IDLE_AFTER_QUIET_FRAMES {
                     let at = web_time::Instant::now();
                     self.idle_work = matches!(run(Job::Idle), Done::Idle(true));
                     if !self.idle_work {
@@ -1436,7 +1442,16 @@ impl Streaming {
         let deadline = web_time::Instant::now() + std::time::Duration::from_secs(30);
         while self.decorating > 0 || !self.finishing.is_empty() || self.saving > 0 {
             let left = deadline.saturating_duration_since(web_time::Instant::now());
-            match self.results.recv_timeout(left) {
+            // The browser has no workers to wait for (and `recv_timeout`
+            // reads std's clock, which panics there): run the jobs here.
+            #[cfg(target_arch = "wasm32")]
+            let received = {
+                self.run_inline(left, false);
+                self.results.try_recv().map_err(|_| ())
+            };
+            #[cfg(not(target_arch = "wasm32"))]
+            let received = self.results.recv_timeout(left).map_err(|_| ());
+            match received {
                 Ok(Done::Decorated(x, z, region)) => self.receive_decorated(x, z, region),
                 Ok(Done::Generated(chunk)) => self.receive_generated(chunk, world),
                 Ok(Done::Saved(protos)) => self.receive_saved(protos),
@@ -1462,6 +1477,10 @@ impl Streaming {
     /// Proto snapshots are checked out to workers before chunk writes, just as
     /// in `save(true)`, so older generation cannot overwrite the final chunks.
     pub fn poll_save(&mut self, world: &mut World) -> bool {
+        // The save screen does not run `update`, so in the browser the jobs
+        // waited for here are run here.
+        #[cfg(target_arch = "wasm32")]
+        self.run_inline(std::time::Duration::from_millis(40), false);
         let started = web_time::Instant::now();
         while let Ok(done) = self.results.try_recv() {
             match done {
