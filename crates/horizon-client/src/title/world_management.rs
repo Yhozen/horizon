@@ -59,6 +59,8 @@ pub fn delete(saves: &Path, folder: &str) -> crate::Result<()> {
             Err(e) if attempt >= 5 => return Err(e.into()),
             Err(e) => {
                 log::warn!("Failed to delete {}: {e}", world.display());
+                // No sleeping in the browser build (it panics there); its files are in memory.
+                #[cfg(not(target_arch = "wasm32"))]
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
         }
