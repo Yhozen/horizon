@@ -30,6 +30,15 @@ pub fn current_exe() -> std::io::Result<std::path::PathBuf> {
     std::env::current_exe()
 }
 
+/// The process id, for temporary file names: `std::process::id`, which panics in the
+/// browser build ("no pids on this platform"), where one page is one game and 1 is used.
+pub fn process_id() -> u32 {
+    #[cfg(target_arch = "wasm32")]
+    return 1;
+    #[cfg(not(target_arch = "wasm32"))]
+    std::process::id()
+}
+
 /// `exists`, `is_file` and `is_dir` that see the browser build's files.
 pub trait PathExt {
     fn exists_vfs(&self) -> bool;

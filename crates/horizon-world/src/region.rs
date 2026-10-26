@@ -414,7 +414,7 @@ impl RegionWriter {
         let (temporary, file) = loop {
             let path = parent.join(format!(
                 ".horizon-{}-{}.tmp",
-                std::process::id(),
+                horizon_core::fs::process_id(),
                 NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
             ));
             match OpenOptions::new()

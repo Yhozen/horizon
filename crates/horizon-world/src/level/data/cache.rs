@@ -720,7 +720,7 @@ fn write(
     let path = dir.join(FILE_NAME);
     let tmp = dir.join(format!(
         "{FILE_NAME}.tmp-{}-{}",
-        std::process::id(),
+        horizon_core::fs::process_id(),
         NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
     ));
     let result = (|| {
