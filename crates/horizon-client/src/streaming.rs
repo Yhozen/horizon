@@ -165,6 +165,7 @@ enum Job {
     /// off the main thread like vanilla's IOWorker.
     Save(Vec<((i32, i32), Proto)>),
 }
+#[cfg(target_arch = "wasm32")]
 impl Job {
     /// The kind of job and where, for logs.
     fn describe(&self) -> String {
