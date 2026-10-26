@@ -1656,6 +1656,8 @@ trait SeededPipeline: Send + Sync {
     fn unsupported_features(&self) -> Vec<(String, String)>;
     fn forget_structure_starts(&self);
     fn ring_positions(&self, set: &str) -> Option<Vec<ChunkPos>>;
+    fn compute_ring_positions(&self, worker: &mut WorkerState, set: &str) -> Option<Vec<ChunkPos>>;
+    fn step_ring_search(&self, worker: &mut WorkerState) -> bool;
     fn spawn_position(&self) -> Result<[i32; 2], GeneratorError>;
     fn locate(
         &self,
@@ -1757,6 +1759,26 @@ where
     }
     fn ring_positions(&self, set: &str) -> Option<Vec<ChunkPos>> {
         self.structures.as_ref()?.cached_rings(set)
+    }
+    fn compute_ring_positions(&self, worker: &mut WorkerState, set: &str) -> Option<Vec<ChunkPos>> {
+        self.structures.as_ref()?.ring_positions(
+            &mut StructureQueries {
+                pipeline: self,
+                worker,
+                valid: BTreeSet::new(),
+            },
+            set,
+        )
+    }
+    fn step_ring_search(&self, worker: &mut WorkerState) -> bool {
+        let Some(structures) = &self.structures else {
+            return true;
+        };
+        structures.step_rings(&mut StructureQueries {
+            pipeline: self,
+            worker,
+            valid: BTreeSet::new(),
+        })
     }
     fn spawn_position(&self) -> Result<[i32; 2], GeneratorError> {
         if let Some(position) = self.spawn_position.get() {
@@ -2457,6 +2479,16 @@ impl GeneratorWorker {
             .surface_sample(&mut self.state, x, z, Some(&mut spans));
         (surface, spans)
     }
+    /// Concentric ring positions of a structure set (strongholds), running
+    /// the ring search if no start lookup needed it yet.
+    pub fn ring_positions(&mut self, set: &str) -> Option<Vec<ChunkPos>> {
+        self.pipeline.compute_ring_positions(&mut self.state, set)
+    }
+    /// One step of the ring search (`ring_positions`), for spreading it
+    /// over idle time; true once the rings are known.
+    pub fn step_ring_search(&mut self) -> bool {
+        self.pipeline.step_ring_search(&mut self.state)
+    }
     /// `/locate structure`: the nearest start of one of `names`.
     pub fn locate(
         &mut self,
@@ -2890,10 +2922,56 @@ mod tests {
             return;
         };
         let generator = OverworldGenerator::new(data, 1234).expect("generator");
-        generator.worker().structure_starts(ChunkPos::new(0, 0));
-        let rings = generator
+        // Chunks this near the origin skip the ring search (2.75 x 32 - 12
+        // chunks, `ring_free_radius`); their starts must not change once it ran.
+        let near: Vec<ChunkPos> = (40..70)
+            .flat_map(|x| (-15..15).map(move |z| ChunkPos::new(x, z)))
+            .collect();
+        let names = |generator: &OverworldGenerator| -> Vec<Vec<(String, ChunkPos)>> {
+            let mut worker = generator.worker();
+            near.iter()
+                .map(|&c| {
+                    worker
+                        .structure_starts(c)
+                        .iter()
+                        .map(|s| (s.name.clone(), s.chunk))
+                        .collect()
+                })
+                .collect()
+        };
+        let before = names(&generator);
+        assert!(before.iter().flatten().count() > 0, "no starts to compare");
+        // Stepped one biome search at a time (the browser's idle frames)...
+        let mut worker = generator.worker();
+        let mut steps = 1;
+        while !worker.step_ring_search() {
+            steps += 1;
+        }
+        assert_eq!(steps, 128);
+        assert!(worker.step_ring_search());
+        let rings = worker
             .ring_positions("minecraft:strongholds")
             .expect("ring positions");
+        // ...the rings are those a worker finds at once when nothing needed
+        // them yet.
+        let at_once = OverworldGenerator::new(prepared_data().expect("data"), 1234)
+            .expect("generator")
+            .worker()
+            .ring_positions("minecraft:strongholds")
+            .expect("ring positions");
+        assert_eq!(rings, at_once);
+        generator.worker().forget_structure_starts();
+        assert_eq!(names(&generator), before);
+        for ring in &rings {
+            assert!(
+                f64::from(ring.x).hypot(f64::from(ring.z)) >= 76.0,
+                "{ring:?}"
+            );
+        }
+        assert_eq!(
+            generator.ring_positions("minecraft:strongholds").as_ref(),
+            Some(&rings)
+        );
         assert_eq!(rings.len(), 128);
         for (i, x, z) in [
             (0, -100, -125),

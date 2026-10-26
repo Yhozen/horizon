@@ -58,6 +58,12 @@ pub trait ChunkGenerator: Send + Sync + 'static {
     /// What a loaded chunk needs from the generator before the game uses it,
     /// on the worker that loaded it.
     fn prepare_loaded(&self, _worker: &mut Self::Worker, _chunk: &Chunk) {}
+    /// A slice of up-front work the generator would otherwise do inside the
+    /// first job that needs it (the stronghold ring search), for the browser
+    /// build's idle frames. True once there is none left.
+    fn idle_step(&self, _worker: &mut Self::Worker) -> bool {
+        true
+    }
     fn proto(&self, worker: &mut Self::Worker, x: i32, z: i32) -> Proto;
     fn decorates(&self) -> bool {
         false
@@ -155,6 +161,12 @@ struct MeshSettings {
     cutout_leaves: bool,
     cull_leaves: bool,
 }
+/// Frames in a row without queued jobs before the browser build runs idle
+/// work (`Streaming::pump_inline`).
+#[cfg(target_arch = "wasm32")]
+const IDLE_AFTER_QUIET_FRAMES: u32 = 10;
+/// Proto chunks per save job in the browser (`Streaming::save_checked_out`).
+const SAVE_BATCH: usize = 16;
 enum Job {
     Generate(i32, i32),
     Decorate(i32, i32, Box<[Proto; 9]>),
@@ -164,6 +176,24 @@ enum Job {
     /// Proto chunks checked out to be saved (`ChunkGenerator::save_protos`),
     /// off the main thread like vanilla's IOWorker.
     Save(Vec<((i32, i32), Proto)>),
+    /// `ChunkGenerator::idle_step`, run by an idle frame.
+    #[cfg(target_arch = "wasm32")]
+    Idle,
+}
+#[cfg(target_arch = "wasm32")]
+impl Job {
+    /// The kind of job and where, for logs.
+    fn describe(&self) -> String {
+        match self {
+            Job::Generate(x, z) => format!("generate {x},{z}"),
+            Job::Decorate(x, z, _) => format!("decorate {x},{z}"),
+            Job::Finish(_) => "finish".to_owned(),
+            Job::Light(x, z, ..) => format!("light {x},{z}"),
+            Job::Mesh(x, y, z, ..) => format!("mesh {x},{y},{z}"),
+            Job::Save(protos) => format!("save {} protos", protos.len()),
+            Job::Idle => "idle step".to_owned(),
+        }
+    }
 }
 pub enum Done {
     Generated(Chunk),
@@ -173,6 +203,9 @@ pub enum Done {
     Lit(i32, i32, Vec<crate::chunk::Light>, u64),
     Meshed(i32, i32, i32, SectionMesh, u64),
     Saved(Vec<((i32, i32), Proto)>),
+    /// `Job::Idle`: whether idle work is left.
+    #[cfg(target_arch = "wasm32")]
+    Idle(bool),
 }
 struct Queued {
     priority: i64,
@@ -213,6 +246,12 @@ pub struct Streaming {
     /// The browser build's worker, run by the frame.
     #[cfg(target_arch = "wasm32")]
     inline: Option<(Box<dyn FnMut(Job) -> Done + Send>, mpsc::Sender<Done>)>,
+    /// Whether the generator still has idle work (`ChunkGenerator::idle_step`).
+    #[cfg(target_arch = "wasm32")]
+    idle_work: bool,
+    /// Frames in a row that started with no queued job.
+    #[cfg(target_arch = "wasm32")]
+    quiet_frames: u32,
     order: u64,
     generating: FxHashSet<(i32, i32)>,
     generation_scan: GenerationScan,
@@ -452,6 +491,8 @@ fn job_runner<G: ChunkGenerator>(
             generator.save_protos(&refs);
             Done::Saved(protos)
         }
+        #[cfg(target_arch = "wasm32")]
+        Job::Idle => Done::Idle(!generator.idle_step(&mut worker)),
         Job::Light(x, z, region, seq, sky) => {
             Done::Lit(x, z, light_chunk(&borrow(&region), &light, sky), seq)
         }
@@ -547,6 +588,10 @@ impl Streaming {
             threads,
             #[cfg(target_arch = "wasm32")]
             inline,
+            #[cfg(target_arch = "wasm32")]
+            idle_work: true,
+            #[cfg(target_arch = "wasm32")]
+            quiet_frames: 0,
             order: 0,
             generating: Default::default(),
             generation_scan: GenerationScan::default(),
@@ -689,11 +734,20 @@ impl Streaming {
             .into_iter()
             .filter_map(|k| Some((k, self.protos.get_mut(&k)?.take()?)))
             .collect();
-        if !protos.is_empty() {
+        // The browser runs each job whole inside a frame: ~100 protos took
+        // 120–190 ms there. In batches the frame budget spreads them out.
+        let batch = if cfg!(target_arch = "wasm32") {
+            SAVE_BATCH
+        } else {
+            usize::MAX
+        };
+        let mut protos = protos;
+        while !protos.is_empty() {
+            let rest = protos.split_off(protos.len().min(batch));
             self.saving += 1;
             // Ahead of every other job: a column generated again meanwhile
             // would not find them saved.
-            self.submit(i64::MIN, Job::Save(protos));
+            self.submit(i64::MIN, Job::Save(std::mem::replace(&mut protos, rest)));
         }
     }
     fn receive_generated(&mut self, mut chunk: Chunk, world: &mut World) {
@@ -828,15 +882,50 @@ impl Streaming {
     /// The browser build: run queued jobs in the frame for up to `budget`.
     #[cfg(target_arch = "wasm32")]
     pub fn pump_inline(&mut self, budget: std::time::Duration) {
+        self.run_inline(budget, true);
+    }
+    /// Run queued jobs on this thread for up to `budget`; with `idle`, a
+    /// step of idle work when nothing is queued.
+    #[cfg(target_arch = "wasm32")]
+    fn run_inline(&mut self, budget: std::time::Duration, idle: bool) {
         let started = web_time::Instant::now();
         let Some((run, send)) = self.inline.as_mut() else {
             return;
         };
+        // Idle work waits until every chunk in range is generated and frames
+        // have had nothing to do for a while, so that it does not slow down
+        // loading (a step is ~25 ms).
+        if self.generation_scan.exhausted && self.shared.queue.lock().unwrap().is_empty() {
+            self.quiet_frames = self.quiet_frames.saturating_add(1);
+        } else {
+            self.quiet_frames = 0;
+        }
         while started.elapsed() < budget {
             let Some(job) = self.shared.queue.lock().unwrap().pop() else {
+                // Nothing queued: one step of idle work.
+                if idle && self.idle_work && self.quiet_frames >= IDLE_AFTER_QUIET_FRAMES {
+                    let at = web_time::Instant::now();
+                    self.idle_work = matches!(run(Job::Idle), Done::Idle(true));
+                    if !self.idle_work {
+                        log::info!(
+                            "Horizon web: idle work done (last step {} ms)",
+                            at.elapsed().as_millis()
+                        );
+                    }
+                }
                 break;
             };
+            let what = job.job.describe();
+            let at = web_time::Instant::now();
             let _ = send.send(run(job.job));
+            // A job runs whole inside the frame: name the ones long enough to show as a hitch.
+            let took = at.elapsed();
+            if took > std::time::Duration::from_millis(100) {
+                log::info!(
+                    "Horizon web: {what} took {} ms in the frame",
+                    took.as_millis()
+                );
+            }
         }
     }
     /// Advance streaming: collect finished work, then schedule more.
@@ -870,6 +959,8 @@ impl Streaming {
                 Done::Decorated(x, z, region) => self.receive_decorated(x, z, region),
                 Done::Generated(chunk) => self.receive_generated(chunk, world),
                 Done::Saved(protos) => self.receive_saved(protos),
+                #[cfg(target_arch = "wasm32")]
+                Done::Idle(_) => {}
                 Done::Lit(x, z, sections, seq) => {
                     if self.lighting.get(&(x, z)) != Some(&seq) {
                         continue;
@@ -1354,7 +1445,16 @@ impl Streaming {
         let deadline = web_time::Instant::now() + std::time::Duration::from_secs(30);
         while self.decorating > 0 || !self.finishing.is_empty() || self.saving > 0 {
             let left = deadline.saturating_duration_since(web_time::Instant::now());
-            match self.results.recv_timeout(left) {
+            // The browser has no workers to wait for (and `recv_timeout`
+            // reads std's clock, which panics there): run the jobs here.
+            #[cfg(target_arch = "wasm32")]
+            let received = {
+                self.run_inline(left, false);
+                self.results.try_recv().map_err(|_| ())
+            };
+            #[cfg(not(target_arch = "wasm32"))]
+            let received = self.results.recv_timeout(left).map_err(|_| ());
+            match received {
                 Ok(Done::Decorated(x, z, region)) => self.receive_decorated(x, z, region),
                 Ok(Done::Generated(chunk)) => self.receive_generated(chunk, world),
                 Ok(Done::Saved(protos)) => self.receive_saved(protos),
@@ -1380,6 +1480,10 @@ impl Streaming {
     /// Proto snapshots are checked out to workers before chunk writes, just as
     /// in `save(true)`, so older generation cannot overwrite the final chunks.
     pub fn poll_save(&mut self, world: &mut World) -> bool {
+        // The save screen does not run `update`, so in the browser the jobs
+        // waited for here are run here.
+        #[cfg(target_arch = "wasm32")]
+        self.run_inline(std::time::Duration::from_millis(40), false);
         let started = web_time::Instant::now();
         while let Ok(done) = self.results.try_recv() {
             match done {

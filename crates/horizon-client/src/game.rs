@@ -368,7 +368,9 @@ impl Options {
             dev_mods: Vec::new(),
             // The command harness (HORIZON_COMMAND_SCRIPT) drives the world
             // itself, without the event loop: it stays in the frame.
-            server_thread: std::env::var("HORIZON_SERVER_THREAD").map_or(true, |v| v != "0")
+            // The browser build cannot start threads: its world always runs in the frame.
+            server_thread: !cfg!(target_arch = "wasm32")
+                && std::env::var("HORIZON_SERVER_THREAD").map_or(true, |v| v != "0")
                 && std::env::var_os("HORIZON_COMMAND_SCRIPT").is_none(),
             integrated: false,
         };
@@ -395,7 +397,7 @@ impl Options {
                 "--no-pause" => o.no_pause = true,
                 "--offscreen" => o.offscreen = true,
                 "--control" => o.control = Some(horizon_client::control::default_path()),
-                "--server-thread" => o.server_thread = true,
+                "--server-thread" => o.server_thread = !cfg!(target_arch = "wasm32"),
                 "--in-frame" | "--no-server-thread" => o.server_thread = false,
                 _ => {
                     let value = args

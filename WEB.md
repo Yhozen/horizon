@@ -68,6 +68,11 @@ pnpm package --archive dist/horizon-data.bin
 pnpm serve
 ```
 
+For a local server with cross-origin isolation headers, run
+`python3 tools/web/serve.py` from the repository root after packaging. It serves the
+shell from `web/.build/site` and the manifest's asset URLs from `web/.build/objects`;
+`--dir` selects another packaged build directory.
+
 Open <http://127.0.0.1:8080/> in desktop Chrome (113 or later, WebGPU on). The page passes these game
 arguments by default:
 
@@ -251,9 +256,9 @@ the game.
 |---|---|
 | Rendering | wgpu `webgpu` backend; device opened before the game (`gfx::open_web_gpu`); `rgba8unorm` canvas; one block-sprite array, packing a grid of sprites per layer where the adapter has too few layers (`gfx::sprite_grid`); sections drawn flat, one draw per arena page (`gfx/flat.rs`); animated sprites blended on the CPU and written through the queue (`gfx/animate.rs`); per-frame mapped-at-creation staging buffers instead of `StagingBelt` (`gfx/upload.rs`) |
 | World | single player with `--in-frame`, or a server-fed multiplayer world; generation, lighting and meshing run as inline jobs each frame (`Streaming::pump_inline`, 40 ms budget); local world loading runs inline (`world_loading::Handle`) |
-| Files | `horizon_core::fs`: an in-memory store on wasm (the data archive is mounted read-write; saves live until the tab closes) |
+| Files | `horizon_core::fs`: an in-memory store on wasm (the data archive is mounted read-write; saves live until the tab closes). Files keep modification times (the Singleplayer list skips worlds whose `level.dat` has none); region and chunk data are compressed at zlib's fastest level, since they never leave memory |
 | Time | `web-time` everywhere `Instant`/`SystemTime` were used; browser animation frames replace the blocking native frame limiter |
-| Threads | none: `thread::Builder::spawn` returns an error on wasm, which callers that already handled a failed spawn (`.ok()`) absorb; the places that panicked (`thread::spawn`/`thread::scope`) run inline on wasm: streaming workers, world loading, HUD sprite decode, mod-content tables. Other spawn sites (region writer, LOD, saving) are not audited for the web yet |
+| Threads | none: `thread::Builder::spawn` returns an error on wasm, which callers that already handled a failed spawn (`.ok()`) absorb; the places that panicked (`thread::spawn`/`thread::scope`) run inline on wasm: streaming workers, world loading, HUD sprite decode, mod-content tables, region-file writes (`RegionWriter`). The integrated server always ticks in the frame (`--server-thread` is ignored), and world deletion does not sleep between retries |
 | Networking | offline-mode Minecraft 26.3 through a WebSocket/TCP gateway; native TCP, server-list pings, Microsoft login, LAN discovery and friend/relay tunnels remain unavailable in the browser |
 | Off | audio, controllers, mods (wasmtime), native HTTPS services, clipboard, telemetry upload, LOD/distant terrain, persistence |
 
@@ -307,9 +312,41 @@ On a GPU-less machine the canvas is read back for compositing, so a frame takes 
 GPU time. What remains is mostly shading: terrain about half of the frame, then the sky, the
 hand, clouds and water. Horizon's resolution scale (0.25–2) trades sharpness for speed.
 
+## Freezes while playing (fixed)
+
+The game stopped (canvas frozen, `RuntimeError: unreachable` in the console) a few seconds to minutes
+into play. Each one was a std call that panics on wasm32, reached from a path that only runs in play:
+
+- **Unloading chunks** saved their mobs, and a mob without a UUID got one salted with
+  `std::process::id()` (panics): ~20 s of walking froze the game. The browser salts with random bits
+  and a counter; temp-file names use `horizon_core::fs::process_id()` (1 on wasm).
+- **Region writes** started a writer thread (`thread::spawn` fails); they now write inline.
+- **The log directory** fell back to `std::env::temp_dir()` (panics); it falls back to the VFS cwd.
+- **The integrated server thread** and **world deletion's retry sleep** are off on wasm.
+- **Saved worlds were missing from Singleplayer** after Save & Quit: the in-memory files had no
+  modification times, and the list drops worlds whose `level.dat` returns an error. They now have
+  them.
+- **Save & Quit hung for 30 s and then stopped the game** when unsaved proto chunks were left: the
+  save screen doesn't run `Streaming::update`, which is where queued jobs run inline, so the saves it
+  waited for never ran. The final `Streaming::save(true)` then panicked in `recv_timeout` (std's
+  clock). Both now run the queued jobs themselves.
+
+Checked by a 25-minute soak (walking, clicking and commands) and a 10-minute vanilla-terrain walk
+with `/tp` jumps, then Save & Quit, re-entering the world from the list, walking and clicking.
+
 ## Known issues
 
-- One thread: a frame that generates chunks takes up to ~40 ms more.
+- One thread: streaming runs inline with a 40 ms budget per frame, but each job runs whole. In a
+  vanilla (not `--test-terrain`) world one chunk generation takes up to ~100-260 ms. The stronghold
+  ring search (128 positions × 3,249 biome samples, ~3.8 s) is skipped near the origin, where no
+  ring can reach, and is run one search per idle frame once the chunks in range are generated. A
+  walk out past ~65 chunks (~1,000 blocks) before that finishes still pays the rest in one frame. Saves go in
+  batches of 16 proto chunks. Jobs over 100 ms are logged
+  (`Horizon web: generate x,z took N ms in the frame`).
+- Worlds are not persisted: the file system is in memory, so a reload loses them.
+- std on wasm32 panics in `std::process::id`, `thread::sleep`, `Instant::now`/`SystemTime::now`,
+  `env::temp_dir` and `Condvar::wait`. A panic inside the animation-frame callback ends winit's loop
+  and leaves the last frame on the canvas, which looks like a freeze; see above.
 - `thread::sleep`, `recv_timeout` and blocking `device.poll(Wait)` paths (screenshots, F2, LOD) are not
   reworked yet. Avoid them on the web.
 - Clicking into the game asks for pointer lock; Chrome refuses it without a user gesture (a

@@ -82,15 +82,22 @@ impl Compression {
     }
 
     pub fn encode(self, bytes: &[u8]) -> io::Result<Vec<u8>> {
+        // Java's Deflater default; the fastest level in the browser, where saving runs inside
+        // the frame and the files only live in memory. Any level reads back the same.
+        let level = if cfg!(target_arch = "wasm32") {
+            Level::fast()
+        } else {
+            Level::default()
+        };
         match self {
             Self::None => Ok(bytes.to_vec()),
             Self::Gzip => {
-                let mut encoder = flate2::write::GzEncoder::new(Vec::new(), Level::default());
+                let mut encoder = flate2::write::GzEncoder::new(Vec::new(), level);
                 encoder.write_all(bytes)?;
                 encoder.finish()
             }
             Self::Zlib => {
-                let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), Level::default());
+                let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), level);
                 encoder.write_all(bytes)?;
                 encoder.finish()
             }

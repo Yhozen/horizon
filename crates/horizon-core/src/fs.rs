@@ -30,6 +30,15 @@ pub fn current_exe() -> std::io::Result<std::path::PathBuf> {
     std::env::current_exe()
 }
 
+/// The process id, for temporary file names: `std::process::id`, which panics in the
+/// browser build ("no pids on this platform"), where one page is one game and 1 is used.
+pub fn process_id() -> u32 {
+    #[cfg(target_arch = "wasm32")]
+    return 1;
+    #[cfg(not(target_arch = "wasm32"))]
+    std::process::id()
+}
+
 /// `exists`, `is_file` and `is_dir` that see the browser build's files.
 pub trait PathExt {
     fn exists_vfs(&self) -> bool;
@@ -85,8 +94,18 @@ mod web {
 
     #[derive(Clone)]
     enum Node {
-        File(Arc<Vec<u8>>),
+        /// A file's contents and when they were last written.
+        File(Arc<Vec<u8>>, std::time::SystemTime),
         Dir,
+    }
+
+    /// The wall clock as a `std` time: `SystemTime::now` panics in the browser, but a time
+    /// built from the epoch is fine. Saves list and sort their worlds by these times.
+    fn now() -> std::time::SystemTime {
+        let since = web_time::SystemTime::now()
+            .duration_since(web_time::UNIX_EPOCH)
+            .unwrap_or_default();
+        std::time::UNIX_EPOCH + since
     }
 
     static TREE: Mutex<BTreeMap<String, Node>> = Mutex::new(BTreeMap::new());
@@ -150,7 +169,7 @@ mod web {
         let k = key(path);
         let mut tree = TREE.lock().unwrap();
         make_parents(&mut tree, &k);
-        tree.insert(k, Node::File(Arc::new(data)));
+        tree.insert(k, Node::File(Arc::new(data), now()));
     }
 
     /// Adds one file (and its folders).
@@ -192,7 +211,7 @@ mod web {
     pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
         let path = path.as_ref();
         match TREE.lock().unwrap().get(&key(path)) {
-            Some(Node::File(d)) => Ok(d.as_ref().clone()),
+            Some(Node::File(d, _)) => Ok(d.as_ref().clone()),
             Some(Node::Dir) => Err(io::Error::new(io::ErrorKind::IsADirectory, "is a folder")),
             None => Err(not_found(path)),
         }
@@ -215,7 +234,7 @@ mod web {
     pub fn create_dir_all<P: AsRef<Path>>(path: P) -> io::Result<()> {
         let k = key(path.as_ref());
         let mut tree = TREE.lock().unwrap();
-        if let Some(Node::File(_)) = tree.get(&k) {
+        if let Some(Node::File(..)) = tree.get(&k) {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
                 "a file is there",
@@ -316,6 +335,24 @@ mod web {
     pub struct Metadata {
         dir: bool,
         len: u64,
+        /// Files only: folders have no time here.
+        modified: Option<std::time::SystemTime>,
+    }
+    impl Metadata {
+        fn of(node: &Node) -> Self {
+            match node {
+                Node::File(d, at) => Metadata {
+                    dir: false,
+                    len: d.len() as u64,
+                    modified: Some(*at),
+                },
+                Node::Dir => Metadata {
+                    dir: true,
+                    len: 0,
+                    modified: None,
+                },
+            }
+        }
     }
     impl Metadata {
         pub fn is_file(&self) -> bool {
@@ -334,7 +371,8 @@ mod web {
             FileType { dir: self.dir }
         }
         pub fn modified(&self) -> io::Result<std::time::SystemTime> {
-            Err(io::ErrorKind::Unsupported.into())
+            self.modified
+                .ok_or_else(|| io::ErrorKind::Unsupported.into())
         }
         pub fn created(&self) -> io::Result<std::time::SystemTime> {
             Err(io::ErrorKind::Unsupported.into())
@@ -347,11 +385,7 @@ mod web {
     pub fn metadata<P: AsRef<Path>>(path: P) -> io::Result<Metadata> {
         let path = path.as_ref();
         match TREE.lock().unwrap().get(&key(path)) {
-            Some(Node::File(d)) => Ok(Metadata {
-                dir: false,
-                len: d.len() as u64,
-            }),
-            Some(Node::Dir) => Ok(Metadata { dir: true, len: 0 }),
+            Some(node) => Ok(Metadata::of(node)),
             None => Err(not_found(path)),
         }
     }
@@ -394,7 +428,7 @@ mod web {
         let tree = TREE.lock().unwrap();
         match tree.get(&k) {
             Some(Node::Dir) => {}
-            Some(Node::File(_)) => {
+            Some(Node::File(..)) => {
                 return Err(io::Error::new(io::ErrorKind::NotADirectory, "a file"));
             }
             None => return Err(not_found(path)),
@@ -411,13 +445,7 @@ mod web {
             .map(|(name, node)| {
                 Ok(DirEntry {
                     path: path.join(&name[prefix.len()..]),
-                    meta: match node {
-                        Node::File(d) => Metadata {
-                            dir: false,
-                            len: d.len() as u64,
-                        },
-                        Node::Dir => Metadata { dir: true, len: 0 },
-                    },
+                    meta: Metadata::of(node),
                 })
             })
             .collect();
@@ -453,9 +481,14 @@ mod web {
             OpenOptions::new()
         }
         pub fn metadata(&self) -> io::Result<Metadata> {
+            let modified = match TREE.lock().unwrap().get(&key(&self.path)) {
+                Some(Node::File(_, at)) if !self.dirty => *at,
+                _ => now(),
+            };
             Ok(Metadata {
                 dir: false,
                 len: self.data.len() as u64,
+                modified: Some(modified),
             })
         }
         pub fn set_len(&mut self, size: u64) -> io::Result<()> {
@@ -602,7 +635,7 @@ mod web {
         pub fn open<P: AsRef<Path>>(&self, path: P) -> io::Result<File> {
             let path = path.as_ref();
             let existing = match TREE.lock().unwrap().get(&key(path)) {
-                Some(Node::File(d)) => Some(d.as_ref().clone()),
+                Some(Node::File(d, _)) => Some(d.as_ref().clone()),
                 Some(Node::Dir) => {
                     return Err(io::Error::new(io::ErrorKind::IsADirectory, "is a folder"));
                 }

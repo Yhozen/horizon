@@ -1546,10 +1546,66 @@ type PendingWrites = Mutex<HashMap<(bool, i32, i32), (u64, Record)>>;
 type WriteBatch = (bool, Vec<((i32, i32), Record, u64)>);
 
 /// The background thread that encodes chunks and writes them into the region files, in
-/// submission order.
+/// submission order. The browser build writes inline instead (`SaveDir::queue`).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 struct Writer {
     send: mpsc::Sender<WriteBatch>,
     thread: std::thread::JoinHandle<()>,
+}
+
+/// The region writer's state: encodes a batch and writes it into the region files.
+struct WriterContext {
+    root: PathBuf,
+    regions: Arc<RegionCache>,
+    entity_regions: Arc<RegionCache>,
+    pending: Arc<PendingWrites>,
+    outstanding: Arc<Outstanding>,
+}
+impl WriterContext {
+    fn write(&self, entities: bool, batch: Vec<((i32, i32), Record, u64)>) {
+        let (folder, cache) = if entities {
+            ("entities", &self.entity_regions)
+        } else {
+            ("region", &self.regions)
+        };
+        // IOWorker.pendingWrites: a chunk queued again since is
+        // written once, by its newest batch.
+        let newest = |k: &(i32, i32), seq: u64| {
+            self.pending.lock().map_or(true, |p| {
+                p.get(&(entities, k.0, k.1)).is_none_or(|p| p.0 <= seq)
+            })
+        };
+        let records: Vec<_> = batch
+            .iter()
+            .filter(|(k, _, seq)| newest(k, *seq))
+            .map(|(k, r, _)| (*k, r))
+            .collect();
+        let result = write_region_records(&self.root, cache, folder, &records);
+        if let Err(e) = &result {
+            let message = format!("failed to write {folder} files: {e}");
+            log::warn!("Horizon: {message}");
+            if let Ok(mut error) = self.outstanding.error.lock() {
+                *error = Some(message);
+            }
+        }
+        // Keep failed snapshots readable; never report them as durable.
+        if result.is_ok()
+            && let Ok(mut pending) = self.pending.lock()
+        {
+            for (k, _, seq) in &batch {
+                if pending
+                    .get(&(entities, k.0, k.1))
+                    .is_some_and(|p| p.0 == *seq)
+                {
+                    pending.remove(&(entities, k.0, k.1));
+                }
+            }
+        }
+        if let Ok(mut count) = self.outstanding.count.lock() {
+            *count -= 1;
+            self.outstanding.done.notify_all();
+        }
+    }
 }
 
 /// Writes still queued or running, with a condition to wait for none.
@@ -1689,78 +1745,56 @@ impl SaveDir {
                 .count
                 .lock()
                 .map_err(|_| "writer poisoned")? += 1;
-            let mut writer = self.writer.lock().map_err(|_| "writer poisoned")?;
-            let writer = writer.get_or_insert_with(|| self.start_writer());
-            if writer.send.send((entities, batch)).is_err() {
-                *self
-                    .outstanding
-                    .error
-                    .lock()
-                    .map_err(|_| "writer poisoned")? = Some("the region writer stopped".into());
-                *self
-                    .outstanding
-                    .count
-                    .lock()
-                    .map_err(|_| "writer poisoned")? -= 1;
-                self.outstanding.done.notify_all();
-                return Err("the region writer stopped".into());
-            }
+            // The browser build has no threads: write the batch now (the files are in memory).
+            #[cfg(target_arch = "wasm32")]
+            self.writer_context().write(entities, batch);
+            #[cfg(not(target_arch = "wasm32"))]
+            self.send_to_writer(entities, batch)?;
         }
         if wait {
             self.flush()?;
         }
         Ok(())
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn send_to_writer(&self, entities: bool, batch: Vec<((i32, i32), Record, u64)>) -> Result<()> {
+        let mut writer = self.writer.lock().map_err(|_| "writer poisoned")?;
+        let writer = writer.get_or_insert_with(|| self.start_writer());
+        if writer.send.send((entities, batch)).is_err() {
+            *self
+                .outstanding
+                .error
+                .lock()
+                .map_err(|_| "writer poisoned")? = Some("the region writer stopped".into());
+            *self
+                .outstanding
+                .count
+                .lock()
+                .map_err(|_| "writer poisoned")? -= 1;
+            self.outstanding.done.notify_all();
+            return Err("the region writer stopped".into());
+        }
+        Ok(())
+    }
+    /// What the region writer needs, detached from `self` for its thread.
+    fn writer_context(&self) -> WriterContext {
+        WriterContext {
+            root: self.root.clone(),
+            regions: self.regions.clone(),
+            entity_regions: self.entity_regions.clone(),
+            pending: self.pending.clone(),
+            outstanding: self.outstanding.clone(),
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     fn start_writer(&self) -> Writer {
         let (send, receive) = mpsc::channel::<WriteBatch>();
-        let root = self.root.clone();
-        let (regions, entity_regions) = (self.regions.clone(), self.entity_regions.clone());
-        let pending = self.pending.clone();
-        let outstanding = self.outstanding.clone();
+        let context = self.writer_context();
         let thread = std::thread::Builder::new()
             .name("horizon-region-writer".into())
             .spawn(move || {
                 for (entities, batch) in receive {
-                    let (folder, cache) = if entities {
-                        ("entities", &entity_regions)
-                    } else {
-                        ("region", &regions)
-                    };
-                    // IOWorker.pendingWrites: a chunk queued again since is
-                    // written once, by its newest batch.
-                    let newest = |k: &(i32, i32), seq: u64| {
-                        pending.lock().map_or(true, |p| {
-                            p.get(&(entities, k.0, k.1)).is_none_or(|p| p.0 <= seq)
-                        })
-                    };
-                    let records: Vec<_> = batch
-                        .iter()
-                        .filter(|(k, _, seq)| newest(k, *seq))
-                        .map(|(k, r, _)| (*k, r))
-                        .collect();
-                    let result = write_region_records(&root, cache, folder, &records);
-                    if let Err(e) = &result {
-                        let message = format!("failed to write {folder} files: {e}");
-                        log::warn!("Horizon: {message}");
-                        *outstanding.error.lock().unwrap() = Some(message);
-                    }
-                    // Keep failed snapshots readable; never report them as durable.
-                    if result.is_ok()
-                        && let Ok(mut pending) = pending.lock()
-                    {
-                        for (k, _, seq) in &batch {
-                            if pending
-                                .get(&(entities, k.0, k.1))
-                                .is_some_and(|p| p.0 == *seq)
-                            {
-                                pending.remove(&(entities, k.0, k.1));
-                            }
-                        }
-                    }
-                    if let Ok(mut count) = outstanding.count.lock() {
-                        *count -= 1;
-                        outstanding.done.notify_all();
-                    }
+                    context.write(entities, batch);
                 }
             })
             .expect("spawn region writer");
@@ -1970,12 +2004,34 @@ pub fn uuid_from_text(s: &str) -> Option<[i32; 4]> {
     }
     Some(out)
 }
+/// Differs between running game processes: the process id, or random bits in the
+/// browser (which has no process ids; `std::process::id` panics there).
+fn process_salt() -> u64 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        u64::from(std::process::id())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        static SALT: OnceLock<u64> = OnceLock::new();
+        *SALT.get_or_init(|| {
+            let mut bytes = [0; 8];
+            getrandom::fill(&mut bytes).map_or(0, |()| u64::from_le_bytes(bytes))
+        })
+    }
+}
 /// A random (version 4) UUID as vanilla's four-int form.
 pub fn random_uuid() -> [i32; 4] {
     let t = web_time::SystemTime::now()
         .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos() as u64);
-    let mut s = t ^ (std::process::id() as u64).rotate_left(32) ^ 0x9E37_79B9_7F4A_7C15;
+    // A counter keeps UUIDs made within one clock tick apart (the browser's clock has
+    // millisecond resolution).
+    static MADE: AtomicU64 = AtomicU64::new(0);
+    let made = MADE
+        .fetch_add(1, Ordering::Relaxed)
+        .wrapping_mul(0xD6E8_FEB8_6659_FD93);
+    let mut s = t ^ process_salt().rotate_left(32) ^ made ^ 0x9E37_79B9_7F4A_7C15;
     let mut next = || {
         s ^= s << 13;
         s ^= s >> 7;
@@ -3341,6 +3397,9 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
     fn prepare_loaded(&self, worker: &mut G::Worker, chunk: &Chunk) {
         self.inner.prepare_loaded(worker, chunk);
     }
+    fn idle_step(&self, worker: &mut G::Worker) -> bool {
+        self.inner.idle_step(worker)
+    }
     fn proto(&self, worker: &mut G::Worker, x: i32, z: i32) -> crate::streaming::Proto {
         let mut proto = self.inner.proto(worker, x, z);
         if let Some(saved) = self
@@ -3887,6 +3946,12 @@ mod tests {
         );
         let r = random_uuid();
         assert_eq!((r[1] >> 12) & 0xF, 4, "version 4");
+    }
+    #[test]
+    fn random_uuids_made_together_differ() {
+        // Entities saved in one batch get theirs within one clock tick.
+        let made: std::collections::HashSet<_> = (0..10_000).map(|_| random_uuid()).collect();
+        assert_eq!(made.len(), 10_000);
     }
     #[test]
     fn creaking_heart_keeps_its_protector_uuid() {

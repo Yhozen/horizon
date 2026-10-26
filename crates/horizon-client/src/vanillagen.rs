@@ -274,9 +274,15 @@ impl VanillaTerrain {
     pub fn origin(&self) -> crate::Result<ChunkPos> {
         Ok(self.generator.origin()?)
     }
-    /// Concentric ring positions of a structure set (strongholds), once known.
+    /// Concentric ring positions of a structure set (strongholds), searching
+    /// for them if no chunk generated so far needed them.
     pub fn ring_positions(&self, set: &str) -> Option<Vec<ChunkPos>> {
-        self.generator.ring_positions(set)
+        if let Some(rings) = self.generator.ring_positions(set) {
+            return Some(rings);
+        }
+        let mut worker = self.query.lock().unwrap_or_else(|e| e.into_inner());
+        let worker = worker.get_or_insert_with(|| self.generator.worker());
+        worker.ring_positions(set)
     }
 }
 /// The worldgen bundle at `dir`, loaded once and shared by every generator
@@ -323,6 +329,12 @@ impl ChunkGenerator for VanillaTerrain {
         for (x, z) in starts {
             worker.structure_starts(ChunkPos::new(x, z));
         }
+    }
+    /// The stronghold rings, one biome search per call, so that the browser
+    /// build computes them in idle frames rather than in one frame of
+    /// seconds when the player first walks out far enough to need them.
+    fn idle_step(&self, worker: &mut GeneratorWorker) -> bool {
+        worker.step_ring_search()
     }
     fn proto(&self, worker: &mut GeneratorWorker, x: i32, z: i32) -> Proto {
         match worker.generate_proto(ChunkPos::new(x, z)) {
