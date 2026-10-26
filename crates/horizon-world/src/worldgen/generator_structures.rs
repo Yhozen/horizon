@@ -96,6 +96,24 @@ impl RingWork {
             left = self.finished.wait(left).unwrap();
         }
     }
+    /// Run one search if any is left to take. True once every search is
+    /// done, without waiting for searches other threads took.
+    fn step<'a>(
+        &self,
+        preferred: impl Fn(usize) -> &'a BTreeSet<BiomeId>,
+        biomes: &mut dyn FnMut(&[[i32; 3]]) -> Vec<BiomeId>,
+    ) -> bool {
+        let i = self.next.fetch_add(1, Ordering::Relaxed);
+        if let Some((set, search)) = self.searches.get(i) {
+            let _ = self.found[i].set(search.find(preferred(*set), biomes));
+            let mut left = self.left.lock().unwrap();
+            *left -= 1;
+            if *left == 0 {
+                self.finished.notify_all();
+            }
+        }
+        *self.left.lock().unwrap() == 0
+    }
     /// The positions by set name, once every search is done.
     fn rings(&self, name: impl Fn(usize) -> String) -> Rings {
         let mut rings: Rings = self
@@ -257,6 +275,30 @@ impl StructureState {
         });
         self.rings
             .get_or_init(|| work.rings(|set| registry.sets[set].name.clone()))
+    }
+    /// One biome search of the ring computation, for a caller that spreads
+    /// it over time (the browser build's idle frames) instead of paying for
+    /// it inside the first start lookup that needs it. True once the rings
+    /// are known; the positions are the same as `rings` computes at once.
+    pub(super) fn step_rings(&self, context: &mut impl StartContext) -> bool {
+        if self.rings.get().is_some() {
+            return true;
+        }
+        let work = self.ring_work.get_or_init(|| {
+            RingWork::new(
+                self.registry
+                    .ring_searches(&self.possible_sets, context.seed()),
+            )
+        });
+        let registry = &self.registry;
+        if !work.step(|set| registry.ring_biomes(set), &mut |quarts| {
+            context.noise_biomes(quarts)
+        }) {
+            return false;
+        }
+        self.rings
+            .get_or_init(|| work.rings(|set| registry.sets[set].name.clone()));
+        true
     }
     /// Drop the cached starts, so that later chunks build fresh pieces (the
     /// pieces keep per-start placement state such as a shipwreck's height).

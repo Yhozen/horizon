@@ -330,6 +330,12 @@ impl ChunkGenerator for VanillaTerrain {
             worker.structure_starts(ChunkPos::new(x, z));
         }
     }
+    /// The stronghold rings, one biome search per call, so that the browser
+    /// build computes them in idle frames rather than in one frame of
+    /// seconds when the player first walks out far enough to need them.
+    fn idle_step(&self, worker: &mut GeneratorWorker) -> bool {
+        worker.step_ring_search()
+    }
     fn proto(&self, worker: &mut GeneratorWorker, x: i32, z: i32) -> Proto {
         match worker.generate_proto(ChunkPos::new(x, z)) {
             Ok(chunk) => Box::new(VanillaProto::Ready(Box::new(chunk))),

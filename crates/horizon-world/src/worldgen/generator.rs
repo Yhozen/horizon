@@ -1658,6 +1658,7 @@ trait SeededPipeline: Send + Sync {
     fn ring_positions(&self, set: &str) -> Option<Vec<ChunkPos>>;
     fn compute_ring_positions(&self, worker: &mut WorkerState, set: &str)
     -> Option<Vec<ChunkPos>>;
+    fn step_ring_search(&self, worker: &mut WorkerState) -> bool;
     fn spawn_position(&self) -> Result<[i32; 2], GeneratorError>;
     fn locate(
         &self,
@@ -1773,6 +1774,16 @@ where
             },
             set,
         )
+    }
+    fn step_ring_search(&self, worker: &mut WorkerState) -> bool {
+        let Some(structures) = &self.structures else {
+            return true;
+        };
+        structures.step_rings(&mut StructureQueries {
+            pipeline: self,
+            worker,
+            valid: BTreeSet::new(),
+        })
     }
     fn spawn_position(&self) -> Result<[i32; 2], GeneratorError> {
         if let Some(position) = self.spawn_position.get() {
@@ -2478,6 +2489,11 @@ impl GeneratorWorker {
     pub fn ring_positions(&mut self, set: &str) -> Option<Vec<ChunkPos>> {
         self.pipeline.compute_ring_positions(&mut self.state, set)
     }
+    /// One step of the ring search (`ring_positions`), for spreading it
+    /// over idle time; true once the rings are known.
+    pub fn step_ring_search(&mut self) -> bool {
+        self.pipeline.step_ring_search(&mut self.state)
+    }
     /// `/locate structure`: the nearest start of one of `names`.
     pub fn locate(
         &mut self,
@@ -2930,11 +2946,25 @@ mod tests {
         };
         let before = names(&generator);
         assert!(before.iter().flatten().count() > 0, "no starts to compare");
-        // The worker runs the search when nothing needed it yet.
-        let rings = generator
+        // Stepped one biome search at a time (the browser's idle frames)...
+        let mut worker = generator.worker();
+        let mut steps = 1;
+        while !worker.step_ring_search() {
+            steps += 1;
+        }
+        assert_eq!(steps, 128);
+        assert!(worker.step_ring_search());
+        let rings = worker
+            .ring_positions("minecraft:strongholds")
+            .expect("ring positions");
+        // ...the rings are those a worker finds at once when nothing needed
+        // them yet.
+        let at_once = OverworldGenerator::new(prepared_data().expect("data"), 1234)
+            .expect("generator")
             .worker()
             .ring_positions("minecraft:strongholds")
             .expect("ring positions");
+        assert_eq!(rings, at_once);
         generator.worker().forget_structure_starts();
         assert_eq!(names(&generator), before);
         for ring in &rings {
