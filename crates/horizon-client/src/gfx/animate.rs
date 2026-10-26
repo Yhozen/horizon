@@ -18,7 +18,7 @@ use horizon_core::fs::PathExt as _;
 use wgpu::util::DeviceExt;
 
 /// Bytes of `animate.wgsl`'s `Job`.
-const JOB_BYTES: usize = 20;
+const JOB_BYTES: usize = 24;
 /// `animate.wgsl`'s workgroup edge.
 const WORKGROUP: u32 = 8;
 
@@ -27,8 +27,9 @@ struct Sprite {
     /// What its layer shows (`None`: the frame the array was created with,
     /// rewritten on the first tick).
     shown: Option<FrameBlend>,
-    /// Its layer in its sprite array.
+    /// Its layer in its sprite array, and its tile in the layer's grid.
     layer: u32,
+    tile: u32,
     /// Each frame's mip chain: its offset in words in the group's frames.
     frames: Vec<u32>,
     /// Edge of the chains' first level.
@@ -53,11 +54,27 @@ pub(super) struct SpriteAnimator {
     pipeline: wgpu::ComputePipeline,
     /// Edge of the arrays' layers.
     size: u32,
+    /// The sprites `collect` found changed this tick.
+    changed: Vec<usize>,
+    /// The browser build's CPU animation (`Cpu`).
+    cpu: Option<Cpu>,
+}
+
+/// The browser build blends the changed sprites on the CPU and writes them
+/// into their layers through the queue: on a software adapter the compute
+/// pass, however small its dispatches, cost more than all of the writes.
+struct Cpu {
+    /// Every sprite's frames' chains, as the frames buffer holds them.
+    frames: Vec<Vec<Vec<u8>>>,
+    /// Each group's sprite array.
+    textures: Vec<wgpu::Texture>,
+    grid: u32,
 }
 
 impl SpriteAnimator {
-    /// `textures` are the sprite arrays, `split` layers each, `size` pixels
-    /// wide; `animations` hold their frames at that size.
+    /// `textures` are the sprite arrays, `split` layers each of `grid` by
+    /// `grid` sprites `size` pixels wide; `animations` hold their frames at
+    /// that size.
     pub fn new(
         device: &wgpu::Device,
         animations: &[SpriteAnimation],
@@ -65,7 +82,27 @@ impl SpriteAnimator {
         settings: &[Settings],
         textures: &[wgpu::Texture],
         split: u32,
+        grid: u32,
     ) -> Self {
+        let cpu = cfg!(target_arch = "wasm32");
+        Self::with_path(
+            device, animations, size, settings, textures, split, grid, cpu,
+        )
+    }
+
+    /// `new`, blending on the CPU (`Cpu`) or in the compute pass.
+    #[allow(clippy::too_many_arguments)]
+    fn with_path(
+        device: &wgpu::Device,
+        animations: &[SpriteAnimation],
+        size: u32,
+        settings: &[Settings],
+        textures: &[wgpu::Texture],
+        split: u32,
+        grid: u32,
+        cpu_path: bool,
+    ) -> Self {
+        let per = grid * grid;
         let limits = device.limits();
         let limit = limits
             .max_storage_buffer_binding_size
@@ -75,6 +112,7 @@ impl SpriteAnimator {
         let mut keys: Vec<(u32, usize)> = Vec::new();
         let mut counts: Vec<usize> = Vec::new();
         let mut sprites = Vec::with_capacity(animations.len());
+        let mut cpu_frames = Vec::new();
         for animation in animations {
             let chains: Vec<_> = (0..animation.frame_count())
                 .map(|frame| source_chain(animation.pixels(frame), size, settings, animation.layer))
@@ -103,7 +141,10 @@ impl SpriteAnimator {
                     offset
                 })
                 .collect();
-            let key = (animation.layer / split, buffer);
+            if cpu_path {
+                cpu_frames.push(chains.iter().map(|(chain, _)| chain.clone()).collect());
+            }
+            let key = (animation.layer / (split * per), buffer);
             let group = keys.iter().position(|&k| k == key).unwrap_or_else(|| {
                 keys.push(key);
                 counts.push(0);
@@ -113,7 +154,8 @@ impl SpriteAnimator {
             sprites.push(Sprite {
                 animation: animation.clone(),
                 shown: None,
-                layer: animation.layer % split,
+                layer: animation.layer % (split * per) / per,
+                tile: animation.layer % per,
                 frames: offsets,
                 edge: chains[0].1,
                 group,
@@ -151,7 +193,10 @@ impl SpriteAnimator {
             layout: None,
             module: &module,
             entry_point: Some("animate"),
-            compilation_options: Default::default(),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &[("GRID", f64::from(grid))],
+                ..Default::default()
+            },
             cache: None,
         });
         let layout = pipeline.get_bind_group_layout(0);
@@ -201,12 +246,22 @@ impl SpriteAnimator {
                 }
             })
             .collect();
+        let cpu = cpu_path.then(|| Cpu {
+            frames: cpu_frames,
+            textures: keys
+                .iter()
+                .map(|&(array, _)| textures[array as usize].clone())
+                .collect(),
+            grid,
+        });
         Self {
             sprites,
             groups,
             jobs,
             pipeline,
             size,
+            changed: Vec::new(),
+            cpu,
         }
     }
 
@@ -216,9 +271,61 @@ impl SpriteAnimator {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         uploads: &mut Uploads,
+        queue: &wgpu::Queue,
         tick: u64,
     ) {
         if self.collect(tick) == 0 {
+            return;
+        }
+        if let Some(cpu) = &self.cpu {
+            for group in &mut self.groups {
+                group.jobs.clear();
+            }
+            for &i in &self.changed {
+                let sprite = &self.sprites[i];
+                let blend = sprite.shown.expect("changed sprites show a blend");
+                let frames = &cpu.frames[i];
+                let chain = blend_chain(
+                    &frames[blend.frame],
+                    &frames[blend.next],
+                    blend.millis,
+                    sprite.edge,
+                    self.size,
+                );
+                let texture = &cpu.textures[sprite.group];
+                let mut start = 0;
+                for level in 0..texture.mip_level_count() {
+                    let width = self.size >> level;
+                    let bytes = (width * width * 4) as usize;
+                    // Written at once, ahead of this frame's commands, as the
+                    // copies at its start would be; the browser streams queue
+                    // writes without a staging buffer of their own.
+                    queue.write_texture(
+                        wgpu::TexelCopyTextureInfo {
+                            texture,
+                            mip_level: level,
+                            origin: wgpu::Origin3d {
+                                x: sprite.tile % cpu.grid * width,
+                                y: sprite.tile / cpu.grid * width,
+                                z: sprite.layer,
+                            },
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        &chain[start..start + bytes],
+                        wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(width * 4),
+                            rows_per_image: Some(width),
+                        },
+                        wgpu::Extent3d {
+                            width,
+                            height: width,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                    start += bytes;
+                }
+            }
             return;
         }
         for group in &self.groups {
@@ -247,14 +354,17 @@ impl SpriteAnimator {
     /// its layer shows; the number of jobs.
     fn collect(&mut self, tick: u64) -> usize {
         let mut count = 0;
-        for sprite in &mut self.sprites {
+        self.changed.clear();
+        for (i, sprite) in self.sprites.iter_mut().enumerate() {
             let blend = sprite.animation.blend(tick);
             if sprite.shown == Some(blend) {
                 continue;
             }
             sprite.shown = Some(blend);
+            self.changed.push(i);
             let job = [
                 sprite.layer,
+                sprite.tile,
                 sprite.frames[blend.frame],
                 sprite.frames[blend.next],
                 blend.millis,
@@ -286,11 +396,55 @@ fn source_chain(pixels: &[u8], size: u32, settings: &[Settings], layer: u32) -> 
     (super::mip_chain(&frame, edge, settings, layer, 1).0, edge)
 }
 
+/// `animate.wgsl` on the CPU: `chain` (first level `edge` wide) as the
+/// full chain of a `size` layer, mixed `millis` thousandths of the way
+/// towards `next`. The chain is mixed once, at its own size, then its first
+/// level repeated by whole pixels into the larger levels.
+fn blend_chain(chain: &[u8], next: &[u8], millis: u32, edge: u32, size: u32) -> Vec<u8> {
+    let mixed: Vec<u8>;
+    let source = if millis == 0 {
+        chain
+    } else {
+        mixed = chain
+            .iter()
+            .zip(next)
+            .map(|(&a, &b)| {
+                ((u32::from(a) * (1000 - millis) + u32::from(b) * millis + 500) / 1000) as u8
+            })
+            .collect();
+        &mixed
+    };
+    let levels = size.trailing_zeros() + 1;
+    let mut out = Vec::with_capacity((0..levels).map(|l| ((size >> l).pow(2) * 4) as usize).sum());
+    for level in 0..levels {
+        let width = (size >> level) as usize;
+        let edge = edge as usize;
+        if width >= edge {
+            let scale = width / edge;
+            for y in 0..edge {
+                let row = out.len();
+                for texel in source[y * edge * 4..(y + 1) * edge * 4].as_chunks::<4>().0 {
+                    for _ in 0..scale {
+                        out.extend_from_slice(texel);
+                    }
+                }
+                for _ in 1..scale {
+                    out.extend_from_within(row..row + width * 4);
+                }
+            }
+        } else {
+            let first = 4 * (edge * edge - width * width) / 3;
+            out.extend_from_slice(&source[first * 4..(first + width * width) * 4]);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mipmap::Strategy;
 
+    /// The plain per-texel form of `blend_chain` (and of `animate.wgsl`).
     /// `animate.wgsl` on the CPU: `chain` (first level `edge` wide) as the
     /// full chain of a `size` layer, mixed `millis` thousandths of the way
     /// towards `next`.
@@ -319,6 +473,25 @@ mod tests {
         }
         out
     }
+
+    #[test]
+    fn blend_chain_matches_the_per_texel_reference() {
+        for (edge, size) in [(8u32, 32u32), (16, 16), (4, 64), (32, 32)] {
+            let chain_len: usize = (0..edge.trailing_zeros() + 1)
+                .map(|l| ((edge >> l) * (edge >> l) * 4) as usize)
+                .sum();
+            let chain: Vec<u8> = (0..chain_len).map(|i| (i * 37 % 251) as u8).collect();
+            let next: Vec<u8> = (0..chain_len).map(|i| (i * 91 % 241) as u8).collect();
+            for millis in [0, 1, 333, 500, 999] {
+                assert_eq!(
+                    blend_chain(&chain, &next, millis, edge, size),
+                    reference(&chain, &next, millis, edge, size),
+                    "edge {edge} size {size} millis {millis}"
+                );
+            }
+        }
+    }
+    use crate::mipmap::Strategy;
 
     fn frame(size: u32, seed: u32) -> Vec<u8> {
         (0..size * size)
@@ -371,7 +544,7 @@ mod tests {
                     let fits = native.is_power_of_two() && native < size;
                     assert_eq!(edge, if fits { native } else { size });
                     assert_eq!(
-                        reference(&chain, &chain, 0, edge, size),
+                        blend_chain(&chain, &chain, 0, edge, size),
                         expected,
                         "{native} in {size}, {strategy:?}, item {item}"
                     );
@@ -418,7 +591,7 @@ mod tests {
                     super::super::mip_chain(pixels, 64, &sprites.mips, animation.layer, 1);
                 let (chain, edge) = source_chain(pixels, 64, &sprites.mips, animation.layer);
                 assert!(edge < 64, "layer {}", animation.layer);
-                assert_eq!(reference(&chain, &chain, 0, edge, 64), expected);
+                assert_eq!(blend_chain(&chain, &chain, 0, edge, 64), expected);
             }
         }
     }
@@ -502,8 +675,34 @@ mod tests {
         out
     }
 
+    /// The full mip chain of the sprite in `tile` of a `grid` by `grid`
+    /// layer's chain (`read_back`'s), sprites `size` wide.
+    fn untile(layer: &[u8], size: u32, grid: u32, tile: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut level_start = 0;
+        for level in 0..size.trailing_zeros() + 1 {
+            let edge = (size >> level) as usize;
+            let row = edge * grid as usize * 4;
+            let (x, y) = ((tile % grid) as usize * edge, (tile / grid) as usize * edge);
+            for r in 0..edge {
+                let at = level_start + (y + r) * row + x * 4;
+                out.extend_from_slice(&layer[at..at + edge * 4]);
+            }
+            level_start += row * edge * grid as usize;
+        }
+        out
+    }
+
     #[test]
     fn gpu_layers_match_the_cpu_chains_every_tick() {
+        for grid in [1, 2] {
+            for cpu in [false, true] {
+                gpu_layers_match_the_cpu_chains(grid, cpu);
+            }
+        }
+    }
+
+    fn gpu_layers_match_the_cpu_chains(grid: u32, cpu: bool) {
         let Some((device, queue)) = device() else {
             return;
         };
@@ -536,26 +735,37 @@ mod tests {
                 device.create_texture(&wgpu::TextureDescriptor {
                     label: None,
                     size: wgpu::Extent3d {
-                        width: size,
-                        height: size,
+                        width: size * grid,
+                        height: size * grid,
                         depth_or_array_layers: split,
                     },
                     mip_level_count: size.trailing_zeros() + 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::COPY_DST,
                     view_formats: &[],
                 })
             })
             .collect();
-        let mut animator = SpriteAnimator::new(&device, &animations, size, &mips, &textures, split);
+        let mut animator = SpriteAnimator::with_path(
+            &device,
+            &animations,
+            size,
+            &mips,
+            &textures,
+            split,
+            grid,
+            cpu,
+        );
         let mut uploads = Uploads::new(&device);
         let mut writes = Vec::new();
         for tick in [0, 0, 1, 2, 3, 4, 7, 7, 12, 30] {
             let mut encoder = device.create_command_encoder(&Default::default());
             let shown: Vec<_> = animator.sprites.iter().map(|s| s.shown).collect();
-            animator.animate(&mut encoder, &mut uploads, tick);
+            animator.animate(&mut encoder, &mut uploads, &queue, tick);
             writes.push(
                 animator
                     .sprites
@@ -570,15 +780,17 @@ mod tests {
                 let blend = animation.blend(tick);
                 let chain = |f| source_chain(animation.pixels(f), size, &mips, animation.layer);
                 let ((current, edge), (next, _)) = (chain(blend.frame), chain(blend.next));
+                let per = grid * grid;
                 let layers = read_back(
                     &device,
                     &queue,
-                    &textures[(animation.layer / split) as usize],
+                    &textures[(animation.layer / (split * per)) as usize],
                 );
+                let layer = &layers[(animation.layer % (split * per) / per) as usize];
                 assert_eq!(
-                    layers[(animation.layer % split) as usize],
-                    reference(&current, &next, blend.millis, edge, size),
-                    "layer {} at tick {tick}",
+                    untile(layer, size, grid, animation.layer % per),
+                    blend_chain(&current, &next, blend.millis, edge, size),
+                    "layer {} at tick {tick} in a grid of {grid} (CPU {cpu})",
                     animation.layer
                 );
             }
