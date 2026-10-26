@@ -12,6 +12,29 @@ const shell = Object.fromEntries([["index.html", "text/html"], ["release.json", 
 const gateway = (request, env, ctx) => handleGateway(request, env, ctx, shell);
 const identity = { getIdentity: async () => ({ email: allowedEmails[0] }) };
 
+test("multiplayer requires native Access and same origin, and strips credentials before routing", async () => {
+  let calls = 0;
+  const connect = async (incoming) => {
+    calls++;
+    assert.equal(incoming.url, "https://minecraft.internal/connect");
+    assert.deepEqual([...incoming.headers], [["upgrade", "websocket"]]);
+    return new Response("accepted");
+  };
+  const headers = { Upgrade: "websocket", Origin: "https://game.test", Cookie: "private", Authorization: "private" };
+  const ctx = { exports: {}, access: identity };
+  for (const context of [{ exports: {} }, { ...ctx, access: { getIdentity: async () => ({ email: "other@test.net" }) } }]) {
+    const response = await handleGateway(request("/connect", { headers }), env, context, shell, connect);
+    assert.equal(response.status, 403);
+  }
+  for (const origin of ["https://attacker.test", "null", ""]) {
+    assert.equal((await handleGateway(request("/connect", { headers: { ...headers, Origin: origin } }), env, ctx, shell, connect)).status, 403);
+  }
+  assert.equal(calls, 0);
+  assert.equal((await handleGateway(request("/connect"), env, ctx, shell, connect)).status, 426);
+  assert.equal((await handleGateway(request("/connect?host=attacker.test", { headers }), env, ctx, shell, connect)).status, 200);
+  assert.equal(calls, 1);
+});
+
 test("anonymous and forged-header requests never reach assets or a warm internal cache", async () => {
   let calls = 0;
   const ctx = { exports: { Assets: { fetch: async () => { calls++; return new Response("cached"); } } } };

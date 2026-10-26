@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { assetPath } from "../src/http.ts";
 
 const root = fileURLToPath(new URL("../.build", import.meta.url));
+const port = Number(process.env.HORIZON_WEB_PORT ?? 8080);
 const types = { html: "text/html", js: "text/javascript", json: "application/json",
   wasm: "application/wasm", bin: "application/octet-stream" };
 createServer(async (request, response) => {
@@ -23,4 +24,4 @@ createServer(async (request, response) => {
     if (request.method === "HEAD") response.end();
     else createReadStream(file).pipe(response);
   } catch { response.writeHead(404); response.end(); }
-}).listen(8080, "127.0.0.1", () => console.log("Horizon: http://127.0.0.1:8080 (local only; no Access login)"));
+}).listen(port, "127.0.0.1", () => console.log(`Horizon: http://127.0.0.1:${port} (local only; no Access login)`));

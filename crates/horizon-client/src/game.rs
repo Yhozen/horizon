@@ -11699,6 +11699,23 @@ impl Game<'_> {
                 .as_ref()
                 .map(|p| [p.position.x, p.position.y, p.position.z]),
         );
+        // Read-only diagnostics for browser multiplayer smoke runs and support reports.
+        let status = serde_json::json!({
+            "frame": self.frames, "screen": format!("{:?}", self.screen),
+            "chunks": self.world.chunks.len(), "meshed": self.streaming.meshed_total,
+            "player": self.player.as_ref().map(|p| [p.position.x, p.position.y, p.position.z]),
+            "remote": self.remote_status(),
+            "target": self.pick().map(|hit| serde_json::json!({
+                "pos": hit.pos,
+                "block": &*self.res.facts().get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2])).name,
+            })),
+            "held": self.held().map(|item| &*item.item),
+        });
+        if let Some(window) = web_sys::window()
+            && let Ok(value) = js_sys::JSON::parse(&status.to_string())
+        {
+            let _ = js_sys::Reflect::set(&window, &"horizonGame".into(), &value);
+        }
     }
 }
 /// clouds.png as filled cells (`CloudRenderer.prepare`: alpha 10 or more).

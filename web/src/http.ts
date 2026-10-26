@@ -38,7 +38,8 @@ export interface GatewayContext {
   exports: { Assets: { fetch(request: Request): Promise<Response> } };
 }
 
-export async function gateway(request: Request, env: GatewayEnv, ctx: GatewayContext, shell: Shell): Promise<Response> {
+export async function gateway(request: Request, env: GatewayEnv, ctx: GatewayContext, shell: Shell,
+  multiplayer?: (request: Request) => Promise<Response>): Promise<Response> {
   // The platform-populated Access context cannot be forged by supplying HTTP headers.
   try {
     const identity = await ctx.access?.getIdentity();
@@ -49,6 +50,16 @@ export async function gateway(request: Request, env: GatewayEnv, ctx: GatewayCon
   } catch { return failure("Could not verify access", 503); }
   if (request.method !== "GET" && request.method !== "HEAD") return failure("Method not allowed", 405);
   try {
+    const url = new URL(request.url);
+    if (url.pathname === "/connect") {
+      if (request.method !== "GET" || request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+        return failure("WebSocket required", 426);
+      }
+      if (request.headers.get("Origin") !== url.origin) return failure("Invalid connection origin", 403);
+      if (!multiplayer) return failure("Multiplayer unavailable", 503);
+      // Forward only the upgrade. Access cookies and assertions never reach the server.
+      return await multiplayer(new Request("https://minecraft.internal/connect", { headers: { Upgrade: "websocket" } }));
+    }
     return await route(request, ctx, shell);
   } catch { return failure("Content unavailable", 502); }
 }
