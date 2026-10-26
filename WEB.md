@@ -256,6 +256,10 @@ into play. Each one was a std call that panics on wasm32, reached from a path th
 - **Saved worlds were missing from Singleplayer** after Save & Quit: the in-memory files had no
   modification times, and the list drops worlds whose `level.dat` returns an error. They now have
   them.
+- **Save & Quit hung for 30 s and then stopped the game** when unsaved proto chunks were left: the
+  save screen doesn't run `Streaming::update`, which is where queued jobs run inline, so the saves it
+  waited for never ran. The final `Streaming::save(true)` then panicked in `recv_timeout` (std's
+  clock). Both now run the queued jobs themselves.
 
 Checked by a 25-minute soak (walking, clicking and commands) and a 10-minute vanilla-terrain walk
 with `/tp` jumps, then Save & Quit, re-entering the world from the list, walking and clicking.
