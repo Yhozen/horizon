@@ -114,6 +114,9 @@ mod web {
         open: Option<(wgpu::Buffer, u64)>,
         frame: Vec<wgpu::Buffer>,
         old: std::collections::VecDeque<Vec<wgpu::Buffer>>,
+        /// Bytes this frame's writes took so far, and the last frame's.
+        used: u64,
+        last: u64,
     }
 
     pub struct Slice {
@@ -145,6 +148,8 @@ mod web {
                 open: None,
                 frame: Vec::new(),
                 old: Default::default(),
+                used: 0,
+                last: 0,
             }
         }
         pub fn allocate(&mut self, size: NonZeroU64, alignment: NonZeroU64) -> Slice {
@@ -157,9 +162,13 @@ mod web {
                 if let Some((buffer, _)) = self.open.take() {
                     self.frame.push(buffer);
                 }
+                // Chrome zeroes and ships every byte of a buffer mapped at
+                // creation: size it for what the last frame wrote (most
+                // frames write a few kilobytes), not a whole chunk.
+                let expected = self.last.saturating_sub(self.used).next_multiple_of(1 << 16);
                 let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("web staging"),
-                    size: size.max(self.chunk),
+                    size: size.max(expected.clamp(1 << 16, self.chunk)),
                     usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
                     mapped_at_creation: true,
                 });
@@ -167,6 +176,7 @@ mod web {
             }
             let (buffer, used) = self.open.as_mut().expect("opened above");
             let offset = used.next_multiple_of(align);
+            self.used += offset + size - *used;
             *used = offset + size;
             Slice {
                 buffer: buffer.clone(),
@@ -196,6 +206,7 @@ mod web {
                 buffer.unmap();
             }
             self.old.push_back(std::mem::take(&mut self.frame));
+            self.last = std::mem::take(&mut self.used);
             while self.old.len() > FRAMES {
                 self.old.pop_front();
             }
