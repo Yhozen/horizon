@@ -1656,8 +1656,7 @@ trait SeededPipeline: Send + Sync {
     fn unsupported_features(&self) -> Vec<(String, String)>;
     fn forget_structure_starts(&self);
     fn ring_positions(&self, set: &str) -> Option<Vec<ChunkPos>>;
-    fn compute_ring_positions(&self, worker: &mut WorkerState, set: &str)
-    -> Option<Vec<ChunkPos>>;
+    fn compute_ring_positions(&self, worker: &mut WorkerState, set: &str) -> Option<Vec<ChunkPos>>;
     fn step_ring_search(&self, worker: &mut WorkerState) -> bool;
     fn spawn_position(&self) -> Result<[i32; 2], GeneratorError>;
     fn locate(
@@ -1761,11 +1760,7 @@ where
     fn ring_positions(&self, set: &str) -> Option<Vec<ChunkPos>> {
         self.structures.as_ref()?.cached_rings(set)
     }
-    fn compute_ring_positions(
-        &self,
-        worker: &mut WorkerState,
-        set: &str,
-    ) -> Option<Vec<ChunkPos>> {
+    fn compute_ring_positions(&self, worker: &mut WorkerState, set: &str) -> Option<Vec<ChunkPos>> {
         self.structures.as_ref()?.ring_positions(
             &mut StructureQueries {
                 pipeline: self,
@@ -2968,7 +2963,10 @@ mod tests {
         generator.worker().forget_structure_starts();
         assert_eq!(names(&generator), before);
         for ring in &rings {
-            assert!(f64::from(ring.x).hypot(f64::from(ring.z)) >= 76.0, "{ring:?}");
+            assert!(
+                f64::from(ring.x).hypot(f64::from(ring.z)) >= 76.0,
+                "{ring:?}"
+            );
         }
         assert_eq!(
             generator.ring_positions("minecraft:strongholds").as_ref(),

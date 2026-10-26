@@ -516,8 +516,8 @@ impl StructureRegistry {
     /// least 2.75 `distance` out (generateRingPositions: 4 `distance` minus up
     /// to 1.25 `distance` of jitter); the biome search moves a position at
     /// most 7.5 chunks on each axis, and an exclusion zone or `avoid` naming a
-    /// ring set reaches further by its range (all ranges added, so zones of
-    /// zones are covered).
+    /// ring set reaches further by sqrt(2) times its range: the search is a
+    /// square (all ranges added, so zones of zones are covered).
     pub fn ring_free_radius(&self, possible_sets: &[usize]) -> f64 {
         let rings: Vec<(&str, i32, i32)> = possible_sets
             .iter()
@@ -538,7 +538,9 @@ impl StructureRegistry {
         };
         let is_ring = |name: &str| rings.iter().any(|(n, _, _)| *n == name);
         let names_ring = self.sets.iter().any(|set| {
-            set.exclusion.as_ref().is_some_and(|(other, _)| is_ring(other))
+            set.exclusion
+                .as_ref()
+                .is_some_and(|(other, _)| is_ring(other))
                 || set
                     .avoid
                     .as_ref()
@@ -555,7 +557,7 @@ impl StructureRegistry {
         } else {
             0.0
         };
-        (nearest - 12.0 - reach).max(0.0)
+        (nearest - 12.0 - std::f64::consts::SQRT_2 * reach).max(0.0)
     }
     /// RandomSpreadStructurePlacement.getPotentialStructureChunk et al.
     /// RandomSpreadStructurePlacement.getPotentialStructureChunk for the
@@ -1538,6 +1540,67 @@ mod tests {
             "b places nothing once its own zone is checked"
         );
         assert!(!chunk("t:spread"), "b's spread alone is in range");
+    }
+
+    #[test]
+    fn ring_free_radius_covers_diagonal_exclusion_zones() {
+        for (zone, value) in [
+            (
+                "exclusion_zone",
+                json!({"other_set": "t:rings", "chunk_count": 16}),
+            ),
+            (
+                "horizon:exclusion_zone",
+                json!({"other_sets": ["t:rings"], "chunk_count": 16}),
+            ),
+        ] {
+            let mut placement = json!({"type": "minecraft:random_spread",
+                "spacing": 1, "separation": 0, "salt": 0});
+            placement[zone] = value;
+            let r = registry(
+                &[],
+                &[
+                    ("t:excluded", json!({"placement": placement})),
+                    (
+                        "t:rings",
+                        json!({"placement": {"type": "minecraft:concentric_rings",
+                    "distance": 32, "spread": 3, "count": 1, "preferred_biomes": "#t:one"}}),
+                    ),
+                ],
+            );
+            let possible: Vec<_> = (0..r.sets.len()).collect();
+            // Seed 4131's first ring, with its only preferred biome at the
+            // lower corner of the 112-block biome search, is (69, 44).
+            let rings: Rings = r
+                .ring_searches(&possible, 4131)
+                .into_iter()
+                .map(|(set, searches)| {
+                    let positions = searches
+                        .iter()
+                        .map(|search| {
+                            search.find(r.ring_biomes(set), &mut |quarts| {
+                                let mut biomes = vec![BiomeId(0); quarts.len()];
+                                biomes[0] = BiomeId(1);
+                                biomes
+                            })
+                        })
+                        .collect();
+                    (r.sets[set].name.clone(), positions)
+                })
+                .collect();
+            assert_eq!(rings["t:rings"], [ChunkPos::new(69, 44)]);
+            let set = r.sets.iter().find(|s| s.name == "t:excluded").unwrap();
+            let chunk = ChunkPos::new(53, 28);
+            assert!(!r.is_structure_chunk(set, 4131, chunk.x, chunk.z, &rings));
+            assert!(r.is_structure_chunk(set, 4131, chunk.x, chunk.z, &Rings::new()));
+            // The old radius of 60 incorrectly skipped the ring search here
+            // and cached a start which its exclusion zone should prevent.
+            assert!(
+                f64::from(chunk.x).hypot(f64::from(chunk.z)) >= r.ring_free_radius(&possible),
+                "{zone}"
+            );
+            assert!(r.ring_free_radius(&possible) > 0.0);
+        }
     }
 
     #[test]

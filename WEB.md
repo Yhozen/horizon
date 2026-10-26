@@ -68,6 +68,11 @@ pnpm package --archive dist/horizon-data.bin
 pnpm serve
 ```
 
+For a local server with cross-origin isolation headers, run
+`python3 tools/web/serve.py` from the repository root after packaging. It serves the
+shell from `web/.build/site` and the manifest's asset URLs from `web/.build/objects`;
+`--dir` selects another packaged build directory.
+
 Open <http://127.0.0.1:8080/> in desktop Chrome (113 or later, WebGPU on). The page passes these game
 arguments by default:
 

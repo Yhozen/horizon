@@ -165,7 +165,10 @@ mod web {
                 // Chrome zeroes and ships every byte of a buffer mapped at
                 // creation: size it for what the last frame wrote (most
                 // frames write a few kilobytes), not a whole chunk.
-                let expected = self.last.saturating_sub(self.used).next_multiple_of(1 << 16);
+                let expected = self
+                    .last
+                    .saturating_sub(self.used)
+                    .next_multiple_of(1 << 16);
                 let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("web staging"),
                     size: size.max(expected.clamp(1 << 16, self.chunk)),

@@ -371,7 +371,8 @@ mod web {
             FileType { dir: self.dir }
         }
         pub fn modified(&self) -> io::Result<std::time::SystemTime> {
-            self.modified.ok_or_else(|| io::ErrorKind::Unsupported.into())
+            self.modified
+                .ok_or_else(|| io::ErrorKind::Unsupported.into())
         }
         pub fn created(&self) -> io::Result<std::time::SystemTime> {
             Err(io::ErrorKind::Unsupported.into())

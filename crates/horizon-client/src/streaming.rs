@@ -921,7 +921,10 @@ impl Streaming {
             // A job runs whole inside the frame: name the ones long enough to show as a hitch.
             let took = at.elapsed();
             if took > std::time::Duration::from_millis(100) {
-                log::info!("Horizon web: {what} took {} ms in the frame", took.as_millis());
+                log::info!(
+                    "Horizon web: {what} took {} ms in the frame",
+                    took.as_millis()
+                );
             }
         }
     }
