@@ -94,7 +94,7 @@ fn main() -> Result<(), Error> {
         let before = world.chunks.len();
         let _ = streaming.update(&mut world);
         thread::sleep(Duration::from_millis(2));
-        quiet = if streaming.pending() == 0 && before == world.chunks.len() {
+        quiet = if !streaming.busy() && before == world.chunks.len() {
             quiet + 1
         } else {
             0
