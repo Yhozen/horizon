@@ -7,6 +7,8 @@ use crate::{
 };
 use horizon_world::nbt::Tag;
 
+#[cfg(test)]
+mod nesting_tests;
 mod skip;
 
 /// minecraft:data_component_type registry ids (26.3).
@@ -105,6 +107,10 @@ pub struct Profile {
 }
 impl Component {
     fn read(kind: i32, r: &mut Reader) -> Result<Self> {
+        // Templates and block predicates both recurse through this entry point.
+        r.read_nested(|r| Self::read_inner(kind, r))
+    }
+    fn read_inner(kind: i32, r: &mut Reader) -> Result<Self> {
         use component::*;
         Ok(match kind {
             MAX_STACK_SIZE | MAX_DAMAGE | DAMAGE | RARITY | REPAIR_COST | MAP_ID

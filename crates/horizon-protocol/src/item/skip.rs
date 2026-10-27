@@ -278,12 +278,14 @@ fn mob_effect(r: &mut Reader) -> Result<()> {
 /// MobEffectInstance.Details: amplifier, duration, ambient, showParticles, showIcon, then the
 /// hidden effect's Details, recursively.
 fn effect_details(r: &mut Reader) -> Result<()> {
-    varint(r)?;
-    varint(r)?;
-    boolean(r)?;
-    boolean(r)?;
-    boolean(r)?;
-    optional(r, effect_details)
+    r.read_nested(|r| {
+        varint(r)?;
+        varint(r)?;
+        boolean(r)?;
+        boolean(r)?;
+        boolean(r)?;
+        optional(r, effect_details)
+    })
 }
 /// ConsumeEffect.STREAM_CODEC: the consume_effect_type id, then that type's fields.
 fn consume_effect(r: &mut Reader) -> Result<()> {

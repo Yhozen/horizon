@@ -8,14 +8,36 @@ use std::marker::PhantomData;
 /// Vanilla's default NBT quota for network tags (NbtAccounter.defaultQuota).
 pub const NBT_QUOTA: usize = 2_097_152;
 
+/// Bound recursive wire values independently of the packet's byte limit.
+pub(crate) const MAX_NESTING_DEPTH: usize = 32;
+
 /// A cursor over a received packet body.
 pub struct Reader<'a> {
     data: &'a [u8],
     pos: usize,
+    nesting_depth: usize,
 }
 impl<'a> Reader<'a> {
     pub fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0 }
+        Self {
+            data,
+            pos: 0,
+            nesting_depth: 0,
+        }
+    }
+    /// Share a depth budget across mutually recursive codecs. Siblings do not
+    /// accumulate depth, and a failed read releases its level too.
+    pub(crate) fn read_nested<T>(
+        &mut self,
+        read: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        if self.nesting_depth >= MAX_NESTING_DEPTH {
+            return Err(Error::new("protocol values nest too deep"));
+        }
+        self.nesting_depth += 1;
+        let result = read(self);
+        self.nesting_depth -= 1;
+        result
     }
     pub fn remaining(&self) -> usize {
         self.data.len() - self.pos
