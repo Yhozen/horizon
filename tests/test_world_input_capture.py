@@ -90,17 +90,19 @@ struct Game {
     focused: bool, agent_pointer: bool, window: Option<Window>, mouse: Mouse,
     captured: bool, title: Option<()>, screen: Screen, remote: Option<Remote>,
     mining: bool, lan_acting: Option<u32>, renderer: Option<Renderer>, cursor: (f32, f32),
+    inventory_drag: bool,
 }
 impl Default for Game {
     fn default() -> Self {
         Self { focused: true, agent_pointer: false, window: Some(Window::default()),
             mouse: Mouse::default(), captured: false, title: None,
             screen: Screen::Playing, remote: None, mining: false, lan_acting: None,
-            renderer: None, cursor: (0.0, 0.0) }
+            renderer: None, cursor: (0.0, 0.0), inventory_drag: true }
     }
 }
 impl Game {
     fn stop_mining(&mut self) { self.mining = false; }
+    fn reset_inventory_clicks(&mut self) { self.inventory_drag = false; }
 METHODS
 }
 fn main() {
@@ -116,19 +118,23 @@ fn main() {
             game.title = None;
             game.capture_loaded_world();
             assert!(game.captured);
+            assert!(!game.inventory_drag);
             assert!(game.mouse.ignore_first);
             assert!(!game.window.as_ref().unwrap().visible.get());
             for screen in [Screen::Paused, Screen::Inventory] {
                 game.screen = screen;
                 game.mining = true;
+                game.inventory_drag = true;
                 game.capture(false);
                 assert!(!game.mining);
+                assert!(game.inventory_drag);
                 game.capture_loaded_world();
                 assert!(!game.captured);
                 assert!(game.window.as_ref().unwrap().visible.get());
                 game.screen = Screen::Playing;
                 game.capture(true);
                 assert!(game.captured);
+                assert!(!game.inventory_drag);
             }
         }
         // Alt+Tab during loading: no native grab or agent-pointer reset.
