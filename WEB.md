@@ -10,6 +10,10 @@ opens the WebGPU device, creates a fresh single-player world, ticks it on the pa
 Join multiplayer in the page's session bar to use the shared server instead. Choppy is expected:
 one browser thread handles the client simulation and rendering.
 
+[UPSTREAM.md](UPSTREAM.md) records the upstream source commits backported into this browser fork,
+the most recent backport, and the upstream tip last assessed. Update that record with each import;
+its backport pointer represents selective fixes, not a complete upstream sync.
+
 ## 1. Toolchain
 
 ```sh
