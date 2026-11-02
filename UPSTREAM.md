@@ -47,7 +47,9 @@ commit has different content. Each row is present in this branch.
 | [`f83be65d79d3e1717ba3b99c05ecf77c621545ee`](https://github.com/ludovic111/horizon/commit/f83be65d79d3e1717ba3b99c05ecf77c621545ee) | Send creative inventory edits with the click, not at tick end | 2026-11-02 |
 | [`8f2677105330b06ad8e0711ca712294d436d8161`](https://github.com/ludovic111/horizon/commit/8f2677105330b06ad8e0711ca712294d436d8161) | Fall back to level.dat_old and keep an unreadable level.dat | 2026-11-02 |
 | [`8ba30576d14f174976a26303cd17e0749c7ad223`](https://github.com/ludovic111/horizon/commit/8ba30576d14f174976a26303cd17e0749c7ad223) | Back up an unreadable player file and fall back to its .dat_old | 2026-11-02 |
-
+| [`c9bfcdcef7a2b9c2de6670d5b1585561eb34e376`](https://github.com/ludovic111/horizon/commit/c9bfcdcef7a2b9c2de6670d5b1585561eb34e376) | Creative item tabs: Q on a hotbar slot drops the item instead of deleting it | 2026-11-02 |
+| [`85ec4c8c65ad63b0b39cf55e1843177a69e00a5d`](https://github.com/ludovic111/horizon/commit/85ec4c8c65ad63b0b39cf55e1843177a69e00a5d) | lan_e2e creative_throw: clear each step's drops before the next | 2026-11-02 |
+| [`5a6d49212647999d98a054b6eef3ab633d980879`](https://github.com/ludovic111/horizon/commit/5a6d49212647999d98a054b6eef3ab633d980879) | Creative Survival Inventory tab: Q while carrying drops from the slot | 2026-11-02 |
 
 ## Latest comparison
 
@@ -65,10 +67,6 @@ resource-pack metadata precedence (`04bc30606d09fa618f5e9fef8aec99839b895639`), 
 picking (`f92cf816b17e8376d497c67a4d9edea9f2facb25` plus
 `0543cf0345e840087283e2c8795af6e319f232c0`). These are **not imported**. Native staging-buffer changes,
 the client crate split, and worker-based GUI atlas compression need separate browser evaluation.
-| [`c9bfcdcef7a2b9c2de6670d5b1585561eb34e376`](https://github.com/ludovic111/horizon/commit/c9bfcdcef7a2b9c2de6670d5b1585561eb34e376) | Creative item tabs: Q on a hotbar slot drops the item instead of deleting it | 2026-11-02 |
-| [`85ec4c8c65ad63b0b39cf55e1843177a69e00a5d`](https://github.com/ludovic111/horizon/commit/85ec4c8c65ad63b0b39cf55e1843177a69e00a5d) | lan_e2e creative_throw: clear each step's drops before the next | 2026-11-02 |
-| [`5a6d49212647999d98a054b6eef3ab633d980879`](https://github.com/ludovic111/horizon/commit/5a6d49212647999d98a054b6eef3ab633d980879) | Creative Survival Inventory tab: Q while carrying drops from the slot | 2026-11-02 |
-
 
 ## Maintaining the record
 
