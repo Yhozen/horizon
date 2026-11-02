@@ -83,6 +83,42 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn world_picker_keeps_a_recoverable_world_selectable_without_changing_its_files() {
+    for missing in [false, true] {
+        let mut f = Fixture::new();
+        f.world("World", "Recovered world");
+        let current = f.title.saves.join("World/level.dat");
+        let backup = f.title.saves.join("World/level.dat_old");
+        let bytes = fs::read(&current).unwrap();
+        fs::copy(&current, &backup).unwrap();
+        let modified = fs::metadata(&backup).unwrap().modified().unwrap();
+        if missing {
+            fs::remove_file(&current).unwrap();
+        } else {
+            fs::write(&current, b"broken NBT").unwrap();
+        }
+        let worlds = list_worlds(&f.title.saves);
+        assert_eq!(worlds.len(), 1);
+        let world = &worlds[0];
+        assert_eq!(world.name, "Recovered world");
+        assert_eq!(world.version, "26.3");
+        assert!(world.commands && world.creative);
+        assert_eq!(world.modified, modified);
+        f.select();
+        assert!(matches!(
+            f.click("Play Selected World"),
+            Action::Play { folder } if folder == "World"
+        ));
+        assert_eq!(fs::read(&backup).unwrap(), bytes);
+        if missing {
+            assert!(!current.exists_vfs());
+        } else {
+            assert_eq!(fs::read(&current).unwrap(), b"broken NBT");
+        }
+    }
+}
+
+#[test]
 fn direct_connection_remembers_the_address_on_cancel_escape_and_join() {
     let mut f = Fixture::new();
     f.title.last_server = "localhost:25566".into();
