@@ -4,8 +4,8 @@ Upstream repository: <https://github.com/ludovic111/horizon>, branch `main`.
 
 | Pointer | Upstream commit |
 | --- | --- |
-| Most recent backported source | [`13e946a89c329411dab3ba3f1256cc34a384a14d`](https://github.com/ludovic111/horizon/commit/13e946a89c329411dab3ba3f1256cc34a384a14d) — hotbar stack borrowing |
-| Main merge that introduced that source | [`5689e63500f1905affec3b8e4ddcb31f650a3820`](https://github.com/ludovic111/horizon/commit/5689e63500f1905affec3b8e4ddcb31f650a3820) — upstream PR #2169 |
+| Most recent backported source | [`67b6e75c0b4361c9aa2fb04ea020410cf0fe5167`](https://github.com/ludovic111/horizon/commit/67b6e75c0b4361c9aa2fb04ea020410cf0fe5167) — The container screen's press state does not survive the screen |
+| Main merge that introduced that source | [`91d84ba3c2a00a07a58227f142d740d295034d2b`](https://github.com/ludovic111/horizon/commit/91d84ba3c2a00a07a58227f142d740d295034d2b) — upstream PR #2561 |
 | Upstream tip assessed on 2026-10-27 | [`51447edda45e15bfa6b91ae57e78689767a4cf72`](https://github.com/ludovic111/horizon/commit/51447edda45e15bfa6b91ae57e78689767a4cf72) |
 
 These are selective imports. The backport pointer does **not** mean every earlier upstream change
@@ -36,11 +36,9 @@ commit has different content. Each row is present in this branch.
 | [`0f6569070d13ba42d43db11711d62c572bf2b50d`](https://github.com/ludovic111/horizon/commit/0f6569070d13ba42d43db11711d62c572bf2b50d) | Cache static GUI item vertices and borrow default components | 2026-10-27 |
 | [`5389f72b9a7479d791f66977a25b6bfd1bc5d9cb`](https://github.com/ludovic111/horizon/commit/5389f72b9a7479d791f66977a25b6bfd1bc5d9cb) | Invalidate creative cache after resource/language reload | 2026-10-27 |
 | [`13e946a89c329411dab3ba3f1256cc34a384a14d`](https://github.com/ludovic111/horizon/commit/13e946a89c329411dab3ba3f1256cc34a384a14d) | Borrow hotbar stacks while drawing | 2026-10-27 |
+| [`9223b401e7bb8864711e1f05c891b9d3187bbadb`](https://github.com/ludovic111/horizon/commit/9223b401e7bb8864711e1f05c891b9d3187bbadb) | Decode all item data components (with fork recursion bounds) | [Fork #7](https://github.com/Yhozen/horizon/pull/7) |
+| [`67b6e75c0b4361c9aa2fb04ea020410cf0fe5167`](https://github.com/ludovic111/horizon/commit/67b6e75c0b4361c9aa2fb04ea020410cf0fe5167) | The container screen's press state does not survive the screen | 2026-11-02 |
 
-Item-component decoding, source
-[`9223b401e7bb8864711e1f05c891b9d3187bbadb`](https://github.com/ludovic111/horizon/commit/9223b401e7bb8864711e1f05c891b9d3187bbadb),
-is in separate [fork PR #7](https://github.com/Yhozen/horizon/pull/7). It is not present in this branch
-and does not count toward its backport pointer.
 
 ## Maintaining the record
 
