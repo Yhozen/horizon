@@ -14,7 +14,7 @@ the recorded source whose first containing merge is latest on upstream `main`'s 
 not the source's author timestamp or the order in which this fork applied patches. The source SHA
 identifies the actual backport; the containing merge records its place on upstream `main`.
 
-orted sources
+## Imported sources
 
 This list records the selective backports made for the browser fork; the fork's original base already
 contains other upstream history. An adapted backport retains its source SHA here even when its fork

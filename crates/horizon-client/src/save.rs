@@ -1045,8 +1045,12 @@ pub fn encode_with(
                 .collect();
             s.insert("References".into(), Tag::Compound(refs));
         }
-        map.entry("PostProcessing".into())
+        let post = map
+            .entry("PostProcessing".into())
             .or_insert_with(|| Tag::List(vec![Tag::List(Vec::new()); shape.section_count()]));
+        if let Tag::List(lists) = post {
+            fit_post_processing(lists, shape);
+        }
     }
     if let Some(t) = tables {
         put(&mut root, "Heightmaps", heightmaps(chunk, t, shape));
@@ -1061,6 +1065,18 @@ pub fn encode_with(
         name: "".into(),
         tag: root,
     }
+}
+/// One list per section of the level (`ChunkAccess.postProcessing`). Nether
+/// and End chunks saved before levels had their own height kept the
+/// Overworld's 24, counted from its floor: realign them.
+fn fit_post_processing(lists: &mut Vec<Tag>, shape: LevelShape) {
+    if lists.len() == shape.section_count() {
+        return;
+    }
+    if lists.len() == SECTIONS {
+        lists.drain(..(shape.min_section() - (MIN_Y >> 4)).max(0) as usize);
+    }
+    lists.resize(shape.section_count(), Tag::List(Vec::new()));
 }
 /// Root keys `encode_with` regenerates; everything else is kept as loaded.
 const GENERATED_KEYS: [&str; 14] = [
@@ -3567,6 +3583,29 @@ mod tests {
             );
             assert_eq!(&client.iter().find(|(id, _)| *id == 1).unwrap().1, surface);
         }
+    }
+
+    #[test]
+    fn old_overworld_height_post_processing_is_realigned() {
+        // Saved before levels had their own height: 24 lists from y=-64,
+        // with a mark in the section at y=0.
+        let mark = Tag::List(vec![Tag::Short(0x123)]);
+        let mut old = vec![Tag::List(Vec::new()); SECTIONS];
+        old[4] = mark.clone();
+        for shape in [LevelShape::NETHER, LevelShape::END] {
+            let mut lists = old.clone();
+            fit_post_processing(&mut lists, shape);
+            assert_eq!(lists.len(), 16);
+            assert_eq!(lists[0], mark);
+            assert!(lists[1..].iter().all(|l| *l == Tag::List(Vec::new())));
+            // Already the level's own height: unchanged.
+            let mut again = lists.clone();
+            fit_post_processing(&mut again, shape);
+            assert_eq!(again, lists);
+        }
+        let mut lists = old.clone();
+        fit_post_processing(&mut lists, LevelShape::OVERWORLD);
+        assert_eq!(lists, old);
     }
 
     #[test]
