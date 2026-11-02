@@ -5517,7 +5517,45 @@ impl Game<'_> {
             self.creative_display_click(slot, button, input);
             return true;
         }
+        if let Some(slot) = slot
+            && input == horizon_client::menu::Input::Throw
+            && self.carried.is_some()
+            && ((slot < 9 && self.creative_tab_open()) || self.creative_inventory_open())
+        {
+            self.creative_throw_carrying(slot, button);
+            return true;
+        }
         self.menu_ops(&[(slot, button, input)])
+    }
+    /// CreativeModeInventoryScreen.slotClicked: Q drops from the hovered slot
+    /// while keeping the cursor stack. The menu's THROW requires an empty hand.
+    fn creative_throw_carrying(&mut self, slot: usize, button: i32) {
+        let Some(old) = self.slot_mut(slot).clone() else {
+            return;
+        };
+        let count = if button == 0 {
+            1
+        } else if self.creative_inventory_open() {
+            let max = self.res.items().get(&old.item).map_or(64, |i| i.max_stack);
+            old.count.min(max)
+        } else {
+            old.count
+        };
+        let before = self.player_equipment();
+        let left = old.count - count;
+        *self.slot_mut(slot) = (left > 0).then(|| ItemStack {
+            count: left,
+            ..old.clone()
+        });
+        self.player_equipment_changed(&before);
+        self.apply_equipment();
+        let thrown = ItemStack { count, ..old };
+        if self.remote.is_some() {
+            self.remote_creative_throw(thrown);
+            self.send_creative_slots();
+        } else {
+            self.player_drop(thrown);
+        }
     }
     /// A click on an item tab's display slot: the screen's own handling
     /// (`creative::click_display`), never the menu's.
@@ -6019,8 +6057,9 @@ impl Game<'_> {
                 self.player_drop(stack);
             }
             self.award_crafted(&crafted);
-        } else if self.creative_inventory_open() {
-            // The creative screen owns its menu; the server only receives changed slots and drops.
+        } else if self.screen == Screen::Creative {
+            // Every creative tab sends its menu's drops to the server, including
+            // the item tabs' hotbar; the changed slots follow with the click.
             for stack in dropped {
                 self.remote_creative_throw(stack);
             }
