@@ -4,8 +4,8 @@ Upstream repository: <https://github.com/ludovic111/horizon>, branch `main`.
 
 | Pointer | Upstream commit |
 | --- | --- |
-| Most recent backported source | [`67b6e75c0b4361c9aa2fb04ea020410cf0fe5167`](https://github.com/ludovic111/horizon/commit/67b6e75c0b4361c9aa2fb04ea020410cf0fe5167) — The container screen's press state does not survive the screen |
-| Main merge that introduced that source | [`91d84ba3c2a00a07a58227f142d740d295034d2b`](https://github.com/ludovic111/horizon/commit/91d84ba3c2a00a07a58227f142d740d295034d2b) — upstream PR #2561 |
+| Most recent backported source | [`27cd7982a33ff5e51feceff133431cd83cb880f9`](https://github.com/ludovic111/horizon/commit/27cd7982a33ff5e51feceff133431cd83cb880f9) — Fix GPU timer readback after buffer destruction |
+| Main merge that introduced that source | [`0f365f9404aaae2f13b6af5d15cc50548bd4feb9`](https://github.com/ludovic111/horizon/commit/0f365f9404aaae2f13b6af5d15cc50548bd4feb9) — upstream PR #6354 |
 | Upstream tip assessed on 2026-10-27 | [`51447edda45e15bfa6b91ae57e78689767a4cf72`](https://github.com/ludovic111/horizon/commit/51447edda45e15bfa6b91ae57e78689767a4cf72) |
 
 These are selective imports. The backport pointer does **not** mean every earlier upstream change
@@ -38,6 +38,7 @@ commit has different content. Each row is present in this branch.
 | [`13e946a89c329411dab3ba3f1256cc34a384a14d`](https://github.com/ludovic111/horizon/commit/13e946a89c329411dab3ba3f1256cc34a384a14d) | Borrow hotbar stacks while drawing | 2026-10-27 |
 | [`9223b401e7bb8864711e1f05c891b9d3187bbadb`](https://github.com/ludovic111/horizon/commit/9223b401e7bb8864711e1f05c891b9d3187bbadb) | Decode all item data components (with fork recursion bounds) | [Fork #7](https://github.com/Yhozen/horizon/pull/7) |
 | [`67b6e75c0b4361c9aa2fb04ea020410cf0fe5167`](https://github.com/ludovic111/horizon/commit/67b6e75c0b4361c9aa2fb04ea020410cf0fe5167) | The container screen's press state does not survive the screen | 2026-11-02 |
+| [`27cd7982a33ff5e51feceff133431cd83cb880f9`](https://github.com/ludovic111/horizon/commit/27cd7982a33ff5e51feceff133431cd83cb880f9) | Fix GPU timer readback after buffer destruction | 2026-11-02 |
 
 
 ## Maintaining the record
