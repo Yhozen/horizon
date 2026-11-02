@@ -5540,9 +5540,18 @@ impl Game<'_> {
         let catalog = self.res.items();
         let max = |s: &ItemStack| catalog.get(&s.item).map_or(64, |i| i.max_stack);
         match click_display(&mut self.carried, shown, max, button, input) {
-            DisplayClick::Hotbar(i, stack) => self.inventory[i] = Some(stack),
+            DisplayClick::Hotbar(i, stack) if i < self.inventory.len() => {
+                self.inventory[i] = Some(stack);
+            }
+            DisplayClick::Offhand(stack) => self.offhand = Some(stack),
+            // handleCreativeModeItemDrop: a server drops the stack sent to slot -1.
+            DisplayClick::Drop(stack) if self.remote.is_some() => self.remote_creative_throw(stack),
             DisplayClick::Drop(stack) => self.player_drop(stack),
-            DisplayClick::Nothing => {}
+            _ => {}
+        }
+        // CreativeInventoryListener sends the changed slots with the click.
+        if self.remote.is_some() {
+            self.send_creative_slots();
         }
     }
     /// Several clicks on one menu instance (a quick craft drag is three).
@@ -5556,7 +5565,7 @@ impl Game<'_> {
             self.crafter_slot_clicked(*slot, *button, *input);
         }
         let ops = ops.to_vec();
-        self.menu_session(move |menu, env, to_menu| {
+        let done = self.menu_session(move |menu, env, to_menu| {
             let mut clicks = Vec::new();
             for &(slot, button, input) in &ops {
                 let menu_slot = match slot {
@@ -5580,7 +5589,11 @@ impl Game<'_> {
                 }
             }
             Some(true)
-        })
+        });
+        if done && self.remote.is_some() && self.screen == Screen::Creative {
+            self.send_creative_slots();
+        }
+        done
     }
     /// A sound a menu click made the player play (a bundle's insert or
     /// remove): `Entity.playSound` at the player.
@@ -6006,6 +6019,11 @@ impl Game<'_> {
                 self.player_drop(stack);
             }
             self.award_crafted(&crafted);
+        } else if self.creative_inventory_open() {
+            // The creative screen owns its menu; the server only receives changed slots and drops.
+            for stack in dropped {
+                self.remote_creative_throw(stack);
+            }
         }
         if kind == Kind::Loom {
             if let Some(s) = self.station.as_mut() {
@@ -6195,12 +6213,15 @@ impl Game<'_> {
                     return;
                 }
                 if let Some(moved) = self.last_quick_moved.clone() {
-                    if self.remote.is_some() {
+                    if self.remote.is_some() && self.screen != Screen::Creative {
                         self.remote_quick_move_all(slot, &moved);
                     } else {
                         self.menu_session(|menu, env, to_menu| {
                             Some(menu.quick_move_all(env, to_menu(slot)?, &moved).is_ok())
                         });
+                        if self.remote.is_some() {
+                            self.send_creative_slots();
+                        }
                     }
                 }
                 self.last_inv_click = None;
@@ -6355,7 +6376,11 @@ impl Game<'_> {
         use horizon_client::menu::Input;
         let button = i32::from(right);
         if self.remote.is_some() {
-            self.remote_throw(right, input);
+            if self.screen == Screen::Creative {
+                self.remote_creative_drop(right);
+            } else {
+                self.remote_throw(right, input);
+            }
             return;
         }
         let before = self.carried.clone();

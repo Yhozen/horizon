@@ -517,6 +517,8 @@ pub enum DisplayClick {
     Nothing,
     /// SWAP: the hotbar slot gets a full stack of the item.
     Hotbar(usize, ItemStack),
+    /// SWAP with button 40 (Key F): the off-hand gets a full stack of the item.
+    Offhand(ItemStack),
     /// THROW: a copy of the item is dropped.
     Drop(ItemStack),
 }
@@ -538,8 +540,11 @@ pub fn click_display(
     match input {
         Input::Swap => {
             return match shown {
-                Some(s) => DisplayClick::Hotbar(button as usize, copy(s, max(s))),
-                None => DisplayClick::Nothing,
+                Some(s) if button == 40 => DisplayClick::Offhand(copy(s, max(s))),
+                Some(s) if (0..9).contains(&button) => {
+                    DisplayClick::Hotbar(button as usize, copy(s, max(s)))
+                }
+                Some(_) | None => DisplayClick::Nothing,
             };
         }
         Input::Clone => {
@@ -662,10 +667,14 @@ mod tests {
             display(Some(stack("ender_pearl", 9)), 1, Pickup).0,
             Some(stack("ender_pearl", 8))
         );
-        // Number keys fill a hotbar slot, Q drops copies, pick block clones.
+        // Number keys fill a hotbar slot, F fills off-hand, Q drops copies, pick block clones.
         assert_eq!(
             display(None, 3, Swap).1,
             DisplayClick::Hotbar(3, stack("stone", 64))
+        );
+        assert_eq!(
+            display(None, 40, Swap).1,
+            DisplayClick::Offhand(stack("stone", 64))
         );
         assert_eq!(
             display(None, 0, Throw).1,
@@ -690,6 +699,38 @@ mod tests {
         assert_eq!(carried, Some(stack("dirt", 2)));
         click_display(&mut carried, None, |_| 64, 0, Pickup);
         assert_eq!(carried, None);
+    }
+
+    #[test]
+    fn display_swaps_keep_components_and_ignore_invalid_buttons() {
+        use crate::menu::Input::Swap;
+        let mut shown = stack("ender_pearl", 1);
+        shown.damage = 3;
+        shown.extra = Some(Box::new(crate::item_data::StackData {
+            custom_name: Some("Kept on swap".into()),
+            ..Default::default()
+        }));
+        let cursor = Some(stack("dirt", 2));
+        let mut carried = cursor.clone();
+        let mut full = shown.clone();
+        full.count = 16;
+        assert_eq!(
+            click_display(&mut carried, Some(&shown), |_| 16, 40, Swap),
+            DisplayClick::Offhand(full)
+        );
+        assert_eq!(carried, cursor);
+        for button in [-1, 9, 39, 41, i32::MAX] {
+            assert_eq!(
+                click_display(&mut carried, Some(&shown), |_| 16, button, Swap),
+                DisplayClick::Nothing
+            );
+            assert_eq!(carried, cursor);
+        }
+        assert_eq!(
+            click_display(&mut carried, None, |_| 16, 40, Swap),
+            DisplayClick::Nothing
+        );
+        assert_eq!(carried, cursor);
     }
 
     fn creative(items: usize) -> Creative {
