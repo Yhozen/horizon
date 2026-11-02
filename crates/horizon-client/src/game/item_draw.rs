@@ -210,9 +210,15 @@ impl Game<'_> {
             self.world.day_time,
             dimension,
         );
+        // Guest particle effects resolve items with their player's spawn in
+        // place. Returning to the host can change it without advancing a clock.
+        let respawn = self
+            .spawn
+            .map(|s| [s.x.floor() as i32, s.y.floor() as i32, s.z.floor() as i32]);
         let mut cached = self.item_level_cache.borrow_mut();
         if let Some((at, level)) = cached.as_ref()
             && *at == key
+            && level.respawn.as_ref().map(|p| p.pos) == respawn
         {
             return level.clone();
         }
