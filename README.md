@@ -22,6 +22,9 @@
 
 # Horizon
 
+This fork's private browser preview is at **https://horizon.rccpr.tech**. Sign in
+with an invited email address; see [WEB.md](WEB.md) for browser setup and deployment.
+
 Horizon is Minecraft: Java Edition 26.3 rewritten in Rust: a native game that reads the same worlds, follows the same rules and generates the same terrain as the Java game, and is checked against it by 281 differential harnesses. You play it through a small launcher, on the files from your own copy of Minecraft. It is free, open source and unofficial.
 
 > Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft. Horizon contains no Minecraft code, assets or data: you need your own legally obtained copy of Minecraft: Java Edition 26.3.

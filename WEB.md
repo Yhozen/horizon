@@ -95,6 +95,11 @@ thread), and both `Game::resumed` and `Loading::resumed` bind winit to `canvas#h
 
 ## 5. Private Cloudflare preview
 
+Open **https://horizon.rccpr.tech** and sign in with an address on the existing
+email allowlist. Alchemy's `Game.domain` manages this custom hostname for the
+`horizon-web-preview` Worker; Cloudflare provisions its DNS record and TLS
+certificate. The Worker's Access application covers the custom hostname too.
+
 The deployment project is `web/`; the marketing website is a separate project. Node 24+, pnpm, the
 Rust wasm target, clang on Linux, and the matching wasm-bindgen CLI are required. Alchemy dependencies
 are pinned in the pnpm lockfile.

@@ -33,6 +33,7 @@ export default Alchemy.Stack("HorizonWeb", {
   const published = yield* PublishAssets({ ...upload, bucket: bucket.bucketName });
   const game = yield* Cloudflare.Worker("Game", {
     name: "horizon-web-preview",
+    domain: "horizon.rccpr.tech",
     main: "./src/worker.ts",
     compatibility: { date: "2026-10-24" },
     workersDev: { enabled: true, previewsEnabled: false },
