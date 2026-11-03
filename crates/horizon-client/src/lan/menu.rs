@@ -18,6 +18,11 @@ pub trait Rules {
     fn max_stack(&self, item: &str) -> u32;
     /// The armor slot (0 head .. 3 feet) an item can be worn in.
     fn armor_index(&self, item: &str) -> Option<usize>;
+    /// `ItemStack.getEquipmentSlot`: the `minecraft:equippable` component's
+    /// slot ("head", "chest", "legs", "feet", "mainhand", "offhand").
+    fn equip_slot(&self, item: &str) -> Option<&str> {
+        self.items().get(item)?.equip_slot.as_deref()
+    }
 }
 
 /// An open block container.
@@ -244,10 +249,14 @@ fn quick_move(view: &mut View, i: usize, rules: &dyn Rules) {
         } else {
             move_to(view, stack, 0..n, false, rules)
         }
-    } else if (5..=8).contains(&i) || i == 45 || i < 5 {
+    } else if (5..=8).contains(&i) || i < 5 {
         move_to(view, stack, 9..45, false, rules)
     } else {
-        // Wear it, otherwise swap between the main inventory and the hotbar.
+        // Wear it, otherwise the stack fills the inventory: from the main
+        // slots for the hotbar and the off hand, from the hotbar for the
+        // main ones. The off hand is in this arm too, so armour worn there
+        // is put on like any other (InventoryMenu.quickMoveStack asks for
+        // the item's equipment slot before it looks at the clicked index).
         let armor = rules
             .armor_index(&stack.item)
             .filter(|a| view.get(5 + a).is_none());
@@ -262,10 +271,29 @@ fn quick_move(view: &mut View, i: usize, rules: &dyn Rules) {
             let mut rest = stack.clone();
             rest.count -= 1;
             (rest.count > 0).then_some(rest)
+        } else if rules.equip_slot(&stack.item) == Some("offhand") && view.get(45).is_none() {
+            // An equippable offhand item goes to the empty off hand before the
+            // hotbar (InventoryMenu.quickMoveStack's OFFHAND branch).
+            let max = view.slot_max(45, &stack, rules);
+            let moved = stack.count.min(max);
+            view.set(
+                45,
+                Some(ItemStack {
+                    count: moved,
+                    ..stack.clone()
+                }),
+            );
+            let rest = stack.count - moved;
+            (rest > 0).then_some(ItemStack {
+                count: rest,
+                ..stack.clone()
+            })
         } else if hotbar.contains(&i) {
             move_to(view, stack, main, false, rules)
-        } else {
+        } else if main.contains(&i) {
             move_to(view, stack, hotbar, false, rules)
+        } else {
+            move_to(view, stack, 9..45, false, rules)
         }
     };
     view.set(i, rest);
@@ -505,13 +533,26 @@ fn swap(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
     if i >= view.len() || !view.enabled(i) {
         return;
     }
-    // Hotbar slot `button` (0..9) or the off hand (40).
+    // Hotbar slot `button` (0..9) or the off hand (40). A chest has no
+    // off-hand slot, so F swaps with `Guest.offhand` (Inventory slot 40).
+    if button == 40 && view.container.is_some() {
+        let (clicked, off) = (view.get(i), view.guest.offhand.clone());
+        if off
+            .as_ref()
+            .is_some_and(|off| !view.may_place(i, off, rules))
+        {
+            return;
+        }
+        view.set(i, off);
+        view.guest.offhand = clicked;
+        return;
+    }
     let other = match button {
         0..=8 => match &view.container {
             Some(c) => c.len() + 27 + button as usize,
             None => 36 + button as usize,
         },
-        40 if view.container.is_none() => 45,
+        40 => 45,
         _ => return,
     };
     if other == i {
@@ -634,6 +675,62 @@ mod tests {
     use horizon_protocol::packets::configuration::ClientInformation;
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
+    struct SwapRules;
+    impl Rules for SwapRules {
+        fn items(&self) -> &Items {
+            unreachable!("swap does not read the item catalog");
+        }
+        fn max_stack(&self, _: &str) -> u32 {
+            64
+        }
+        fn armor_index(&self, _: &str) -> Option<usize> {
+            None
+        }
+    }
+
+    /// F (SWAP button 40) over a chest or the inventory below it swaps with
+    /// the off hand, even though the menu has no off-hand slot.
+    #[test]
+    fn guest_chest_f_swaps_with_the_off_hand() {
+        let rules = SwapRules;
+        let mut g = guest();
+        g.offhand = Some(ItemStack::new("minecraft:shield", 1));
+        let mut chest = vec![Some(ItemStack::new("minecraft:diamond", 1)), None];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+        };
+        click(&mut view, &mut drag, 0, 40, input::SWAP, &rules);
+        assert_eq!(
+            view.get(0).as_ref().map(|s| &*s.item),
+            Some("minecraft:shield")
+        );
+        assert_eq!(
+            view.guest.offhand.as_ref().map(|s| &*s.item),
+            Some("minecraft:diamond")
+        );
+        // Empty chest slot: the off hand goes in.
+        click(&mut view, &mut drag, 1, 40, input::SWAP, &rules);
+        assert_eq!(
+            view.get(1).as_ref().map(|s| &*s.item),
+            Some("minecraft:diamond")
+        );
+        assert!(view.guest.offhand.is_none());
+        // F over the first hotbar slot (menu slot 2 + 27).
+        view.guest.offhand = Some(ItemStack::new("minecraft:oak_boat", 1));
+        view.guest.inventory[0] = Some(ItemStack::new("minecraft:apple", 1));
+        click(&mut view, &mut drag, 2 + 27, 40, input::SWAP, &rules);
+        assert_eq!(
+            view.guest.inventory[0].as_ref().map(|s| &*s.item),
+            Some("minecraft:oak_boat")
+        );
+        assert_eq!(
+            view.guest.offhand.as_ref().map(|s| &*s.item),
+            Some("minecraft:apple")
+        );
+    }
+
     struct ItemRules(Items);
     impl Rules for ItemRules {
         fn items(&self) -> &Items {
@@ -737,5 +834,116 @@ mod tests {
             Some(("minecraft:ender_pearl", 16))
         );
         assert_eq!(contents(&view.get(2)), []);
+    }
+    struct EquipRules;
+    impl Rules for EquipRules {
+        fn items(&self) -> &Items {
+            unreachable!("a quick move reads no item catalog");
+        }
+        fn max_stack(&self, _: &str) -> u32 {
+            64
+        }
+        fn armor_index(&self, _: &str) -> Option<usize> {
+            None
+        }
+        fn equip_slot(&self, item: &str) -> Option<&str> {
+            (item == "minecraft:shield").then_some("offhand")
+        }
+    }
+
+    /// A shift-click in the inventory menu puts a shield in the empty off-hand
+    /// slot: `InventoryMenu.quickMoveStack` asks `getEquipmentSlotForItem` for
+    /// `EquipmentSlot.OFFHAND` and moves it to slot 45 before it tries the
+    /// hotbar. A full off hand, or an item with no `equippable` slot, still
+    /// goes to the hotbar.
+    #[test]
+    fn inventory_quick_move_equips_an_off_hand_item() {
+        let rules = EquipRules;
+        let mut g = guest();
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: None,
+        };
+        // Menu slot 9 is the first main-inventory slot, 45 the off hand.
+        view.guest.inventory[9] = Some(ItemStack::new("minecraft:shield", 1));
+        click(&mut view, &mut drag, 9, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(
+            view.get(45).as_ref().map(|s| &*s.item),
+            Some("minecraft:shield")
+        );
+        assert!(view.get(9).is_none());
+        assert!(view.get(36).is_none());
+        // The off hand is taken: the next shield goes to the hotbar instead.
+        view.guest.inventory[9] = Some(ItemStack::new("minecraft:shield", 1));
+        click(&mut view, &mut drag, 9, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(
+            view.get(36).as_ref().map(|s| &*s.item),
+            Some("minecraft:shield")
+        );
+        assert!(view.get(9).is_none());
+        // An item that equips nowhere is untouched by the off-hand branch.
+        view.guest.inventory[10] = Some(ItemStack::new("minecraft:diamond", 3));
+        click(&mut view, &mut drag, 10, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(37).as_ref().map(|s| s.count), Some(3));
+        assert_eq!(
+            view.get(45).as_ref().map(|s| &*s.item),
+            Some("minecraft:shield")
+        );
+    }
+
+    struct ArmorRules;
+    impl Rules for ArmorRules {
+        fn items(&self) -> &Items {
+            unreachable!("a quick move reads no item catalog");
+        }
+        fn max_stack(&self, _: &str) -> u32 {
+            64
+        }
+        fn armor_index(&self, item: &str) -> Option<usize> {
+            (item == "minecraft:iron_helmet").then_some(0)
+        }
+        fn equip_slot(&self, _: &str) -> Option<&str> {
+            None
+        }
+    }
+
+    /// A shift-click from the off-hand slot wears the armour it holds:
+    /// `InventoryMenu.quickMoveStack` asks for the item's equipment slot
+    /// before it looks at the clicked index, so the helmet goes to the empty
+    /// helmet slot. With that slot taken, and for anything else in the off
+    /// hand, the stack fills the main inventory before the hotbar.
+    #[test]
+    fn inventory_quick_move_wears_armor_from_the_off_hand() {
+        let rules = ArmorRules;
+        let mut g = guest();
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: None,
+        };
+        // Menu slot 45 is the off hand; 5 to 8 are the armour slots, head first.
+        view.guest.offhand = Some(ItemStack::new("minecraft:iron_helmet", 1));
+        click(&mut view, &mut drag, 45, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(
+            view.get(5).as_ref().map(|s| &*s.item),
+            Some("minecraft:iron_helmet")
+        );
+        assert!(view.get(45).is_none());
+        assert!(view.get(9).is_none());
+        // The helmet slot is taken: the next helmet goes to the inventory.
+        view.guest.offhand = Some(ItemStack::new("minecraft:iron_helmet", 1));
+        click(&mut view, &mut drag, 45, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(
+            view.get(9).as_ref().map(|s| &*s.item),
+            Some("minecraft:iron_helmet")
+        );
+        assert!(view.get(45).is_none());
+        // Anything else fills the main inventory before the hotbar.
+        view.guest.offhand = Some(ItemStack::new("minecraft:diamond", 3));
+        click(&mut view, &mut drag, 45, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(10).as_ref().map(|s| s.count), Some(3));
+        assert!(view.get(36).is_none());
+        assert!(view.get(45).is_none());
     }
 }

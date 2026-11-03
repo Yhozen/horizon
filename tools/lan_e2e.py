@@ -5674,6 +5674,96 @@ CHECKS += ['creative_throw']
 CHECK_FNS['creative_throw'] = check_creative_throw
 
 
+def check_offhand_menu(host, guest, out):
+    """Normal guest menus: F in a chest, shield auto-equip and armor from offhand."""
+    guest('command', command='gamemode survival')
+    guest('command', command='clear @s')
+    x, y, z = (int(v // 1) for v in pos_of(guest))
+    chest = (x, y, z + 2)
+    at = ' '.join(map(str, chest))
+    guest('command', command=f'setblock {at} minecraft:chest')
+    guest('command', command=f'item replace block {at} container.0 with minecraft:diamond')
+    guest('command', command='item replace entity @s weapon.offhand with minecraft:shield')
+    guest.wait(10)
+
+    def open_chest():
+        guest.raw('interact', *chest)
+        guest.raw('wait-for', 'screen', 'container', '--timeout', 10)
+        guest.wait(5)
+
+    def close():
+        guest.raw('key', 'esc', 'tap')
+        guest.wait(5)
+
+    def swap(slot):
+        guest.raw('scroll-at', *slot_point(guest, slot), 0)
+        guest.raw('key', 'f', 'tap')
+        guest.wait(5)
+
+    def shift(slot):
+        guest.raw('key', 'shift', 'down')
+        try:
+            guest.raw('click-at', *slot_point(guest, slot))
+        finally:
+            guest.raw('key', 'shift', 'up')
+        guest.wait(5)
+
+    seen = {}
+    open_chest()
+    swap(300)
+    close()
+    seen['chest'] = server_reply(guest, f'data get block {at} Items', 'minecraft:shield')
+    seen['offhand'] = server_reply(guest, 'data get entity @s equipment.offhand', 'minecraft:diamond')
+    open_chest()  # authoritative resend, then F over an empty chest slot
+    slots = {s['slot']: s.get('item') for s in guest('screen')['slots']}
+    assert slots[300] == 'minecraft:shield', slots
+    swap(301)
+    close()
+    assert guest('status')['offhand'] is None
+    seen['empty'] = server_reply(guest, f'data get block {at} Items', 'minecraft:diamond')
+    guest('command', command='item replace entity @s weapon.offhand with minecraft:shield')
+    guest('command', command='item replace entity @s hotbar.0 with minecraft:apple')
+    guest.wait(5)
+    open_chest()
+    swap(0)  # inventory row below the chest
+    close()
+    seen['row'] = server_reply(guest, 'data get entity @s equipment.offhand', 'minecraft:apple')
+    guest('command', command='clear @s')
+    guest('command', command='item replace entity @s weapon.offhand with minecraft:air')
+    guest('command', command='item replace entity @s inventory.0 with minecraft:shield')
+    guest.wait(5)
+    guest.raw('key', 'e', 'tap')
+    guest.raw('wait-for', 'screen', 'inventory', '--timeout', 10)
+    shift(9)
+    close()
+    seen['equipped'] = server_reply(guest, 'data get entity @s equipment.offhand', 'minecraft:shield')
+    guest('command', command='item replace entity @s inventory.0 with minecraft:shield')
+    guest.wait(5)
+    guest.raw('key', 'e', 'tap')
+    shift(9)
+    close()
+    assert guest('inventory')['hotbar'][0].get('item') == 'minecraft:shield'
+    guest('command', command='item replace entity @s weapon.offhand with minecraft:diamond_helmet')
+    guest.wait(5)
+    guest.raw('key', 'e', 'tap')
+    shift(504)
+    close()
+    seen['helmet'] = server_reply(guest, 'data get entity @s equipment.head', 'minecraft:diamond_helmet')
+    assert guest('status')['offhand'] is None
+    guest('command', command='item replace entity @s weapon.offhand with minecraft:diamond_helmet')
+    guest.wait(5)
+    guest.raw('key', 'e', 'tap')
+    shift(504)
+    close()
+    assert guest('status')['offhand'] is None
+    assert any(s.get('item') == 'minecraft:diamond_helmet' for s in guest('inventory')['main'])
+    return seen
+
+
+CHECKS += ['offhand_menu']
+CHECK_FNS['offhand_menu'] = check_offhand_menu
+
+
 def check_keys_released(host, guest, out):
     """Held input follows ordinary key/mouse lifecycle through disconnect/rejoin."""
     port = host.raw('lan', 'status')['port']

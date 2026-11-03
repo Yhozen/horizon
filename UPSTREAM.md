@@ -4,8 +4,8 @@ Upstream repository: <https://github.com/ludovic111/horizon>, branch `main`.
 
 | Pointer | Upstream commit |
 | --- | --- |
-| Most recent backported source | [`eb2b96b6b2551be8494f0ef34189175c4c0e1685`](https://github.com/ludovic111/horizon/commit/eb2b96b6b2551be8494f0ef34189175c4c0e1685) — Draw framed maps without formatting or copying per map per frame |
-| Main merge that introduced that source | [`f7002313847f2999705487ba1f5c360029874ad0`](https://github.com/ludovic111/horizon/commit/f7002313847f2999705487ba1f5c360029874ad0) — Merge pull request #7498 from horizon-rust/perf/map-frame-names |
+| Most recent backported source | [`c686e9eeef95dc2d0f8d8d987bd211a7d725b519`](https://github.com/ludovic111/horizon/commit/c686e9eeef95dc2d0f8d8d987bd211a7d725b519) — Test wearing armour out of the off-hand slot |
+| Main merge that introduced that source | [`1c97d1e804c9cf1cf3cfec61f10504beb98ed312`](https://github.com/ludovic111/horizon/commit/1c97d1e804c9cf1cf3cfec61f10504beb98ed312) — Merge pull request #7840 from MSedgeMC/fix/menu-offhand-armor |
 | Upstream tip assessed on 2026-11-03 | [`fc02103818c212920fd24aa34a2b2f91ba49e56f`](https://github.com/ludovic111/horizon/commit/fc02103818c212920fd24aa34a2b2f91ba49e56f) |
 
 These are selective imports. The backport pointer does **not** mean every earlier upstream change
@@ -61,6 +61,11 @@ commit has different content. Each row is present in this branch.
 | [`7ca3d989013018000e7f7f99c14635b3ba7cafcd`](https://github.com/ludovic111/horizon/commit/7ca3d989013018000e7f7f99c14635b3ba7cafcd) | Save the owner file that will be reloaded and recover guest backups | 2026-11-03 |
 | [`152617ece70af3670b46b2345e4683fd4defaf65`](https://github.com/ludovic111/horizon/commit/152617ece70af3670b46b2345e4683fd4defaf65) | Log player save failures (adapted player-save portion) | 2026-11-03 |
 | [`698e7fd662ba0a6502f0965ea660994f4f11092f`](https://github.com/ludovic111/horizon/commit/698e7fd662ba0a6502f0965ea660994f4f11092f) | Release held input on server disconnect, including physical modifiers | 2026-11-03 |
+| [`b70cb22e9d094319f71c541be9a6ca7a9e5c9647`](https://github.com/ludovic111/horizon/commit/b70cb22e9d094319f71c541be9a6ca7a9e5c9647) | Allow server offhand swaps in normal containers | 2026-11-03 |
+| [`d9f93b474f36138c590eb518f36fe4f9a4a4a5b9`](https://github.com/ludovic111/horizon/commit/d9f93b474f36138c590eb518f36fe4f9a4a4a5b9) | Shift-click equippable items into an empty offhand | 2026-11-03 |
+| [`8987ae75eb3e29aa02ecf876832757dac8d20f72`](https://github.com/ludovic111/horizon/commit/8987ae75eb3e29aa02ecf876832757dac8d20f72) | Cover offhand shift-click destinations and occupied fallback | 2026-11-03 |
+| [`34e889990df1910043044c1507c01d0a1d50a58a`](https://github.com/ludovic111/horizon/commit/34e889990df1910043044c1507c01d0a1d50a58a) | Shift-click offhand armor into its equipment slot | 2026-11-03 |
+| [`c686e9eeef95dc2d0f8d8d987bd211a7d725b519`](https://github.com/ludovic111/horizon/commit/c686e9eeef95dc2d0f8d8d987bd211a7d725b519) | Cover armor-from-offhand and occupied equipment fallback | 2026-11-03 |
 
 ## Latest comparison
 
@@ -75,12 +80,6 @@ The save imports are adapted to preserve readable backups through a subsequent s
 level/player NBT roots, retain legacy generator/version checks, and keep recoverable worlds visible
 in the world picker. They cover the single-player owner in both execution modes and LAN guest
 player-file recovery, including preserving readable backups during the next save.
-
-Recommended next imports, all **not imported**:
-
-| Area | Sources | Scope and dependencies |
-| --- | --- | --- |
-| Normal-container offhand actions | `b70cb22e9d094319f71c541be9a6ca7a9e5c9647`, `d9f93b474f36138c590eb518f36fe4f9a4a4a5b9`, `34e889990df1910043044c1507c01d0a1d50a58a`; tests `8987ae75eb3e29aa02ecf876832757dac8d20f72`, `c686e9eeef95dc2d0f8d8d987bd211a7d725b519` | Chest F swaps and shield/armor shift-click routing on the server; about 225 lines with tests. Separate from the imported creative fixes. |
 
 Imported-world owner identity now uses the named owner file or the joining profile's own file,
 with validated backup recovery. Both in-frame and integrated loading avoid selecting another
