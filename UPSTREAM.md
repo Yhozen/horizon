@@ -56,6 +56,10 @@ commit has different content. Each row is present in this branch.
 | [`04bc30606d09fa618f5e9fef8aec99839b895639`](https://github.com/ludovic111/horizon/commit/04bc30606d09fa618f5e9fef8aec99839b895639) | Keep resource metadata with its owning pack or a higher pack | 2026-11-03 |
 | [`11b36e38671f8f3fd22704b586c9402f1bd1fa23`](https://github.com/ludovic111/horizon/commit/11b36e38671f8f3fd22704b586c9402f1bd1fa23) | Use separate saved-NBT limits without relaxing network bounds | 2026-11-03 |
 | [`9f0d819f6ba6392fcde3b6ec730be663a2114936`](https://github.com/ludovic111/horizon/commit/9f0d819f6ba6392fcde3b6ec730be663a2114936) | Persist sanitized region headers on chunk write and clear | 2026-11-03 |
+| [`be35f0cd18fcce995c7a97706b757f02615fda0f`](https://github.com/ludovic111/horizon/commit/be35f0cd18fcce995c7a97706b757f02615fda0f) | Never infer imported-world ownership from another player file | 2026-11-03 |
+| [`be7de6230c1610a8790968f449a9ecf6a1abd7b4`](https://github.com/ludovic111/horizon/commit/be7de6230c1610a8790968f449a9ecf6a1abd7b4) | Load the named world owner before the joining profile | 2026-11-03 |
+| [`7ca3d989013018000e7f7f99c14635b3ba7cafcd`](https://github.com/ludovic111/horizon/commit/7ca3d989013018000e7f7f99c14635b3ba7cafcd) | Save the owner file that will be reloaded and recover guest backups | 2026-11-03 |
+| [`152617ece70af3670b46b2345e4683fd4defaf65`](https://github.com/ludovic111/horizon/commit/152617ece70af3670b46b2345e4683fd4defaf65) | Log player save failures (adapted player-save portion) | 2026-11-03 |
 
 ## Latest comparison
 
@@ -68,8 +72,8 @@ respawn-cache corrections, and PR #18's real display-click/carried-stack regress
 
 The save imports are adapted to preserve readable backups through a subsequent save, validate
 level/player NBT roots, retain legacy generator/version checks, and keep recoverable worlds visible
-in the world picker. They cover the single-player owner in both execution modes; LAN guest
-player-file recovery and upstream's newer owner-identity pipeline remain separate work.
+in the world picker. They cover the single-player owner in both execution modes and LAN guest
+player-file recovery, including preserving readable backups during the next save.
 
 Recommended next imports, all **not imported**:
 
@@ -78,11 +82,9 @@ Recommended next imports, all **not imported**:
 | Normal-container offhand actions | `b70cb22e9d094319f71c541be9a6ca7a9e5c9647`, `d9f93b474f36138c590eb518f36fe4f9a4a4a5b9`, `34e889990df1910043044c1507c01d0a1d50a58a`; tests `8987ae75eb3e29aa02ecf876832757dac8d20f72`, `c686e9eeef95dc2d0f8d8d987bd211a7d725b519` | Chest F swaps and shield/armor shift-click routing on the server; about 225 lines with tests. Separate from the imported creative fixes. |
 | Disconnect input reset | `698e7fd662ba0a6502f0965ea660994f4f11092f` | Clear held input before reconnecting; extend coverage to this fork's physical modifier keys. |
 
-Imported-world owner identity remains a separate, worthwhile load/save change:
-`be35f0cd18fcce995c7a97706b757f02615fda0f` needs the behavior from
-`be7de6230c1610a8790968f449a9ecf6a1abd7b4` and `7ca3d989013018000e7f7f99c14635b3ba7cafcd`.
-The current newest-player-file fallback can still select another player's legitimate UUID file.
-Both single-player modes and guest reconnects need coverage when adapting this chain.
+Imported-world owner identity now uses the named owner file or the joining profile's own file,
+with validated backup recovery. Both in-frame and integrated loading avoid selecting another
+player's file by modification time; player saves preserve corrupt originals and readable backups.
 
 The new station panic fix `b04bd9a0e33b61509d50509c0ce5064d57442ba8` does not apply: the offending
 upstream result-slot snapshot is absent here. Server block/entity picking, bulk teleport/occlusion

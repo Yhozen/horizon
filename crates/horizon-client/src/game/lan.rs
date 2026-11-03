@@ -620,11 +620,9 @@ impl Game<'_> {
     /// Save a guest when they leave or the world closes: an integrated
     /// server's owner with the world (`save_game`), anyone else in their file.
     pub(super) fn save_guest(&mut self, host: &LanHost, guest: &horizon_client::lan::guest::Guest) {
-        if host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
-            if guest.placed {
-                playerdata::store(guest, &mut self.level);
-            }
-        } else {
+        if guest.placed && host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
+            playerdata::save_owner(guest, &mut self.level, &self.world_root);
+        } else if guest.placed {
             playerdata::save(guest, &self.world_root);
         }
         self.save_guest_records(host, guest);
@@ -1032,14 +1030,8 @@ impl Game<'_> {
         let Some(g) = host.hub.guest_mut(conn) else {
             return;
         };
-        let saved = owner
-            .filter(|o| o.uuid == g.uuid)
-            .and_then(|o| o.saved.take());
-        let known = match saved {
-            Some(level) => {
-                playerdata::apply(g, &level);
-                level.position.is_some()
-            }
+        let known = match owner.filter(|o| o.uuid == g.uuid) {
+            Some(o) => playerdata::load_owner(g, &root, o.saved.take().as_deref()),
             None => playerdata::load(g, &root),
         };
         if !known || force {

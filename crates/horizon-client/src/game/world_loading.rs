@@ -69,6 +69,13 @@ impl WorldRequest {
             ..Level::default()
         });
         let mut level = level;
+        if options.dedicated.is_none() {
+            let auth = horizon_client::auth::current();
+            let player = auth
+                .as_ref()
+                .map_or_else(|| options.player_name(), |a| a.name.clone());
+            level.load_owner_player(&save_root, horizon_protocol::crypto::offline_uuid(&player));
+        }
         // CreateWorldScreen's choices, before streaming reads the generator.
         if created && let Some(o) = create {
             level.hardcore = o.hardcore;
