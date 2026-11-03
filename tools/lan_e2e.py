@@ -5607,9 +5607,11 @@ def check_creative_throw(host, guest, out):
             s['all'] = (slots(player, 2)[2], dropped(player, 'minecraft:gravel'))
             clear()
             # Carrying a picked display stack: Q over the dirt drops one dirt, the hand keeps its stack.
-            player.raw('click', 'slot-900')
+            player.raw('click-at', *slot_point(player, 900))
             player.wait(2)
             carried = player('inventory').get('carried')
+            assert carried and carried == widgets['slot-900']['stack'], \
+                f'{label}: the creative display click did not pick up its stack: {carried}'
             throw(player, 1)
             s['carrying'] = (slots(player, 1)[1], dropped(player, 'minecraft:dirt'), player('inventory').get('carried'))
             clear()
