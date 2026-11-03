@@ -11,7 +11,7 @@ use std::io::Read;
 use std::{collections::BTreeSet, io, path::Path, path::PathBuf};
 
 // Bump when overlay/merge semantics change. Markers are disposable cache data.
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 
 #[derive(Default, Serialize, Deserialize)]
 pub(super) struct Dependencies {
@@ -422,6 +422,111 @@ mod tests {
         out.extend(start.to_le_bytes());
         out.extend([0; 2]);
         out
+    }
+
+    #[test]
+    fn zip_entries_never_leave_cached_overlay() {
+        let f = Fixture::new();
+        let resource = "assets/minecraft/textures/block/stone.png";
+        f.write(&format!("vanilla/{resource}"), b"vanilla");
+        let mut files = vec![
+            (
+                "pack.mcmeta",
+                br#"{"pack":{"description":"test","pack_format":97}}"#.to_vec(),
+            ),
+            (resource, b"pack".to_vec()),
+        ];
+        for name in [
+            "assets/../../escaped.txt",
+            "assets/minecraft/../../../escaped_lang.json",
+            "assets\\..\\..\\escaped_backslash.txt",
+            "assets/./minecraft/dot.txt",
+            "assets//minecraft/empty.txt",
+            "assets/minecraft/C:stream",
+            "assets/minecraft/nul\0.txt",
+        ] {
+            files.push((name, b"unsafe".to_vec()));
+        }
+        f.write("pack.zip", &archive(&files, false));
+        let pack = packs::pack(
+            "zip".into(),
+            Text::empty(),
+            Source::Zip(f.0.join("pack.zip")),
+        )
+        .unwrap();
+        let out = f.0.join("cached");
+        for _ in 0..2 {
+            f.rebuild_matches(std::slice::from_ref(&pack));
+            assert_eq!(fs::read(out.join(resource)).unwrap(), b"pack");
+            assert!(marker_path(&out).exists_vfs());
+            for name in ["escaped.txt", "escaped_lang.json", "escaped_backslash.txt"] {
+                assert!(!f.0.join(name).exists_vfs(), "{name} escaped");
+            }
+            for name in ["dot.txt", "empty.txt", "C:stream", "nul\0.txt"] {
+                assert!(!out.join("assets/minecraft").join(name).exists_vfs());
+            }
+        }
+    }
+
+    #[test]
+    fn metadata_belongs_to_resource_pack_or_higher_in_cold_and_warm_cache() {
+        // Test vanilla and pack metadata below the owner, as well as same/higher
+        // metadata. PNG contents are opaque to the overlay builder.
+        for metadata_owner in 0..4 {
+            let f = Fixture::new();
+            let image = "assets/minecraft/textures/block/magma.png";
+            let meta = format!("{image}.mcmeta");
+            f.write(&format!("vanilla/{image}"), b"vanilla image");
+            f.write(&format!("vanilla/{meta}"), b"vanilla metadata");
+            let low = f.dir_pack("low");
+            let owner = f.dir_pack("owner");
+            let high = f.dir_pack("high");
+            f.write(&format!("owner/{image}"), b"static image");
+            if metadata_owner > 0 {
+                let directory = ["vanilla", "low", "owner", "high"][metadata_owner];
+                f.write(&format!("{directory}/{meta}"), b"pack metadata");
+            }
+            let selected = [low, owner, high];
+            let out = f.0.join("cached");
+            for _ in 0..2 {
+                f.rebuild_matches(&selected);
+                assert_eq!(fs::read(out.join(image)).unwrap(), b"static image");
+                if metadata_owner < 2 {
+                    assert!(!out.join(&meta).exists_vfs());
+                } else {
+                    assert_eq!(fs::read(out.join(&meta)).unwrap(), b"pack metadata");
+                }
+                assert!(marker_path(&out).exists_vfs());
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires prepared resources in HORIZON_OVERLAY_BENCH_VANILLA"]
+    fn prepared_resources_metadata_ownership() {
+        let vanilla = PathBuf::from(std::env::var("HORIZON_OVERLAY_BENCH_VANILLA").unwrap());
+        let f = Fixture::new();
+        let low = f.dir_pack("low");
+        let high = f.dir_pack("high");
+        let image = "assets/minecraft/textures/block/magma.png";
+        let meta = format!("{image}.mcmeta");
+        f.write(
+            &format!("low/{image}"),
+            &fs::read(vanilla.join(image)).unwrap(),
+        );
+        f.write(
+            &format!("low/{meta}"),
+            &fs::read(vanilla.join(&meta)).unwrap(),
+        );
+        let stone = fs::read(vanilla.join("assets/minecraft/textures/block/stone.png")).unwrap();
+        f.write(&format!("high/{image}"), &stone);
+        let out = f.0.join("cached");
+        for _ in 0..2 {
+            packs::build_overlay(&vanilla, &[low.clone(), high.clone()], &out).unwrap();
+            assert_eq!(fs::read(out.join(image)).unwrap(), stone);
+            assert!(!out.join(&meta).exists_vfs());
+            assert!(marker_path(&out).exists_vfs());
+        }
     }
 
     #[test]

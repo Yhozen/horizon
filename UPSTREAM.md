@@ -52,6 +52,8 @@ commit has different content. Each row is present in this branch.
 | [`5a6d49212647999d98a054b6eef3ab633d980879`](https://github.com/ludovic111/horizon/commit/5a6d49212647999d98a054b6eef3ab633d980879) | Creative Survival Inventory tab: Q while carrying drops from the slot | 2026-11-02 |
 | [`79adacb982f4ac3aa7a5c4bccf1704c30bb0a1e3`](https://github.com/ludovic111/horizon/commit/79adacb982f4ac3aa7a5c4bccf1704c30bb0a1e3) | Cache particle light by exact block within each draw | 2026-11-03 |
 | [`eb2b96b6b2551be8494f0ef34189175c4c0e1685`](https://github.com/ludovic111/horizon/commit/eb2b96b6b2551be8494f0ef34189175c4c0e1685) | Reuse map sprite names and borrow framed-map decorations | 2026-11-03 |
+| [`11eecf5a6a90e4e412da9da4cf966d26e5cecd0c`](https://github.com/ludovic111/horizon/commit/11eecf5a6a90e4e412da9da4cf966d26e5cecd0c) | Reject ZIP traversal and invalid resource-pack overlays | 2026-11-03 |
+| [`04bc30606d09fa618f5e9fef8aec99839b895639`](https://github.com/ludovic111/horizon/commit/04bc30606d09fa618f5e9fef8aec99839b895639) | Keep resource metadata with its owning pack or a higher pack | 2026-11-03 |
 
 ## Latest comparison
 
@@ -72,7 +74,6 @@ Recommended next imports, all **not imported**:
 | Area | Sources | Scope and dependencies |
 | --- | --- | --- |
 | Normal-container offhand actions | `b70cb22e9d094319f71c541be9a6ca7a9e5c9647`, `d9f93b474f36138c590eb518f36fe4f9a4a4a5b9`, `34e889990df1910043044c1507c01d0a1d50a58a`; tests `8987ae75eb3e29aa02ecf876832757dac8d20f72`, `c686e9eeef95dc2d0f8d8d987bd211a7d725b519` | Chest F swaps and shield/armor shift-click routing on the server; about 225 lines with tests. Separate from the imported creative fixes. |
-| Resource-pack correctness | `11eecf5a6a90e4e412da9da4cf966d26e5cecd0c`, `04bc30606d09fa618f5e9fef8aec99839b895639` | Reject ZIP traversal/invalid overlay directories and suppress lower-pack metadata when a higher pack replaces its resource. Also bump the overlay cache version and preserve browser VFS operations. |
 | Save compatibility | `11b36e38671f8f3fd22704b586c9402f1bd1fa23`, then `9f0d819f6ba6392fcde3b6ec730be663a2114936` | Give saved NBT its own limits without changing network limits; persist the complete sanitized region header. Small production changes with file-based regressions. |
 | Disconnect input reset | `698e7fd662ba0a6502f0965ea660994f4f11092f` | Clear held input before reconnecting; extend coverage to this fork's physical modifier keys. |
 
