@@ -77,6 +77,12 @@ pub const MAX_ATLAS_SIZE: u32 = 16384;
 /// framed maps, so the pool holds a wall; too few slots re-upload every map
 /// every frame. 26.3's `MapTextureManager` keeps a texture per map instead.
 pub const MAP_SLOTS: usize = 256;
+/// The atlas sprite name for a map slot, shared by atlas construction and each draw.
+pub fn map_slot_sprite(slot: usize) -> Option<&'static str> {
+    static NAMES: std::sync::LazyLock<Vec<String>> =
+        std::sync::LazyLock::new(|| (0..MAP_SLOTS).map(|i| format!("horizon/map{i}")).collect());
+    NAMES.get(slot).map(String::as_str)
+}
 /// The atlas slot the minimap extra draws into.
 pub const MINIMAP_SPRITE: &str = "horizon/minimap";
 /// Atlas slots for downloaded player skins (`skins/<sha1>`), 64x64 each.
@@ -257,7 +263,12 @@ impl HudAtlas {
     /// minimap, downloaded skins, world icons and the on-screen keyboard's text.
     fn slots(images: &mut Vec<PackedImage>, trim: (u32, u32)) {
         for i in 0..MAP_SLOTS {
-            images.push((format!("horizon/map{i}"), 128, 128, vec![0; 128 * 128 * 4]));
+            images.push((
+                map_slot_sprite(i).unwrap().into(),
+                128,
+                128,
+                vec![0; 128 * 128 * 4],
+            ));
         }
         // The minimap extra's image (game/extras.rs).
         images.push((
@@ -1768,5 +1779,22 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod map_slot_tests {
+    use super::*;
+
+    #[test]
+    fn map_slot_names_cover_the_atlas_pool() {
+        assert_eq!(map_slot_sprite(0), Some("horizon/map0"));
+        assert_eq!(map_slot_sprite(MAP_SLOTS - 1), Some("horizon/map255"));
+        assert_eq!(map_slot_sprite(MAP_SLOTS), None);
+        assert_eq!(map_slot_sprite(usize::MAX), None);
+        assert!(std::ptr::eq(
+            map_slot_sprite(42).unwrap(),
+            map_slot_sprite(42).unwrap()
+        ));
     }
 }
