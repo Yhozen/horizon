@@ -55,6 +55,7 @@ commit has different content. Each row is present in this branch.
 | [`11eecf5a6a90e4e412da9da4cf966d26e5cecd0c`](https://github.com/ludovic111/horizon/commit/11eecf5a6a90e4e412da9da4cf966d26e5cecd0c) | Reject ZIP traversal and invalid resource-pack overlays | 2026-11-03 |
 | [`04bc30606d09fa618f5e9fef8aec99839b895639`](https://github.com/ludovic111/horizon/commit/04bc30606d09fa618f5e9fef8aec99839b895639) | Keep resource metadata with its owning pack or a higher pack | 2026-11-03 |
 | [`11b36e38671f8f3fd22704b586c9402f1bd1fa23`](https://github.com/ludovic111/horizon/commit/11b36e38671f8f3fd22704b586c9402f1bd1fa23) | Use separate saved-NBT limits without relaxing network bounds | 2026-11-03 |
+| [`9f0d819f6ba6392fcde3b6ec730be663a2114936`](https://github.com/ludovic111/horizon/commit/9f0d819f6ba6392fcde3b6ec730be663a2114936) | Persist sanitized region headers on chunk write and clear | 2026-11-03 |
 
 ## Latest comparison
 
@@ -75,7 +76,6 @@ Recommended next imports, all **not imported**:
 | Area | Sources | Scope and dependencies |
 | --- | --- | --- |
 | Normal-container offhand actions | `b70cb22e9d094319f71c541be9a6ca7a9e5c9647`, `d9f93b474f36138c590eb518f36fe4f9a4a4a5b9`, `34e889990df1910043044c1507c01d0a1d50a58a`; tests `8987ae75eb3e29aa02ecf876832757dac8d20f72`, `c686e9eeef95dc2d0f8d8d987bd211a7d725b519` | Chest F swaps and shield/armor shift-click routing on the server; about 225 lines with tests. Separate from the imported creative fixes. |
-| Save compatibility | `11b36e38671f8f3fd22704b586c9402f1bd1fa23`, then `9f0d819f6ba6392fcde3b6ec730be663a2114936` | Give saved NBT its own limits without changing network limits; persist the complete sanitized region header. Small production changes with file-based regressions. |
 | Disconnect input reset | `698e7fd662ba0a6502f0965ea660994f4f11092f` | Clear held input before reconnecting; extend coverage to this fork's physical modifier keys. |
 
 Imported-world owner identity remains a separate, worthwhile load/save change:

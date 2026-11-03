@@ -324,3 +324,60 @@ fn benchmark_saving_into_a_full_region() {
     let in_place = start.elapsed() / rounds as u32;
     println!("one chunk into a full region: rewrite {rewrite:?}, in place {in_place:?}");
 }
+
+/// `RegionFile.write` rewrites both header sectors from memory
+/// (`writeHeader`), so entries the constructor dropped as invalid (#5064:
+/// overlapping the header, empty, past the end) are zero on disk afterwards;
+/// their timestamps stay. Vanilla 26.3 leaves this file with these bytes.
+#[test]
+fn a_chunk_write_rewrites_the_whole_region_header() {
+    let dir = Directory::new();
+    let mut header = vec![0u8; 8192];
+    header[20..24].copy_from_slice(&[0, 0, 1, 1]); // slot 5: sector 1
+    header[200..204].copy_from_slice(&[0, 0, 5, 0]); // slot 50: no sectors
+    header[400..404].copy_from_slice(&[0, 0, 0x64, 1]); // slot 100: past the end
+    header[4096 + 20..4096 + 24].copy_from_slice(&12345u32.to_be_bytes());
+    fs::write(dir.region(), &header).unwrap();
+    let root = NamedTag {
+        name: JavaString::default(),
+        tag: Tag::compound([("x", Tag::Int(7))]),
+    };
+    let record = ChunkRecord::from_nbt(&root, Compression::Zlib, 1, Limits::saved()).unwrap();
+    let mut region = RegionFile::open_writable(dir.region(), false).unwrap();
+    region.write(ChunkPos::new(-32, 0), &record).unwrap();
+    drop(region);
+    let bytes = fs::read(dir.region()).unwrap();
+    assert_eq!(bytes[0..4], [0, 0, 2, 1]);
+    for slot in [5, 50, 100] {
+        assert_eq!(bytes[slot * 4..slot * 4 + 4], [0; 4], "slot {slot}");
+    }
+    assert_eq!(bytes[4096 + 20..4096 + 24], 12345u32.to_be_bytes());
+    let mut reopened = RegionFile::open_writable(dir.region(), false).unwrap();
+    assert_eq!(
+        reopened
+            .read(ChunkPos::new(-32, 0))
+            .unwrap()
+            .unwrap()
+            .nbt(Limits::saved())
+            .unwrap(),
+        root
+    );
+    assert_eq!(reopened.chunks().count(), 1);
+    drop(reopened);
+
+    // Reintroduce an unrelated invalid entry. Clear must also persist the
+    // complete sanitized header and retain all unrelated timestamps.
+    let mut bytes = fs::read(dir.region()).unwrap();
+    bytes[20..24].copy_from_slice(&[0, 0, 1, 1]);
+    fs::write(dir.region(), bytes).unwrap();
+    let mut region = RegionFile::open_writable(dir.region(), false).unwrap();
+    assert!(region.clear(ChunkPos::new(-32, 0), 99).unwrap());
+    drop(region);
+    let bytes = fs::read(dir.region()).unwrap();
+    assert_eq!(&bytes[..4096], &[0; 4096]);
+    assert_eq!(bytes[4096..4100], 99u32.to_be_bytes());
+    assert_eq!(bytes[4096 + 20..4096 + 24], 12345u32.to_be_bytes());
+    let mut reopened = RegionFile::open(dir.region()).unwrap();
+    assert!(reopened.read(ChunkPos::new(-32, 0)).unwrap().is_none());
+    assert_eq!(reopened.chunks().count(), 0);
+}
