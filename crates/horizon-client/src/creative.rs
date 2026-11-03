@@ -311,6 +311,16 @@ impl Creative {
     pub fn search_items(&self) -> &[ItemStack] {
         &self.search_items
     }
+    /// CreativeModeInventoryScreen.init rebuilds the search box and scrollbar;
+    /// only the selected tab persists across openings.
+    pub fn reopen(&mut self) {
+        self.search.clear();
+        self.release();
+        self.scroll = 0.0;
+        if self.tab().search {
+            self.search_focused = web_time::Instant::now();
+        }
+    }
     /// Indices into `search_items` that CreativeModeInventoryScreen.refreshSearchResults
     /// shows for `term`: the whole tab when empty, the tag tree after `#`, else
     /// the name tree, both over vanilla's suffix arrays (substring matches,
@@ -617,6 +627,37 @@ mod tests {
         let max = |s: &ItemStack| if s.item.ends_with("pearl") { 16 } else { 64 };
         let effect = click_display(&mut carried, Some(&stack("stone", 1)), max, button, input);
         (carried, effect)
+    }
+
+    #[test]
+    fn reopening_clears_search_and_scroll_but_preserves_tab() {
+        let mut creative = Creative::new(
+            (0..2)
+                .map(|column| Tab {
+                    id: format!("tab-{column}"),
+                    title: String::new(),
+                    icon: String::new(),
+                    items: Vec::new(),
+                    top: true,
+                    column,
+                    search: column == 1,
+                    inventory: false,
+                })
+                .collect(),
+            Vec::new(),
+            Vec::new(),
+        );
+        for tab in [1, 0] {
+            creative.select(tab);
+            creative.search = "stone".into();
+            creative.scroll = 0.75;
+            creative.scrolling = true;
+            creative.reopen();
+            assert_eq!(creative.selected, tab);
+            assert!(creative.search.is_empty());
+            assert_eq!(creative.scroll, 0.0);
+            assert!(!creative.scrolling);
+        }
     }
 
     #[test]

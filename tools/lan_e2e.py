@@ -5770,6 +5770,57 @@ CHECKS += ['offhand_menu']
 CHECK_FNS['offhand_menu'] = check_offhand_menu
 
 
+def check_creative_reopen(host, guest, out):
+    """The search tab persists, while reopening rebuilds its query and scrollbar."""
+    seen = {}
+    for label, player in (('host', host), ('guest', guest)):
+        player('command', command='gamemode creative')
+        # Guests receive game-mode changes asynchronously from the server.
+        for _ in range(40):
+            if player('state').get('gamemode') == 'creative':
+                break
+            player.wait(2)
+        assert player('state').get('gamemode') == 'creative'
+        player.raw('key', 'e', 'tap')
+        player.raw('wait-for', 'screen', 'creative', '--timeout', 10)
+        sx, sy = slot_point(player, 0)
+        # Creative slot 0 center is (17,120); Search is the top-right tab.
+        player.raw('click-at', sx - 17 + 182, sy - 120 - 14)
+        player.wait(3)
+        def shown():
+            return {w['id']: w.get('stack') for w in player.raw('ui')['widgets']
+                    if w['id'].startswith('slot-9') and int(w['id'][5:]) >= 900}
+        initial = shown()
+        assert initial.get('slot-900'), initial
+        player.raw('scroll-at', *slot_point(player, 900), -20)
+        player.wait(3)
+        scrolled = shown()
+        assert scrolled.get('slot-900') != initial['slot-900'], scrolled
+        player.raw('type', 'horizon_no_item_matches_this_query')
+        player.wait(3)
+        assert not any(shown().values()), shown()
+        player.raw('key', 'esc', 'tap')
+        player.wait(3)
+        player.raw('key', 'e', 'tap')
+        player.wait(3)
+        reopened = shown()
+        assert reopened == initial, (initial, reopened)
+        # Text input succeeds only on the retained Search tab.
+        player.raw('type', 'horizon_no_item_matches_this_query')
+        player.wait(3)
+        assert not any(shown().values()), shown()
+        player.shot(out, f'creative-reopen-{label}')
+        player.raw('key', 'esc', 'tap')
+        player.wait(3)
+        seen[label] = {'first': initial['slot-900'], 'scrolled_first': scrolled['slot-900'],
+                       'reopened_first': reopened['slot-900']}
+    return seen
+
+
+CHECKS += ['creative_reopen']
+CHECK_FNS['creative_reopen'] = check_creative_reopen
+
+
 def check_keys_released(host, guest, out):
     """Held input follows ordinary key/mouse lifecycle through disconnect/rejoin."""
     port = host.raw('lan', 'status')['port']
