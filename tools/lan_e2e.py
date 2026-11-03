@@ -1887,20 +1887,26 @@ def check_clicks(host, guest, out):
     guest.raw('key', 'esc', 'tap')
     guest.wait(10)
     in_chest, _ = open_container(guest, chest, out, 'clicks-chest-after')
-    # Coal into the fuel slot, raw iron into the input.
-    guest.raw('interact', *furnace)
-    guest.raw('wait-for', 'screen', 'container', '--timeout', 10)
-    guest.wait(10)
-    mouse(guest, hotbar_slot(guest, 'minecraft:coal'))
-    mouse(guest, 301)
-    mouse(guest, hotbar_slot(guest, 'minecraft:raw_iron'))
-    mouse(guest, 300)
-    guest.wait(10)
-    guest.shot(out, 'clicks-furnace')
-    guest.raw('key', 'esc', 'tap')
-    guest.wait(10)
-    # Opening the furnace again resends the whole menu: the server's own view.
-    in_furnace, _ = open_container(guest, furnace, out, 'clicks-furnace-after')
+    # Smelting is unrelated to mouse routing. Freeze simulation while checking
+    # these slots so a slow renderer cannot turn input into output before reopen.
+    host('command', command='tick freeze')
+    try:
+        # Coal into the fuel slot, raw iron into the input.
+        guest.raw('interact', *furnace)
+        guest.raw('wait-for', 'screen', 'container', '--timeout', 10)
+        guest.wait(10)
+        mouse(guest, hotbar_slot(guest, 'minecraft:coal'))
+        mouse(guest, 301)
+        mouse(guest, hotbar_slot(guest, 'minecraft:raw_iron'))
+        mouse(guest, 300)
+        guest.wait(10)
+        guest.shot(out, 'clicks-furnace')
+        guest.raw('key', 'esc', 'tap')
+        guest.wait(10)
+        # Opening the furnace again resends the whole menu: the server's own view.
+        in_furnace, _ = open_container(guest, furnace, out, 'clicks-furnace-after')
+    finally:
+        host('command', command='tick unfreeze')
     # Two planks dragged over the 2x2 grid's left column: one each, four sticks.
     guest.raw('key', 'e', 'tap')
     guest.raw('wait-for', 'screen', 'inventory')

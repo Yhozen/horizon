@@ -66,6 +66,8 @@ commit has different content. Each row is present in this branch.
 | [`8987ae75eb3e29aa02ecf876832757dac8d20f72`](https://github.com/ludovic111/horizon/commit/8987ae75eb3e29aa02ecf876832757dac8d20f72) | Cover offhand shift-click destinations and occupied fallback | 2026-11-03 |
 | [`34e889990df1910043044c1507c01d0a1d50a58a`](https://github.com/ludovic111/horizon/commit/34e889990df1910043044c1507c01d0a1d50a58a) | Shift-click offhand armor into its equipment slot | 2026-11-03 |
 | [`c686e9eeef95dc2d0f8d8d987bd211a7d725b519`](https://github.com/ludovic111/horizon/commit/c686e9eeef95dc2d0f8d8d987bd211a7d725b519) | Cover armor-from-offhand and occupied equipment fallback | 2026-11-03 |
+| [`e550c9d85c09efc5c52417563deabf5b2fb2cbea`](https://github.com/ludovic111/horizon/commit/e550c9d85c09efc5c52417563deabf5b2fb2cbea) | Reject invalid or repeated server quick-craft starts | 2026-11-03 |
+| [`078bdb45f4a0349735ccecd682b4832097db9458`](https://github.com/ludovic111/horizon/commit/078bdb45f4a0349735ccecd682b4832097db9458) | Cover invalid drag types and normal quick-craft behavior | 2026-11-03 |
 
 ## Latest comparison
 

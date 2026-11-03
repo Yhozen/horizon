@@ -608,7 +608,20 @@ fn quick_craft(
 ) {
     let (stage, kind) = (button & 3, ((button >> 2) & 3) as u8);
     match stage {
-        0 => *drag = view.guest.carried.is_some().then_some((kind, Vec::new())),
+        0 => {
+            // `getQuickcraftType` and `isValidQuickcraftType`: a charitable
+            // (0) or greedy (1) drag is anyone's, a clone drag (2) needs
+            // infinite materials, and 3 is no type at all. A start that is
+            // not legal, or that arrives while a drag is open, leaves the
+            // fields reset instead of collecting slots.
+            let usable = match kind {
+                0 | 1 => true,
+                2 => view.guest.creative(),
+                _ => false,
+            };
+            *drag = (usable && drag.is_none() && view.guest.carried.is_some())
+                .then_some((kind, Vec::new()));
+        }
         1 => {
             if let (Some((_, slots)), Ok(i)) = (drag.as_mut(), usize::try_from(slot))
                 && i < view.len()
@@ -621,7 +634,7 @@ fn quick_craft(
                 slots.push(i);
             }
         }
-        _ => {
+        2 => {
             let Some((kind, slots)) = drag.take() else {
                 return;
             };
@@ -648,7 +661,12 @@ fn quick_craft(
                 }
                 let existing = view.get(i).map_or(0, |s| s.count);
                 let max = view.slot_max(i, &carried, rules);
-                let put = each.min(max.saturating_sub(existing)).min(carried.count);
+                let put = each.min(max.saturating_sub(existing));
+                let put = if kind == 2 {
+                    put
+                } else {
+                    put.min(carried.count)
+                };
                 if put == 0 {
                     continue;
                 }
@@ -665,6 +683,9 @@ fn quick_craft(
             }
             view.guest.carried = (carried.count > 0).then_some(carried);
         }
+        // AbstractContainerMenu.doClick: status 3 is not an end action.
+        // Reset without committing any collected slots.
+        _ => *drag = None,
     }
 }
 
@@ -674,6 +695,226 @@ mod tests {
     use crate::lan::{Joined, PlayerSender};
     use horizon_protocol::packets::configuration::ClientInformation;
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
+
+    /// `AbstractContainerMenu.isValidQuickcraftType`: quick-craft type 2 (a
+    /// clone drag) is for players with infinite materials only, and type 3 is
+    /// no type at all. A survival guest that sends either moves nothing; a
+    /// creative guest's clone drag fills the slots and keeps its stack.
+    #[test]
+    fn a_clone_drag_needs_infinite_materials() {
+        let rules = SwapRules;
+        let mut g = guest();
+        let mut chest = vec![None; 3];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+        };
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 64));
+        // Start, two slots, end, for the two types a survival guest may not
+        // use: 3 is no type, 2 is a clone drag.
+        for kind in [3, 2] {
+            click(
+                &mut view,
+                &mut drag,
+                0,
+                kind << 2,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+            click(
+                &mut view,
+                &mut drag,
+                0,
+                kind << 2 | 1,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+            click(
+                &mut view,
+                &mut drag,
+                1,
+                kind << 2 | 1,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+            click(
+                &mut view,
+                &mut drag,
+                -999,
+                kind << 2 | 2,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+            assert_eq!(view.get(0), None, "type {kind}");
+            assert_eq!(view.get(1), None, "type {kind}");
+            assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
+        }
+        // A charitable drag over the same two slots still shares the stack.
+        click(&mut view, &mut drag, 0, 0, input::QUICK_CRAFT, &rules);
+        click(&mut view, &mut drag, 0, 1, input::QUICK_CRAFT, &rules);
+        click(&mut view, &mut drag, 1, 1, input::QUICK_CRAFT, &rules);
+        click(&mut view, &mut drag, -999, 2, input::QUICK_CRAFT, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(32));
+        assert_eq!(view.get(1).map(|s| s.count), Some(32));
+        assert_eq!(view.guest.carried, None);
+        // With infinite materials a clone drag goes through: both slots take
+        // the whole stack and the cursor keeps it.
+        view.guest.game_mode = crate::lan::guest::CREATIVE;
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 64));
+        click(&mut view, &mut drag, 0, 2 << 2, input::QUICK_CRAFT, &rules);
+        click(
+            &mut view,
+            &mut drag,
+            0,
+            2 << 2 | 1,
+            input::QUICK_CRAFT,
+            &rules,
+        );
+        click(
+            &mut view,
+            &mut drag,
+            2,
+            2 << 2 | 1,
+            input::QUICK_CRAFT,
+            &rules,
+        );
+        click(
+            &mut view,
+            &mut drag,
+            -999,
+            2 << 2 | 2,
+            input::QUICK_CRAFT,
+            &rules,
+        );
+        assert_eq!(view.get(0).map(|s| s.count), Some(64));
+        assert_eq!(view.get(2).map(|s| s.count), Some(64));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
+    }
+
+    #[test]
+    fn guest_quick_craft_greedy_and_repeated_start() {
+        let rules = SwapRules;
+        let mut g = guest();
+        let mut chest = vec![None; 2];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+        };
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 8));
+        // A normal right drag places one in each slot and consumes two.
+        for (slot, button) in [(0, 4), (0, 5), (1, 5), (-999, 6)] {
+            click(
+                &mut view,
+                &mut drag,
+                slot,
+                button,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+        }
+        assert_eq!(view.get(0).map(|s| s.count), Some(1));
+        assert_eq!(view.get(1).map(|s| s.count), Some(1));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(6));
+        // Starting again while collecting resets the drag, rather than
+        // replacing it with a new session that can collect and commit slots.
+        for (slot, button) in [(0, 0), (0, 1), (0, 0), (1, 1), (-999, 2)] {
+            click(
+                &mut view,
+                &mut drag,
+                slot,
+                button,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+        }
+        assert!(drag.is_none());
+        assert_eq!(view.get(0).map(|s| s.count), Some(1));
+        assert_eq!(view.get(1).map(|s| s.count), Some(1));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(6));
+        // A fresh, valid drag still works after that reset.
+        for (slot, button) in [(0, 0), (0, 1), (1, 1), (-999, 2)] {
+            click(
+                &mut view,
+                &mut drag,
+                slot,
+                button,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+        }
+        assert_eq!(view.get(0).map(|s| s.count), Some(4));
+        assert_eq!(view.get(1).map(|s| s.count), Some(4));
+        assert!(view.guest.carried.is_none());
+    }
+
+    #[test]
+    fn creative_clone_drag_fills_slots_from_a_single_carried_item() {
+        let rules = SwapRules;
+        let mut g = guest();
+        g.game_mode = crate::lan::guest::CREATIVE;
+        g.carried = Some(ItemStack::new("minecraft:stone", 1));
+        let mut chest = vec![None, Some(ItemStack::new("minecraft:stone", 7))];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+        };
+        for (slot, button) in [(0, 8), (0, 9), (1, 9), (-999, 10)] {
+            click(
+                &mut view,
+                &mut drag,
+                slot,
+                button,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+        }
+        assert_eq!(view.get(0).map(|s| s.count), Some(64));
+        assert_eq!(view.get(1).map(|s| s.count), Some(64));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(1));
+        assert!(drag.is_none());
+    }
+
+    #[test]
+    fn invalid_quickcraft_stage_resets_without_placing_and_allows_a_new_drag() {
+        let rules = SwapRules;
+        let mut g = guest();
+        g.carried = Some(ItemStack::new("minecraft:stone", 8));
+        let mut chest = vec![None; 2];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+        };
+        for (slot, button) in [(0, 0), (0, 1), (1, 1), (-999, 3), (-999, 2)] {
+            click(
+                &mut view,
+                &mut drag,
+                slot,
+                button,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+        }
+        assert!(drag.is_none());
+        assert!(view.get(0).is_none() && view.get(1).is_none());
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(8));
+        for (slot, button) in [(0, 0), (0, 1), (1, 1), (-999, 2)] {
+            click(
+                &mut view,
+                &mut drag,
+                slot,
+                button,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+        }
+        assert_eq!(view.get(0).map(|s| s.count), Some(4));
+        assert_eq!(view.get(1).map(|s| s.count), Some(4));
+        assert!(view.guest.carried.is_none());
+    }
 
     struct SwapRules;
     impl Rules for SwapRules {
