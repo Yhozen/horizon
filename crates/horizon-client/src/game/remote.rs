@@ -461,6 +461,14 @@ impl Game<'_> {
         if let Some(mut r) = self.remote.take() {
             r.session.disconnect();
         }
+        // Gui.setScreen -> KeyMapping.releaseAll: releases after disconnect go
+        // to the screen, so held input must not survive into the next world.
+        self.keys.clear();
+        self.physical_keys.clear();
+        self.toggles = Default::default();
+        self.modifiers = winit::keyboard::ModifiersState::empty();
+        self.left = false;
+        self.right = false;
         // Single player's server thread saves the world before the title shows.
         let single_player = match self.integrated.take() {
             Some(server) => {

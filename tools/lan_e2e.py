@@ -5674,5 +5674,77 @@ CHECKS += ['creative_throw']
 CHECK_FNS['creative_throw'] = check_creative_throw
 
 
+def check_keys_released(host, guest, out):
+    """Held input follows ordinary key/mouse lifecycle through disconnect/rejoin."""
+    port = host.raw('lan', 'status')['port']
+    for key in ('w', 'space', 'shift', 'ctrl'):
+        guest.raw('key', key, 'down')
+    for button in ('left', 'right'):
+        guest.raw('mouse', button, 'down')
+    held = guest('status')
+    assert set(held['physical_keys']) >= {'KeyW', 'Space', 'ShiftLeft', 'ControlLeft'}, held
+    assert held['attack_down'] and held['use_down'], held
+    guest.raw('disconnect')
+    left = guest('status')
+    # Do not send keys/clear or synthetic releases: that would mask leave_server.
+    guest.raw('connect', f'127.0.0.1:{port}', GUEST_NAME)
+    guest.raw('wait-for', 'loaded', '--timeout', 300)
+    guest.wait(20)
+    rejoined = guest('status')
+    for status in (left, rejoined):
+        assert status['keys'] == [] and status['physical_keys'] == [], status
+        assert not status['attack_down'] and not status['use_down'], status
+    start = pos_of(guest)
+    guest.wait(20)
+    end = pos_of(guest)
+    walked = round(math.hypot(end[0] - start[0], end[2] - start[2]), 3)
+    assert walked < 0.1, f'guest walked after rejoining: {walked}'
+    return {'held': held['physical_keys'], 'left': left['physical_keys'],
+            'rejoined': rejoined['physical_keys'], 'walked': walked}
+
+
+def check_toggles_released(host, guest, out):
+    """Toggle-enabled keyboard mappings must not restore a previous server's state."""
+    port = host.raw('lan', 'status')['port']
+    for key in ('toggleCrouch', 'toggleSprint'):
+        guest.raw('options-set', key, 'true')
+    try:
+        for key in ('shift', 'ctrl'):
+            guest.raw('key', key, 'tap')
+        guest.wait(2)
+        held = guest('status')
+        assert set(held['keys']) >= {'ShiftLeft', 'ControlLeft'}, held
+        assert not held['physical_keys'], held  # toggled, rather than physically held
+        # Opening a screen remembers keyboard toggle state for restoration.
+        guest.raw('key', 'e', 'tap')
+        guest.wait(2)
+        guest.raw('disconnect')
+        guest.raw('connect', f'127.0.0.1:{port}', GUEST_NAME)
+        guest.raw('wait-for', 'loaded', '--timeout', 300)
+        guest.wait(20)
+        rejoined = guest('status')
+        assert not {'ShiftLeft', 'ControlLeft'} & set(rejoined['keys']), rejoined
+        # A later screen close must not restore the remembered old toggle state either.
+        guest.raw('key', 'e', 'tap')
+        guest.wait(2)
+        guest.raw('key', 'esc', 'tap')
+        guest.wait(2)
+        after_screen = guest('status')
+        assert not {'ShiftLeft', 'ControlLeft'} & set(after_screen['keys']), after_screen
+        return {'toggled': held['keys'], 'rejoined': rejoined['keys'],
+                'after_screen': after_screen['keys']}
+    finally:
+        for key in ('toggleCrouch', 'toggleSprint'):
+            guest.raw('options-set', key, 'false')
+
+
+CHECKS += ['toggles_released']
+CHECK_FNS['toggles_released'] = check_toggles_released
+
+
+CHECKS += ['keys_released']
+CHECK_FNS['keys_released'] = check_keys_released
+
+
 if __name__ == '__main__':
     main()

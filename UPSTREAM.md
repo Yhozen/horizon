@@ -60,6 +60,7 @@ commit has different content. Each row is present in this branch.
 | [`be7de6230c1610a8790968f449a9ecf6a1abd7b4`](https://github.com/ludovic111/horizon/commit/be7de6230c1610a8790968f449a9ecf6a1abd7b4) | Load the named world owner before the joining profile | 2026-11-03 |
 | [`7ca3d989013018000e7f7f99c14635b3ba7cafcd`](https://github.com/ludovic111/horizon/commit/7ca3d989013018000e7f7f99c14635b3ba7cafcd) | Save the owner file that will be reloaded and recover guest backups | 2026-11-03 |
 | [`152617ece70af3670b46b2345e4683fd4defaf65`](https://github.com/ludovic111/horizon/commit/152617ece70af3670b46b2345e4683fd4defaf65) | Log player save failures (adapted player-save portion) | 2026-11-03 |
+| [`698e7fd662ba0a6502f0965ea660994f4f11092f`](https://github.com/ludovic111/horizon/commit/698e7fd662ba0a6502f0965ea660994f4f11092f) | Release held input on server disconnect, including physical modifiers | 2026-11-03 |
 
 ## Latest comparison
 
@@ -80,7 +81,6 @@ Recommended next imports, all **not imported**:
 | Area | Sources | Scope and dependencies |
 | --- | --- | --- |
 | Normal-container offhand actions | `b70cb22e9d094319f71c541be9a6ca7a9e5c9647`, `d9f93b474f36138c590eb518f36fe4f9a4a4a5b9`, `34e889990df1910043044c1507c01d0a1d50a58a`; tests `8987ae75eb3e29aa02ecf876832757dac8d20f72`, `c686e9eeef95dc2d0f8d8d987bd211a7d725b519` | Chest F swaps and shield/armor shift-click routing on the server; about 225 lines with tests. Separate from the imported creative fixes. |
-| Disconnect input reset | `698e7fd662ba0a6502f0965ea660994f4f11092f` | Clear held input before reconnecting; extend coverage to this fork's physical modifier keys. |
 
 Imported-world owner identity now uses the named owner file or the joining profile's own file,
 with validated backup recovery. Both in-frame and integrated loading avoid selecting another

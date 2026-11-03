@@ -307,7 +307,8 @@ impl Game<'_> {
                 match arg(2)? {
                     "down" => self.control_key_down(key)?,
                     "up" => {
-                        self.keys.remove(&key);
+                        self.mapped_key(key, false, false)?;
+                        self.physical_keys.remove(&physical);
                         self.physical_keys.remove(&key);
                     }
                     // The system's auto-repeat while the key is held.
@@ -317,7 +318,7 @@ impl Game<'_> {
                     }
                     "tap" => {
                         self.control_key_down(key)?;
-                        self.keys.remove(&key);
+                        self.mapped_key(key, false, false)?;
                         self.physical_keys.remove(&physical);
                         self.debug_key(physical, horizon_client::debug_keys::KeyAction::Release);
                     }
@@ -756,10 +757,7 @@ impl Game<'_> {
         if self.screen == Screen::Options {
             return self.options_key(key, None);
         }
-        if self.keys.insert(key) {
-            self.key_pressed(key)?;
-        }
-        Ok(())
+        self.mapped_key(key, true, false)
     }
 
     fn screen_name(&self) -> &'static str {
@@ -932,7 +930,6 @@ impl Game<'_> {
             "held": self.held().map(|s| json!({ "item": &*s.item, "count": s.count })),
             "offhand": self.offhand.as_ref().map(|s| json!({ "item": &*s.item, "count": s.count, "damage": s.damage })),
             "keys": self.keys.iter().map(|k| format!("{k:?}")).collect::<Vec<_>>(),
-            // The keyboard as the OS reports it (Shift and Ctrl in screens).
             "fps": self.fps,
             "frames": self.frames,
             "ticks": self.ticks,
@@ -978,6 +975,8 @@ impl Game<'_> {
         status["pending_uploads"] = self.pending_uploads.len().into();
         status["destroying"] = json!(destroying);
         status["physical_keys"] = json!(physical_keys);
+        status["attack_down"] = self.left.into();
+        status["use_down"] = self.right.into();
         status["heard"] = json!(self.audio.heard);
         // Boats, minecarts, armor stands, item frames and paintings.
         status["objects"] = json!(self.objects_status());
