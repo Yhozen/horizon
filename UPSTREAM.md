@@ -54,6 +54,7 @@ commit has different content. Each row is present in this branch.
 | [`eb2b96b6b2551be8494f0ef34189175c4c0e1685`](https://github.com/ludovic111/horizon/commit/eb2b96b6b2551be8494f0ef34189175c4c0e1685) | Reuse map sprite names and borrow framed-map decorations | 2026-11-03 |
 | [`11eecf5a6a90e4e412da9da4cf966d26e5cecd0c`](https://github.com/ludovic111/horizon/commit/11eecf5a6a90e4e412da9da4cf966d26e5cecd0c) | Reject ZIP traversal and invalid resource-pack overlays | 2026-11-03 |
 | [`04bc30606d09fa618f5e9fef8aec99839b895639`](https://github.com/ludovic111/horizon/commit/04bc30606d09fa618f5e9fef8aec99839b895639) | Keep resource metadata with its owning pack or a higher pack | 2026-11-03 |
+| [`11b36e38671f8f3fd22704b586c9402f1bd1fa23`](https://github.com/ludovic111/horizon/commit/11b36e38671f8f3fd22704b586c9402f1bd1fa23) | Use separate saved-NBT limits without relaxing network bounds | 2026-11-03 |
 
 ## Latest comparison
 

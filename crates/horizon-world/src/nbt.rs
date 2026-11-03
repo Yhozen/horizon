@@ -111,6 +111,17 @@ impl Limits {
         }
     }
 
+    /// Saved chunks, entities, POI and `.dat` files use vanilla's
+    /// `NbtAccounter.unlimitedHeap()`. Bound decompressed bytes and depth,
+    /// without imposing the network parser's node cap on world data.
+    pub fn saved() -> Self {
+        Self {
+            max_bytes: 1 << 30,
+            max_nodes: usize::MAX,
+            max_depth: 512,
+        }
+    }
+
     /// Structure templates (`structure/*.nbt`): vanilla reads them with
     /// `NbtAccounter.unlimitedHeap()` (TemplateSource.readStructure), and
     /// mods ship templates past the default node cap (YUNG's Better Ocean

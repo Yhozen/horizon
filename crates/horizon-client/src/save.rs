@@ -1558,7 +1558,7 @@ fn compress_records(
     let compress = |record: &Record| {
         record
             .tag()
-            .map(|tag| ChunkRecord::from_nbt(&tag, Compression::Zlib, timestamp, Limits::default()))
+            .map(|tag| ChunkRecord::from_nbt(&tag, Compression::Zlib, timestamp, Limits::saved()))
             .transpose()
     };
     let helpers = std::thread::available_parallelism()
@@ -1754,7 +1754,7 @@ impl SaveDir {
         let path = self.region_path(folder, key.0, key.1);
         let region = cached_region(cache, key, &path, false).ok()??;
         let record = region.lock().ok()?.read(ChunkPos::new(x, z)).ok()??;
-        record.nbt(Limits::default()).ok()
+        record.nbt(Limits::saved()).ok()
     }
     pub fn load(&self, x: i32, z: i32, registry: &BlockRegistry, biomes: &Biomes) -> Option<Chunk> {
         let root = self.read_record("region", x, z)?;
@@ -2005,11 +2005,11 @@ impl Drop for SaveDir {
 
 pub fn read_dat(path: &Path) -> Option<Tag> {
     let bytes = fs::read(path).ok()?;
-    let raw = match Compression::Gzip.decode(&bytes, 64 << 20) {
+    let raw = match Compression::Gzip.decode(&bytes, Limits::saved().max_bytes) {
         Ok(raw) => raw,
         Err(_) => bytes,
     };
-    Some(nbt::read_named(&raw, Limits::default()).ok()?.0.tag)
+    Some(nbt::read_named(&raw, Limits::saved()).ok()?.0.tag)
 }
 /// `FileNameDateFormatter`: names of preserved unreadable files.
 fn backup_stamp() -> String {
@@ -2089,7 +2089,7 @@ pub fn write_dat(path: &Path, tag: Tag) -> Result<()> {
             name: "".into(),
             tag,
         },
-        Limits::default(),
+        Limits::saved(),
     )
     .map_err(|e| e.to_string())?;
     let compressed = Compression::Gzip.encode(&bytes)?;
@@ -3621,6 +3621,34 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn saved_nbt_over_a_million_nodes_roundtrips_dat_and_region() {
+        let dir = std::env::temp_dir().join(format!("horizon-large-nbt-{}", std::process::id()));
+        let _ = horizon_core::fs::remove_dir_all(&dir);
+        horizon_core::fs::create_dir_all(&dir).unwrap();
+        let tag = Tag::compound([("values", Tag::List(vec![Tag::Int(37); 1_000_001]))]);
+        let named = NamedTag {
+            name: "".into(),
+            tag: tag.clone(),
+        };
+        // Default limits remain appropriate for untrusted/network NBT.
+        assert!(nbt::write_named(&named, Limits::default()).is_err());
+        let bytes = nbt::write_named(&named, Limits::saved()).unwrap();
+        assert!(nbt::read_named(&bytes, Limits::default()).is_err());
+        super::write_dat(&dir.join("large.dat"), tag.clone()).unwrap();
+        assert_eq!(super::read_dat(&dir.join("large.dat")), Some(tag));
+        let save = super::SaveDir::new(dir.clone());
+        // Exercise compress_records and the on-disk read path, not pending reads.
+        save.save_entities_later(vec![((1, 2), vec![named.tag.clone()])])
+            .unwrap();
+        save.flush().unwrap();
+        drop(save);
+        let reopened = super::SaveDir::new(dir.clone());
+        assert_eq!(reopened.load_entities(1, 2), vec![named.tag]);
+        drop(reopened);
+        horizon_core::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn saved_and_client_heightmaps_use_dimension_bounds_without_resources() {
         let tables = SaveTables::for_heightmaps(crate::assets::Properties::for_tests(&[
