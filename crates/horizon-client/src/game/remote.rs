@@ -176,7 +176,8 @@ pub(super) struct Remote {
     placing: Option<([i32; 3], u64)>,
     death_message: Option<String>,
     player_type: Option<Arc<MobType>>,
-    /// Inventory as last synchronised, for creative-mode slot updates.
+    /// Inventory, off hand and armour as last synchronised, for creative-mode
+    /// slot updates (`creative_sync_stacks`).
     synced: Vec<Option<ItemStack>>,
     decode_errors: u32,
     clock: Option<i32>,
@@ -428,7 +429,7 @@ impl Game<'_> {
             placing: None,
             death_message: None,
             player_type,
-            synced: vec![None; 36],
+            synced: vec![None; CREATIVE_SYNCED],
             decode_errors: 0,
             clock: None,
             clock_rate: 1.0,
@@ -2337,12 +2338,14 @@ impl Game<'_> {
                     r.state_id = p.state;
                 }
                 let stack = self.to_stack(&p.item);
+                let before = self.creative_stacks();
                 self.set_menu_slot(p.container, i32::from(p.slot), stack);
-                self.remote_synced();
+                self.remote_synced_since(&before);
             }
             C::SetCursorItem(p) => self.carried = self.to_stack(&p.item),
             C::SetPlayerInventory(p) => {
                 let stack = self.to_stack(&p.item);
+                let before = self.creative_stacks();
                 match p.slot {
                     0..=35 => self.inventory[p.slot as usize] = stack,
                     36..=39 => self.armor[3 - (p.slot - 36) as usize] = stack,
@@ -2350,7 +2353,7 @@ impl Game<'_> {
                     40 => self.offhand = stack,
                     _ => {}
                 }
-                self.remote_synced();
+                self.remote_synced_since(&before);
             }
             C::ContainerSetData(p) if self.open_menu_name(p.container) == "minecraft:lectern" => {
                 self.remote_lectern_page(i32::from(p.value));
@@ -3562,22 +3565,34 @@ impl Game<'_> {
         {
             out.push(packet);
         }
-        // Creative inventory edits are sent slot by slot (SetCreativeModeSlot).
-        let mut creative_slots = Vec::new();
-        if self.creative {
-            for i in 0..36 {
-                if self.inventory[i] != r.synced[i] {
-                    r.synced[i] = self.inventory[i].clone();
-                    creative_slots.push(i);
-                }
-            }
-        }
         for packet in out {
             self.send(packet);
         }
-        for i in creative_slots {
-            let slot = if i < 9 { 36 + i } else { i } as i16;
-            let item = self.to_network(&self.inventory[i]);
+        self.send_creative_slots();
+    }
+    fn creative_stacks(&self) -> Vec<Option<ItemStack>> {
+        creative_sync_stacks(&self.inventory, &self.offhand, &self.armor)
+    }
+    /// CreativeInventoryListener.slotChanged / handleCreativeModeItemAdd:
+    /// broadcastChanges sends a click's slots immediately, before an incoming
+    /// server update can replace an unsent edit.
+    pub(super) fn send_creative_slots(&mut self) {
+        if !self.creative {
+            return;
+        }
+        let stacks = self.creative_stacks();
+        let Some(r) = self.remote.as_mut() else {
+            return;
+        };
+        let mut changed = Vec::new();
+        for (i, stack) in stacks.into_iter().enumerate() {
+            if stack != r.synced[i] {
+                r.synced[i] = stack.clone();
+                changed.push((creative_sync_slot(i), stack));
+            }
+        }
+        for (slot, stack) in changed {
+            let item = self.to_network(&stack);
             self.send(S::SetCreativeModeSlot(play::SetCreativeModeSlot {
                 slot,
                 item,
@@ -3586,9 +3601,16 @@ impl Game<'_> {
     }
     /// Inventory as the server last described it.
     fn remote_synced(&mut self) {
-        let inventory = self.inventory.clone();
+        let stacks = self.creative_stacks();
         if let Some(r) = self.remote.as_mut() {
-            r.synced = inventory;
+            r.synced = stacks;
+        }
+    }
+    /// Only slots changed by this server packet are synced; pending creative edits stay pending.
+    fn remote_synced_since(&mut self, before: &[Option<ItemStack>]) {
+        let now = self.creative_stacks();
+        if let Some(r) = self.remote.as_mut() {
+            mark_synced(&mut r.synced, before, now);
         }
     }
 
@@ -4448,6 +4470,12 @@ impl Game<'_> {
         } else {
             Input::Pickup
         };
+        if self.screen == Screen::Creative {
+            // CreativeModeInventoryScreen clicks its own InventoryMenu. A server holding its
+            // cursor stack would give it back after the Destroy Item slot cleared the client's.
+            self.menu_click(Some(internal), i32::from(right), input);
+            return;
+        }
         self.remote_menu_ops(&[(Some(internal), i32::from(right), input)]);
     }
     /// The server's open menu: its window id and menu type (0, "inventory"
@@ -4606,6 +4634,36 @@ impl Game<'_> {
             input: if input == Input::Throw { 4 } else { 0 },
             changed: Vec::new(),
             carried,
+        }));
+    }
+    /// CreativeModeInventoryScreen.slotClicked outside the window: the server knows nothing
+    /// of a stack picked from a creative tab, so send the dropped stack itself.
+    pub(super) fn remote_creative_drop(&mut self, right: bool) {
+        let one = right && !self.creative_inventory_open();
+        let Some(carried) = self.carried.as_mut() else {
+            return;
+        };
+        let thrown = if one && carried.count > 1 {
+            carried.count -= 1;
+            ItemStack {
+                count: 1,
+                ..carried.clone()
+            }
+        } else {
+            self.carried.take().expect("carried")
+        };
+        self.remote_creative_throw(thrown);
+    }
+    /// MultiPlayerGameMode.handleCreativeModeItemDrop: the server drops a slot -1 stack.
+    pub(super) fn remote_creative_throw(&mut self, thrown: ItemStack) {
+        if !self.creative {
+            return;
+        }
+        self.swing_arm();
+        let item = self.to_network(&Some(thrown));
+        self.send(S::SetCreativeModeSlot(play::SetCreativeModeSlot {
+            slot: -1,
+            item,
         }));
     }
     pub(super) fn remote_close_container(&mut self) {
@@ -5048,6 +5106,45 @@ type Predicted = (
     Option<ItemStack>,
 );
 
+/// InventoryMenu's non-crafting slots: 36 inventory slots, off hand, then armour.
+const CREATIVE_SYNCED: usize = 41;
+
+fn creative_sync_stacks(
+    inventory: &[Option<ItemStack>],
+    offhand: &Option<ItemStack>,
+    armor: &[Option<ItemStack>; 4],
+) -> Vec<Option<ItemStack>> {
+    let mut stacks: Vec<Option<ItemStack>> = inventory.iter().take(36).cloned().collect();
+    stacks.resize(36, None);
+    stacks.push(offhand.clone());
+    stacks.extend(armor.iter().cloned());
+    stacks
+}
+
+fn mark_synced(
+    synced: &mut [Option<ItemStack>],
+    before: &[Option<ItemStack>],
+    now: Vec<Option<ItemStack>>,
+) {
+    for (i, stack) in now.into_iter().enumerate() {
+        if before.get(i) != Some(&stack)
+            && let Some(s) = synced.get_mut(i)
+        {
+            *s = stack;
+        }
+    }
+}
+
+/// InventoryMenu: hotbar 36..=44, main inventory 9..=35, off hand 45, armour 5..=8.
+fn creative_sync_slot(i: usize) -> i16 {
+    (match i {
+        0..9 => 36 + i,
+        36 => 45,
+        37.. => 5 + (i - 37),
+        _ => i,
+    }) as i16
+}
+
 fn menu_items(m: &horizon_client::menu::Menu) -> Vec<Option<ItemStack>> {
     (0..m.slot_count()).map(|i| m.slot(i).cloned()).collect()
 }
@@ -5404,6 +5501,51 @@ mod tests {
                 assert_eq!(base.block_state(BlockPos::new(0, 1, 0)), base.air);
             }
         }
+    }
+
+    #[test]
+    fn the_creative_sync_covers_inventory_menu_slots_5_to_45_once_each() {
+        let stack = |item: &str| Some(horizon_client::items::ItemStack::new(item, 1));
+        let inventory: Vec<_> = (0..36)
+            .map(|i| stack(&format!("minecraft:item_{i}")))
+            .collect();
+        let offhand = stack("minecraft:shield");
+        let armor = [
+            stack("minecraft:diamond_helmet"),
+            stack("minecraft:diamond_chestplate"),
+            stack("minecraft:diamond_leggings"),
+            stack("minecraft:diamond_boots"),
+        ];
+        let stacks = super::creative_sync_stacks(&inventory, &offhand, &armor);
+        assert_eq!(stacks.len(), super::CREATIVE_SYNCED);
+        let mut slots: Vec<i16> = (0..stacks.len()).map(super::creative_sync_slot).collect();
+        for (i, &slot) in slots.iter().enumerate() {
+            let game_slot = Game::menu_slot("inventory", i32::from(slot)).unwrap();
+            let expected = match game_slot {
+                0..36 => &inventory[game_slot],
+                504 => &offhand,
+                500..504 => &armor[game_slot - 500],
+                _ => panic!("entry {i} went to game slot {game_slot}"),
+            };
+            assert_eq!(&stacks[i], expected, "entry {i}, menu slot {slot}");
+        }
+        slots.sort();
+        assert_eq!(slots, (5..=45).collect::<Vec<i16>>());
+    }
+
+    #[test]
+    fn a_server_slot_update_leaves_an_unsent_creative_click_to_be_sent() {
+        let stack = |item: &str| Some(horizon_client::items::ItemStack::new(item, 1));
+        let none = || vec![None; super::CREATIVE_SYNCED];
+        // A click puts a helmet on, then a server pickup updates a different slot.
+        let mut synced = none();
+        let mut before = none();
+        before[37] = stack("minecraft:diamond_helmet");
+        let mut now = before.clone();
+        now[0] = stack("minecraft:stick");
+        super::mark_synced(&mut synced, &before, now.clone());
+        assert_eq!(synced[0], now[0]);
+        assert_eq!(synced[37], None, "the helmet must still be sent");
     }
 
     #[test]

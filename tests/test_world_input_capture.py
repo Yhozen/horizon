@@ -127,7 +127,7 @@ fn main() {
                 game.inventory_drag = true;
                 game.capture(false);
                 assert!(!game.mining);
-                assert!(game.inventory_drag);
+                assert!(!game.inventory_drag);
                 game.capture_loaded_world();
                 assert!(!game.captured);
                 assert!(game.window.as_ref().unwrap().visible.get());
@@ -140,8 +140,10 @@ fn main() {
         // Alt+Tab during loading: no native grab or agent-pointer reset.
         game.focused = false;
         game.mining = true;
+        game.inventory_drag = true;
         game.capture(false);
         assert!(!game.mining);
+        assert!(!game.inventory_drag);
         assert!(!game.captured);
         assert!(game.window.as_ref().unwrap().visible.get());
         game.agent_pointer = true;
@@ -178,9 +180,19 @@ fn main() {
     assert_eq!(window.warps.get(), 3);
     assert_eq!(game.cursor, (250.0, 150.0));
     game.cursor = (1.0, 1.0);
+    // A new screen can take over without grabbing the pointer in between.
+    // A drag from the previous screen must not survive that transition.
+    game.inventory_drag = true;
     game.capture(false);
     assert_eq!(game.window.as_ref().unwrap().warps.get(), 3);
     assert_eq!(game.cursor, (1.0, 1.0));
+    assert!(!game.inventory_drag);
+    // A guest action never changes the host's pointer or inventory gesture.
+    game.lan_acting = Some(1);
+    game.inventory_drag = true;
+    game.capture(false);
+    assert!(game.inventory_drag);
+    game.lan_acting = None;
     game.renderer = None;
     game.window.as_mut().unwrap().fail = true;
     game.capture_loaded_world();

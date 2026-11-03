@@ -189,7 +189,7 @@ impl SessionLock {
 /// the latter as it reads each file; Horizon runs them all on opening, which reads
 /// the same data. Worlds older than the ported fixes (1.17) are refused.
 pub fn upgrade_older_world(world: &Path) -> Result<()> {
-    let Some(root) = read_dat(&world.join("level.dat")) else {
+    let Some(root) = read_level_dat(world) else {
         return Ok(());
     };
     let version = root.get("Data").map_or(i64::from(DATA_VERSION), |d| {
@@ -207,6 +207,9 @@ pub fn upgrade_older_world(world: &Path) -> Result<()> {
         )
         .into());
     }
+    // The file upgrader reads level.dat directly; give it the same recovered
+    // file whose version we checked, retaining the unreadable primary.
+    restore_level_dat(world)?;
     horizon_world::datafix::files::upgrade_world(world)
         .map_err(|e| format!("upgrading {}: {e}", world.display()))?;
     Ok(())
@@ -2008,6 +2011,74 @@ pub fn read_dat(path: &Path) -> Option<Tag> {
     };
     Some(nbt::read_named(&raw, Limits::default()).ok()?.0.tag)
 }
+/// `FileNameDateFormatter`: names of preserved unreadable files.
+fn backup_stamp() -> String {
+    chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string()
+}
+/// Never overwrite an earlier recovery attempt made in the same second.
+fn unused_backup_path(dir: &Path, name: &str, extension: &str) -> PathBuf {
+    let mut path = dir.join(format!("{name}{extension}"));
+    let mut suffix = 1;
+    while path.exists_vfs() {
+        path = dir.join(format!("{name}_{suffix}{extension}"));
+        suffix += 1;
+    }
+    path
+}
+pub(crate) fn read_level_file(path: &Path) -> Option<Tag> {
+    read_dat(path).filter(|root| matches!(root.get("Data"), Some(Tag::Compound(_))))
+}
+/// `LevelStorageSource.readLevelDataTagFixed`: level.dat, else level.dat_old.
+fn read_level_dat(dir: &Path) -> Option<Tag> {
+    read_level_file(&dir.join("level.dat")).or_else(|| read_level_file(&dir.join("level.dat_old")))
+}
+fn read_player_file(path: &Path) -> Option<Tag> {
+    read_dat(path).filter(|root| matches!(root, Tag::Compound(_)))
+}
+fn read_player_dat(path: &Path) -> Option<Tag> {
+    read_player_file(path).or_else(|| read_player_file(&path.with_extension("dat_old")))
+}
+/// Preserve an unreadable level.dat before restoring its readable backup.
+/// A failed move stops the save: writing defaults must not bury either file.
+fn restore_level_dat(dir: &Path) -> Result<()> {
+    let path = dir.join("level.dat");
+    if read_level_file(&path).is_some() {
+        return Ok(());
+    }
+    if path.exists_vfs() {
+        let backup =
+            unused_backup_path(dir, &format!("level.dat_corrupted_{}", backup_stamp()), "");
+        fs::rename(&path, backup)?;
+    }
+    let old = dir.join("level.dat_old");
+    if read_level_file(&old).is_some() {
+        fs::rename(old, path)?;
+    }
+    Ok(())
+}
+/// `PlayerDataStorage.backup`: retain the unreadable player file before the
+/// next save rotates it into .dat_old. Failure leaves the original untouched.
+fn back_up_unreadable_player(path: &Path) -> Result<()> {
+    if read_player_file(path).is_some() {
+        return Ok(());
+    }
+    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+        if path.is_file_vfs() {
+            let backup = unused_backup_path(
+                path.parent().unwrap_or(Path::new(".")),
+                &format!("{stem}_corrupted_{}", backup_stamp()),
+                ".dat",
+            );
+            fs::copy(path, backup)?;
+        }
+        // Rotate the readable backup, not the corrupt file, on the next save.
+        let old = path.with_file_name(format!("{stem}.dat_old"));
+        if read_player_file(&old).is_some() {
+            fs::rename(old, path)?;
+        }
+    }
+    Ok(())
+}
 /// Write a gzip NBT file the way vanilla does (`<name>_new`, keep `_old`).
 pub fn write_dat(path: &Path, tag: Tag) -> Result<()> {
     if let Some(dir) = path.parent() {
@@ -2054,7 +2125,7 @@ fn read_saved_data(world: &Path, name: &str) -> Option<Tag> {
 /// level.dat's Data.WorldGenSettings.
 pub fn world_gen_settings(world: &Path) -> Option<Tag> {
     read_saved_data(world, "world_gen_settings").or_else(|| {
-        read_dat(&world.join("level.dat"))?
+        read_level_dat(world)?
             .get("Data")?
             .get("WorldGenSettings")
             .cloned()
@@ -2483,7 +2554,7 @@ impl Level {
         }
     }
     pub fn read(dir: &Path) -> Option<Self> {
-        let root = read_dat(&dir.join("level.dat"))?;
+        let root = read_level_dat(dir)?;
         let data = root.get("Data")?;
         let n = |t: Option<&Tag>| number(t).unwrap_or(0);
         let mut level = Self {
@@ -2571,17 +2642,27 @@ impl Level {
         // file of a server world, or the legacy Data.Player.
         let uuid = uuid_from_tag(data.get("singleplayer_uuid"));
         let player_dir = dir.join("players").join("data");
-        let owner = uuid.and_then(|u| read_dat(&player_dir.join(format!("{}.dat", uuid_text(u)))));
+        // PlayerDataStorage.load: the named file, else the same player's .dat_old.
+        let owner =
+            uuid.and_then(|u| read_player_dat(&player_dir.join(format!("{}.dat", uuid_text(u)))));
         let player = owner
             .or_else(|| {
                 fs::read_dir(&player_dir)
                     .ok()
                     .and_then(|d| {
                         d.flatten()
-                            .filter(|e| e.path().extension().is_some_and(|x| x == "dat"))
+                            .filter(|e| {
+                                let path = e.path();
+                                path.extension().is_some_and(|x| x == "dat")
+                                    && path
+                                        .file_stem()
+                                        .and_then(|s| s.to_str())
+                                        .and_then(uuid_from_text)
+                                        .is_some()
+                            })
                             .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
                     })
-                    .and_then(|e| read_dat(&e.path()))
+                    .and_then(|e| read_player_dat(&e.path()))
             })
             .or_else(|| data.get("Player").cloned());
         level.player_uuid = uuid_from_tag(player.as_ref().and_then(|p| p.get("UUID"))).or(uuid);
@@ -2900,6 +2981,7 @@ impl Level {
     /// Write every file; a world without a player UUID gets a random one.
     pub fn write(&mut self, dir: &Path) -> Result<()> {
         fs::create_dir_all(dir)?;
+        restore_level_dat(dir)?;
         let existing = read_dat(&dir.join("level.dat")).and_then(|r| r.get("Data").cloned());
         let legacy = existing
             .as_ref()
@@ -3090,12 +3172,12 @@ impl Level {
             }
             write_saved_data(dir, "game_rules", rules)?;
         }
-        write_dat(
-            &dir.join("players")
-                .join("data")
-                .join(format!("{}.dat", uuid_text(uuid))),
-            self.player_tag(),
-        )?;
+        let player_file = dir
+            .join("players")
+            .join("data")
+            .join(format!("{}.dat", uuid_text(uuid)));
+        back_up_unreadable_player(&player_file)?;
+        write_dat(&player_file, self.player_tag())?;
         write_dat(&dir.join("level.dat"), Tag::compound([("Data", data)]))?;
         Ok(())
     }
@@ -4518,6 +4600,218 @@ mod tests {
                 .exists_vfs()
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unreadable_or_missing_level_and_player_files_recover_their_backups() {
+        for missing in [false, true] {
+            let dir = std::env::temp_dir().join(format!(
+                "horizon-save-recovery-{}-{missing}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            let mut level = Level {
+                name: "Recovered world".into(),
+                time: 1234,
+                position: Some([12.5, 70.0, -9.25]),
+                inventory: vec![(0, "minecraft:diamond".into(), 7, 0)],
+                ..Level::default()
+            };
+            level.write(&dir).unwrap();
+            let uuid = super::uuid_text(level.player_uuid.unwrap());
+            let player_dir = dir.join("players/data");
+            let current = [
+                dir.join("level.dat"),
+                player_dir.join(format!("{uuid}.dat")),
+            ];
+            let old = [
+                dir.join("level.dat_old"),
+                player_dir.join(format!("{uuid}.dat_old")),
+            ];
+            let mut expected = Vec::new();
+            for (path, backup) in current.iter().zip(&old) {
+                expected.push(super::read_dat(path).unwrap());
+                fs::copy(path, backup).unwrap();
+                if missing {
+                    fs::remove_file(path).unwrap();
+                } else {
+                    fs::write(path, b"broken NBT").unwrap();
+                }
+            }
+            let mut recovered = Level::read(&dir).unwrap();
+            assert_eq!(recovered.name, level.name);
+            assert_eq!(recovered.time, 1234);
+            assert_eq!(recovered.position, level.position);
+            assert_eq!(recovered.inventory, level.inventory);
+            recovered.write(&dir).unwrap();
+            for (path, tag) in old.iter().zip(&expected) {
+                assert_eq!(super::read_dat(path).as_ref(), Some(tag));
+            }
+            for folder in [&dir, &player_dir] {
+                let backups: Vec<_> = fs::read_dir(folder)
+                    .unwrap()
+                    .flatten()
+                    .filter(|e| e.file_name().to_string_lossy().contains("_corrupted_"))
+                    .collect();
+                assert_eq!(backups.len(), usize::from(!missing));
+                for backup in backups {
+                    assert_eq!(fs::read(backup.path()).unwrap(), b"broken NBT");
+                }
+            }
+            recovered.name = "Next save".into();
+            recovered.write(&dir).unwrap();
+            let reopened = Level::read(&dir).unwrap();
+            assert_eq!(reopened.name, "Next save");
+            assert_eq!(reopened.inventory, level.inventory);
+            assert_eq!(reopened.position, level.position);
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn recovery_prefers_current_files_and_never_selects_a_player_backup() {
+        let dir = std::env::temp_dir().join(format!("horizon-save-current-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut level = Level {
+            name: "Old".into(),
+            position: Some([1.0, 64.0, 1.0]),
+            ..Level::default()
+        };
+        level.write(&dir).unwrap();
+        level.name = "Current".into();
+        level.position = Some([7.0, 70.0, 7.0]);
+        level.write(&dir).unwrap();
+        let read = Level::read(&dir).unwrap();
+        assert_eq!(read.name, "Current");
+        assert_eq!(read.position, level.position);
+        let player_dir = dir.join("players/data");
+        let uuid = super::uuid_text(level.player_uuid.unwrap());
+        fs::rename(
+            player_dir.join(format!("{uuid}.dat")),
+            player_dir.join(format!("{uuid}_corrupted_example.dat")),
+        )
+        .unwrap();
+        fs::remove_file(player_dir.join(format!("{uuid}.dat_old"))).unwrap();
+        assert_eq!(Level::read(&dir).unwrap().position, None);
+        // Recovery attempts in the same second keep every previous backup.
+        let name = "level.dat_corrupted_example";
+        let first = super::unused_backup_path(&dir, name, "");
+        fs::write(&first, b"first").unwrap();
+        let second = super::unused_backup_path(&dir, name, "");
+        fs::write(&second, b"second").unwrap();
+        assert_ne!(first, second);
+        assert_eq!(fs::read(first).unwrap(), b"first");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn recovery_checks_the_backups_structure_version_and_legacy_generator() {
+        let dir = std::env::temp_dir().join(format!(
+            "horizon-save-recovery-shape-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let settings = Tag::compound([
+            ("seed", Tag::Long(42)),
+            (
+                "dimensions",
+                Tag::compound([(
+                    "minecraft:overworld",
+                    Tag::compound([(
+                        "generator",
+                        Tag::compound([("type", string("minecraft:flat"))]),
+                    )]),
+                )]),
+            ),
+        ]);
+        let mut data = Tag::compound([
+            ("LevelName", string("Fallback")),
+            ("DataVersion", Tag::Int(super::DATA_VERSION)),
+            ("WorldGenSettings", settings.clone()),
+        ]);
+        super::write_dat(
+            &dir.join("level.dat_old"),
+            Tag::compound([("Data", data.clone())]),
+        )
+        .unwrap();
+        for bad in [
+            Tag::Int(7),
+            Tag::compound([] as [(&str, Tag); 0]),
+            Tag::compound([("Data", Tag::Int(7))]),
+        ] {
+            // Write bytes directly: write_dat would rotate the good backup away.
+            let bytes = nbt::write_named(
+                &super::NamedTag {
+                    name: "".into(),
+                    tag: bad,
+                },
+                super::Limits::default(),
+            )
+            .unwrap();
+            fs::write(dir.join("level.dat"), &bytes).unwrap();
+            assert_eq!(Level::read(&dir).unwrap().name, "Fallback");
+            assert_eq!(super::world_gen_settings(&dir), Some(settings.clone()));
+            super::upgrade_older_world(&dir).unwrap();
+            assert_eq!(fs::read(dir.join("level.dat")).unwrap(), bytes);
+        }
+        put(
+            &mut data,
+            "DataVersion",
+            Tag::Int(horizon_world::datafix::OLDEST_SUPPORTED - 1),
+        );
+        super::write_dat(&dir.join("level.dat_old"), Tag::compound([("Data", data)])).unwrap();
+        let primary = fs::read(dir.join("level.dat")).unwrap();
+        let backup = fs::read(dir.join("level.dat_old")).unwrap();
+        assert!(super::upgrade_older_world(&dir).is_err());
+        assert_eq!(fs::read(dir.join("level.dat")).unwrap(), primary);
+        assert_eq!(fs::read(dir.join("level.dat_old")).unwrap(), backup);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovery_stops_the_save_when_preserving_a_corrupt_file_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        for player in [false, true] {
+            let dir = std::env::temp_dir().join(format!(
+                "horizon-save-recovery-denied-{}-{player}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            let mut level = Level {
+                name: "Original".into(),
+                ..Level::default()
+            };
+            level.write(&dir).unwrap();
+            let (folder, name) = if player {
+                (
+                    dir.join("players/data"),
+                    format!("{}.dat", super::uuid_text(level.player_uuid.unwrap())),
+                )
+            } else {
+                (dir.clone(), "level.dat".into())
+            };
+            let current = folder.join(&name);
+            let old = folder.join(format!("{name}_old"));
+            fs::copy(&current, &old).unwrap();
+            let backup_bytes = fs::read(&old).unwrap();
+            fs::write(&current, b"broken NBT").unwrap();
+            fs::set_permissions(&folder, fs::Permissions::from_mode(0o500)).unwrap();
+            // A root test process can bypass directory permissions.
+            let denied = fs::write(folder.join("permission-probe"), b"").is_err();
+            let result = if denied {
+                Some(level.write(&dir))
+            } else {
+                None
+            };
+            fs::set_permissions(&folder, fs::Permissions::from_mode(0o700)).unwrap();
+            if let Some(result) = result {
+                assert!(result.is_err());
+                assert_eq!(fs::read(&current).unwrap(), b"broken NBT");
+                assert_eq!(fs::read(&old).unwrap(), backup_bytes);
+            }
+            fs::remove_dir_all(dir).unwrap();
+        }
     }
 
     #[test]

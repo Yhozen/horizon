@@ -177,10 +177,14 @@ pub fn list_worlds(saves: &Path) -> Vec<WorldEntry> {
         .filter_map(|e| {
             let path = e.path();
             let level = Level::read(&path)?;
-            let modified = horizon_core::fs::metadata(path.join("level.dat"))
-                .and_then(|m| m.modified())
-                .ok()?;
-            let data = crate::save::read_dat(&path.join("level.dat"))?;
+            // A recoverable world must stay selectable before opening it restores level.dat.
+            // Read the date and metadata from the same validated file as the level fallback.
+            let (data, modified) = ["level.dat", "level.dat_old"].into_iter().find_map(|file| {
+                let file = path.join(file);
+                let data = crate::save::read_level_file(&file)?;
+                let modified = horizon_core::fs::metadata(file).ok()?.modified().ok()?;
+                Some((data, modified))
+            })?;
             let data = data.get("Data")?;
             let modified = match data.get("LastPlayed") {
                 Some(horizon_world::nbt::Tag::Long(millis)) if *millis >= 0 => std::time::UNIX_EPOCH + std::time::Duration::from_millis(*millis as u64),

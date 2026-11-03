@@ -8,7 +8,12 @@
 use super::{Foil, ItemQuad, ItemRenderState, ItemRenderer, SpecialHost};
 use crate::hud::{HudBatch, Rect};
 use glam::{EulerRot, Mat4, Vec2, Vec3};
-use std::{collections::HashMap, f32::consts::PI, sync::Arc};
+use std::{
+    collections::HashMap,
+    f32::consts::PI,
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
 
 mod depth;
 
@@ -177,8 +182,23 @@ pub fn draw(
 /// Entries of `ItemRenderer::gui_drawn` before it starts over.
 const DRAWN_LIMIT: usize = 8192;
 
-/// What a GUI item's vertices depend on: its layers' baked models (kept for the
-/// renderer's life, so their addresses name them), tints and transforms, the
+/// An identity that keeps its model alive even if a concurrent bake replaces
+/// the renderer's entry. Its address cannot be reused while vertices refer to it.
+#[derive(Clone)]
+struct ModelKey(Arc<horizon_assets::item_bake::BakedItemModel>);
+impl PartialEq for ModelKey {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for ModelKey {}
+impl Hash for ModelKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.0).hash(state);
+    }
+}
+
+/// What a GUI item's vertices depend on: its layers' baked models, tints and transforms, the
 /// atlas, and the exact position. None for items whose drawing changes with time
 /// or the host: a glint, or a special model renderer.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -187,7 +207,7 @@ pub(crate) struct DrawnKey {
     sprites: (usize, usize),
     at: [u32; 2],
     oversized: bool,
-    layers: Vec<(usize, Vec<i32>, [u32; 16], bool)>,
+    layers: Vec<(ModelKey, Vec<i32>, [u32; 16], bool)>,
 }
 impl DrawnKey {
     fn of(
@@ -206,7 +226,7 @@ impl DrawnKey {
             .map(|layer| match &layer.geometry {
                 super::LayerGeometry::Quads(baked) if layer.foil == super::FoilType::None => {
                     Some((
-                        Arc::as_ptr(baked) as usize,
+                        ModelKey(Arc::clone(baked)),
                         layer.tints.clone(),
                         layer.matrix.to_cols_array().map(f32::to_bits),
                         layer.uses_block_light,
@@ -457,6 +477,25 @@ mod tests {
             reloaded,
             item_vertices(&renderer, &state, &other_atlas, [20.0, 8.0], 0.0, false)
         );
+    }
+
+    #[test]
+    fn cached_vertices_keep_their_model_alive_until_eviction() {
+        let (renderer, state, sprites) = cached_item_fixture();
+        let super::super::LayerGeometry::Quads(model) = &state.layers[0].geometry else {
+            panic!("fixture must use a baked model");
+        };
+        let model = Arc::downgrade(model);
+        item_vertices(&renderer, &state, &sprites, [4.0, 8.0], 0.0, true);
+        // A concurrent bake can replace the renderer's model entry. Once the
+        // last render state drops, only the vertex cache owns its identity.
+        drop(state);
+        assert!(
+            model.upgrade().is_some(),
+            "cached model address can be reused"
+        );
+        renderer.gui_drawn.lock().unwrap().clear();
+        assert!(model.upgrade().is_none(), "eviction must release the model");
     }
 
     #[test]

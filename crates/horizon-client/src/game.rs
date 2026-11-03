@@ -4624,10 +4624,13 @@ impl Game<'_> {
         if capture && !self.focused {
             return;
         }
-        if capture {
-            // The inventory's screens are behind us: no drag survives them.
-            self.reset_inventory_clicks();
-        } else {
+        // The container screen's press state belongs to the screen: a screen
+        // that takes the pointer over starts with its own state, as
+        // `AbstractContainerScreen` does, so a press whose release never
+        // arrived (the pointer left the window) cannot wedge the next
+        // screen's quick move and clicks.
+        self.reset_inventory_clicks();
+        if !capture {
             self.stop_mining();
         }
         // The real pointer takes over from an agent's.
@@ -5422,12 +5425,14 @@ impl Game<'_> {
         }
     }
     /// `AbstractContainerScreen` keeps `isQuickCrafting` and the drag it
-    /// belongs to on the screen; Horizon keeps them on the game, so they are
-    /// dropped when a screen closes. A press whose release never reaches the
-    /// screen (the pointer left the window, or the screen closed first) would
+    /// belongs to on the screen. Horizon keeps both on `Game` (`inv_clicks`,
+    /// `inv_drag`, `last_inv_click`), so they are dropped when the pointer
+    /// changes hands: a screen that opens or closes starts with its own
+    /// state, and a press whose release never reached the screen -- the
+    /// pointer left the window, or the screen closed first -- would
     /// otherwise leave every later press on every later screen swallowed.
     pub(super) fn reset_inventory_clicks(&mut self) {
-        self.inv_clicks = Default::default();
+        self.inv_clicks.cancel_drag();
         self.inv_drag = None;
         self.last_inv_click = None;
     }
@@ -5512,7 +5517,45 @@ impl Game<'_> {
             self.creative_display_click(slot, button, input);
             return true;
         }
+        if let Some(slot) = slot
+            && input == horizon_client::menu::Input::Throw
+            && self.carried.is_some()
+            && ((slot < 9 && self.creative_tab_open()) || self.creative_inventory_open())
+        {
+            self.creative_throw_carrying(slot, button);
+            return true;
+        }
         self.menu_ops(&[(slot, button, input)])
+    }
+    /// CreativeModeInventoryScreen.slotClicked: Q drops from the hovered slot
+    /// while keeping the cursor stack. The menu's THROW requires an empty hand.
+    fn creative_throw_carrying(&mut self, slot: usize, button: i32) {
+        let Some(old) = self.slot_mut(slot).clone() else {
+            return;
+        };
+        let count = if button == 0 {
+            1
+        } else if self.creative_inventory_open() {
+            let max = self.res.items().get(&old.item).map_or(64, |i| i.max_stack);
+            old.count.min(max)
+        } else {
+            old.count
+        };
+        let before = self.player_equipment();
+        let left = old.count - count;
+        *self.slot_mut(slot) = (left > 0).then(|| ItemStack {
+            count: left,
+            ..old.clone()
+        });
+        self.player_equipment_changed(&before);
+        self.apply_equipment();
+        let thrown = ItemStack { count, ..old };
+        if self.remote.is_some() {
+            self.remote_creative_throw(thrown);
+            self.send_creative_slots();
+        } else {
+            self.player_drop(thrown);
+        }
     }
     /// A click on an item tab's display slot: the screen's own handling
     /// (`creative::click_display`), never the menu's.
@@ -5535,9 +5578,18 @@ impl Game<'_> {
         let catalog = self.res.items();
         let max = |s: &ItemStack| catalog.get(&s.item).map_or(64, |i| i.max_stack);
         match click_display(&mut self.carried, shown, max, button, input) {
-            DisplayClick::Hotbar(i, stack) => self.inventory[i] = Some(stack),
+            DisplayClick::Hotbar(i, stack) if i < self.inventory.len() => {
+                self.inventory[i] = Some(stack);
+            }
+            DisplayClick::Offhand(stack) => self.offhand = Some(stack),
+            // handleCreativeModeItemDrop: a server drops the stack sent to slot -1.
+            DisplayClick::Drop(stack) if self.remote.is_some() => self.remote_creative_throw(stack),
             DisplayClick::Drop(stack) => self.player_drop(stack),
-            DisplayClick::Nothing => {}
+            _ => {}
+        }
+        // CreativeInventoryListener sends the changed slots with the click.
+        if self.remote.is_some() {
+            self.send_creative_slots();
         }
     }
     /// Several clicks on one menu instance (a quick craft drag is three).
@@ -5551,7 +5603,7 @@ impl Game<'_> {
             self.crafter_slot_clicked(*slot, *button, *input);
         }
         let ops = ops.to_vec();
-        self.menu_session(move |menu, env, to_menu| {
+        let done = self.menu_session(move |menu, env, to_menu| {
             let mut clicks = Vec::new();
             for &(slot, button, input) in &ops {
                 let menu_slot = match slot {
@@ -5575,7 +5627,11 @@ impl Game<'_> {
                 }
             }
             Some(true)
-        })
+        });
+        if done && self.remote.is_some() && self.screen == Screen::Creative {
+            self.send_creative_slots();
+        }
+        done
     }
     /// A sound a menu click made the player play (a bundle's insert or
     /// remove): `Entity.playSound` at the player.
@@ -6001,6 +6057,12 @@ impl Game<'_> {
                 self.player_drop(stack);
             }
             self.award_crafted(&crafted);
+        } else if self.screen == Screen::Creative {
+            // Every creative tab sends its menu's drops to the server, including
+            // the item tabs' hotbar; the changed slots follow with the click.
+            for stack in dropped {
+                self.remote_creative_throw(stack);
+            }
         }
         if kind == Kind::Loom {
             if let Some(s) = self.station.as_mut() {
@@ -6190,12 +6252,15 @@ impl Game<'_> {
                     return;
                 }
                 if let Some(moved) = self.last_quick_moved.clone() {
-                    if self.remote.is_some() {
+                    if self.remote.is_some() && self.screen != Screen::Creative {
                         self.remote_quick_move_all(slot, &moved);
                     } else {
                         self.menu_session(|menu, env, to_menu| {
                             Some(menu.quick_move_all(env, to_menu(slot)?, &moved).is_ok())
                         });
+                        if self.remote.is_some() {
+                            self.send_creative_slots();
+                        }
                     }
                 }
                 self.last_inv_click = None;
@@ -6350,7 +6415,11 @@ impl Game<'_> {
         use horizon_client::menu::Input;
         let button = i32::from(right);
         if self.remote.is_some() {
-            self.remote_throw(right, input);
+            if self.screen == Screen::Creative {
+                self.remote_creative_drop(right);
+            } else {
+                self.remote_throw(right, input);
+            }
             return;
         }
         let before = self.carried.clone();
