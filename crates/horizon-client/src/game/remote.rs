@@ -4245,6 +4245,19 @@ impl Game<'_> {
             return;
         }
         // MultiPlayerGameMode.tick syncs the carried slot before keybinds.
+        self.remote_send_carried();
+        let (attack, use_item) = (self.left, self.right);
+        input.tick(&mut RemoteInputWorld(self), attack, use_item);
+        if self.clicks.miss_time > 0 {
+            self.clicks.miss_time -= 1;
+        }
+        if let Some(r) = self.remote.as_mut() {
+            r.input = input;
+        }
+    }
+
+    /// MultiPlayerGameMode.ensureHasSentCarriedItem: actions use the chosen slot.
+    fn remote_send_carried(&mut self) {
         let carried_changed = self.remote.as_mut().is_some_and(|r| {
             if r.carried == Some(self.selected) {
                 false
@@ -4257,14 +4270,6 @@ impl Game<'_> {
             self.send(S::SetCarriedItem(play::SetCarriedItem {
                 slot: self.selected as i16,
             }));
-        }
-        let (attack, use_item) = (self.left, self.right);
-        input.tick(&mut RemoteInputWorld(self), attack, use_item);
-        if self.clicks.miss_time > 0 {
-            self.clicks.miss_time -= 1;
-        }
-        if let Some(r) = self.remote.as_mut() {
-            r.input = input;
         }
     }
 
@@ -4372,6 +4377,7 @@ impl Game<'_> {
                     return Ok(true);
                 }
                 let all = self.keys.contains(&KeyCode::ControlLeft);
+                self.remote_send_carried();
                 // MultiPlayerGameMode.dropItem: predict removal before sending
                 // the action, then swing only if a nonempty stack was removed.
                 let dropped = horizon_client::items::take_held_drop(
@@ -5402,6 +5408,142 @@ impl Remote {
 #[cfg(test)]
 mod tests {
     use super::Game;
+
+    /// Number keys and Q can arrive before the next simulation tick. Exercise
+    /// their real input path, including prediction and the remembered wire slot.
+    #[test]
+    #[ignore = "requires prepared resources in HORIZON_TEST_RESOURCES"]
+    fn hotbar_then_drop_without_a_tick_uses_the_new_slot() {
+        use super::super::{Audio, Options, Progress, Screen, Settings, load_resources};
+        use super::{ItemStack, KeyCode};
+        use horizon_protocol::{
+            connection::{Connection, Pipe},
+            packets::{Empty, configuration as cfg, login, play},
+        };
+        use std::time::Duration;
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            &root,
+            &settings,
+            web_time::Instant::now(),
+            false,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let options = Options {
+            resources: root.clone(),
+            distance: 2,
+            distance_override: None,
+            seed: 0,
+            creative: false,
+            test_terrain: false,
+            frames: None,
+            world_frames: None,
+            screenshot_after: None,
+            timeout: Duration::from_secs(120),
+            report: None,
+            world: None,
+            look: None,
+            spawn_radius: None,
+            time: None,
+            weather: None,
+            dimension: None,
+            no_pause: false,
+            control: None,
+            offscreen: true,
+            window_size: [1280, 720],
+            spikes: None,
+            server: None,
+            player_name: Some("DropTest".into()),
+            dedicated: None,
+            benchmark: None,
+            dev_mods: Vec::new(),
+            server_thread: false,
+            integrated: false,
+        };
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            loaded.game_cpu,
+        )
+        .unwrap();
+        let (client, server) = Pipe::pair();
+        game.connect_local(client, "DropTest").unwrap();
+        let mut server = Connection::local(server);
+        server
+            .reader
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        server.recv().unwrap(); // Handshake.
+        server.recv().unwrap(); // Login hello.
+        server
+            .send(
+                &login::Clientbound::LoginFinished(login::LoginFinished {
+                    profile: login::GameProfile {
+                        uuid: 1,
+                        name: "DropTest".into(),
+                        properties: vec![],
+                    },
+                    session: 0,
+                })
+                .encode(),
+            )
+            .unwrap();
+        server.recv().unwrap(); // Login acknowledged.
+        server.recv().unwrap(); // Client information.
+        server.recv().unwrap(); // Brand.
+        server
+            .send(&cfg::Clientbound::FinishConfiguration(Empty).encode())
+            .unwrap();
+        server.recv().unwrap(); // Configuration acknowledged; the play writer is ready.
+        game.screen = Screen::Playing;
+        for all in [false, true] {
+            game.selected = 0;
+            game.remote.as_mut().unwrap().carried = Some(0);
+            game.inventory[0] = Some(ItemStack::new("minecraft:diamond", 7));
+            game.inventory[1] = Some(ItemStack::new("minecraft:stone", 3));
+            game.keys.clear();
+            if all {
+                game.keys.insert(KeyCode::ControlLeft);
+            }
+            game.key_pressed(KeyCode::Digit2).unwrap();
+            assert_eq!(game.remote.as_ref().unwrap().carried, Some(0));
+            game.key_pressed(KeyCode::KeyQ).unwrap();
+            let (id, body) = server.recv().unwrap();
+            assert_eq!(
+                play::Serverbound::decode(id, &body).unwrap(),
+                play::Serverbound::SetCarriedItem(play::SetCarriedItem { slot: 1 })
+            );
+            let (id, body) = server.recv().unwrap();
+            assert_eq!(
+                play::Serverbound::decode(id, &body).unwrap(),
+                play::Serverbound::PlayerAction(play::PlayerAction {
+                    action: if all { 4 } else { 5 },
+                    pos: [0; 3],
+                    direction: 0,
+                    sequence: 0,
+                })
+            );
+            assert_eq!(
+                game.remote.as_ref().unwrap().carried,
+                Some(1),
+                "Q must synchronize before the next tick"
+            );
+            assert_eq!(game.inventory[0].as_ref().unwrap().count, 7);
+            assert_eq!(
+                game.inventory[1].as_ref().map(|s| s.count),
+                if all { None } else { Some(2) }
+            );
+        }
+    }
 
     #[test]
     fn placement_preview_checks_obstruction_without_changing_the_level() {
