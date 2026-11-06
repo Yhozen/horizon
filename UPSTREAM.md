@@ -71,6 +71,7 @@ commit has different content. Each row is present in this branch.
 | [`e6c1a91a6549d6fb3128f95ae5b7c88dba4a4e6d`](https://github.com/ludovic111/horizon/commit/e6c1a91a6549d6fb3128f95ae5b7c88dba4a4e6d) | Reset creative search and scrolling when reopening the inventory | 2026-11-03 |
 | [`16a4b6010b1fb948c7bf2a0647303bbba01fb25c`](https://github.com/ludovic111/horizon/commit/16a4b6010b1fb948c7bf2a0647303bbba01fb25c) | Bound SNBT parser nesting before the thread stack overflows | 2026-11-06 |
 | [`3f529b7d808c0ac9adfdc49bd533769a878bdf14`](https://github.com/ludovic111/horizon/commit/3f529b7d808c0ac9adfdc49bd533769a878bdf14) | Keep SNBT depth safe for server stacks and valid nested items | 2026-11-06 |
+| [`6bf332f5c5246b2412858c416145e0a6271d8cee`](https://github.com/ludovic111/horizon/commit/6bf332f5c5246b2412858c416145e0a6271d8cee) | Reject excessively nested command redirects before stack overflow | 2026-11-06 |
 
 ## Latest comparison
 
