@@ -320,7 +320,7 @@ impl Downloader {
                 Some(body)
             });
             let image = bytes
-                .and_then(|b| crate::hud::decode_bytes(&b).ok())
+                .and_then(|b| crate::hud::decode_fetched_png(&b).ok())
                 .and_then(|(w, h, rgba)| match kind {
                     Kind::Skin => process_legacy_skin(w, h, &rgba),
                     _ => Some(rgba),
