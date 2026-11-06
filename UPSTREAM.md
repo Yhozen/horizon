@@ -4,8 +4,8 @@ Upstream repository: <https://github.com/ludovic111/horizon>, branch `main`.
 
 | Pointer | Upstream commit |
 | --- | --- |
-| Most recent backported source | [`3f529b7d808c0ac9adfdc49bd533769a878bdf14`](https://github.com/ludovic111/horizon/commit/3f529b7d808c0ac9adfdc49bd533769a878bdf14) — SNBT depth cap: 256 rule frames, and a test for deep real values |
-| Main merge that introduced that source | [`1f90d6f9ae0e9b64f7c5753cec4e8f3d7e5a4673`](https://github.com/ludovic111/horizon/commit/1f90d6f9ae0e9b64f7c5753cec4e8f3d7e5a4673) — Merge pull request #9275 from lightcodegit/snbt-parser-depth-cap |
+| Most recent backported source | [`45af2b23b2a0d341563325def664e40be127d51c`](https://github.com/ludovic111/horizon/commit/45af2b23b2a0d341563325def664e40be127d51c) — Network NBT: no more tags than vanilla's quota admits |
+| Main merge that introduced that source | [`63ddd76a157bb141f4baaa74d4f2b9ed13248307`](https://github.com/ludovic111/horizon/commit/63ddd76a157bb141f4baaa74d4f2b9ed13248307) — Merge pull request #10100 from yahya-nusseibeh/fix/nbt-heap-quota |
 | Upstream tip assessed on 2026-11-03 | [`fc02103818c212920fd24aa34a2b2f91ba49e56f`](https://github.com/ludovic111/horizon/commit/fc02103818c212920fd24aa34a2b2f91ba49e56f) |
 
 These are selective imports. The backport pointer does **not** mean every earlier upstream change
@@ -72,6 +72,7 @@ commit has different content. Each row is present in this branch.
 | [`16a4b6010b1fb948c7bf2a0647303bbba01fb25c`](https://github.com/ludovic111/horizon/commit/16a4b6010b1fb948c7bf2a0647303bbba01fb25c) | Bound SNBT parser nesting before the thread stack overflows | 2026-11-06 |
 | [`3f529b7d808c0ac9adfdc49bd533769a878bdf14`](https://github.com/ludovic111/horizon/commit/3f529b7d808c0ac9adfdc49bd533769a878bdf14) | Keep SNBT depth safe for server stacks and valid nested items | 2026-11-06 |
 | [`6bf332f5c5246b2412858c416145e0a6271d8cee`](https://github.com/ludovic111/horizon/commit/6bf332f5c5246b2412858c416145e0a6271d8cee) | Reject excessively nested command redirects before stack overflow | 2026-11-06 |
+| [`45af2b23b2a0d341563325def664e40be127d51c`](https://github.com/ludovic111/horizon/commit/45af2b23b2a0d341563325def664e40be127d51c) | Bound network NBT tag allocations within a conservative quota | 2026-11-06 |
 
 ## Latest comparison
 
