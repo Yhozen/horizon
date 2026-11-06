@@ -4,9 +4,9 @@ Upstream repository: <https://github.com/ludovic111/horizon>, branch `main`.
 
 | Pointer | Upstream commit |
 | --- | --- |
-| Most recent backported source | [`27cd7982a33ff5e51feceff133431cd83cb880f9`](https://github.com/ludovic111/horizon/commit/27cd7982a33ff5e51feceff133431cd83cb880f9) — Fix GPU timer readback after buffer destruction |
-| Main merge that introduced that source | [`0f365f9404aaae2f13b6af5d15cc50548bd4feb9`](https://github.com/ludovic111/horizon/commit/0f365f9404aaae2f13b6af5d15cc50548bd4feb9) — upstream PR #6354 |
-| Upstream tip assessed on 2026-11-02 | [`90d7eb16355904d4b78258bdb071d37ec5a2fbd9`](https://github.com/ludovic111/horizon/commit/90d7eb16355904d4b78258bdb071d37ec5a2fbd9) |
+| Most recent backported source | [`c686e9eeef95dc2d0f8d8d987bd211a7d725b519`](https://github.com/ludovic111/horizon/commit/c686e9eeef95dc2d0f8d8d987bd211a7d725b519) — Test wearing armour out of the off-hand slot |
+| Main merge that introduced that source | [`1c97d1e804c9cf1cf3cfec61f10504beb98ed312`](https://github.com/ludovic111/horizon/commit/1c97d1e804c9cf1cf3cfec61f10504beb98ed312) — Merge pull request #7840 from MSedgeMC/fix/menu-offhand-armor |
+| Upstream tip assessed on 2026-11-03 | [`fc02103818c212920fd24aa34a2b2f91ba49e56f`](https://github.com/ludovic111/horizon/commit/fc02103818c212920fd24aa34a2b2f91ba49e56f) |
 
 These are selective imports. The backport pointer does **not** mean every earlier upstream change
 is present, and the assessed tip does **not** mean its code has been imported. “Most recent” means
@@ -50,23 +50,52 @@ commit has different content. Each row is present in this branch.
 | [`c9bfcdcef7a2b9c2de6670d5b1585561eb34e376`](https://github.com/ludovic111/horizon/commit/c9bfcdcef7a2b9c2de6670d5b1585561eb34e376) | Creative item tabs: Q on a hotbar slot drops the item instead of deleting it | 2026-11-02 |
 | [`85ec4c8c65ad63b0b39cf55e1843177a69e00a5d`](https://github.com/ludovic111/horizon/commit/85ec4c8c65ad63b0b39cf55e1843177a69e00a5d) | lan_e2e creative_throw: clear each step's drops before the next | 2026-11-02 |
 | [`5a6d49212647999d98a054b6eef3ab633d980879`](https://github.com/ludovic111/horizon/commit/5a6d49212647999d98a054b6eef3ab633d980879) | Creative Survival Inventory tab: Q while carrying drops from the slot | 2026-11-02 |
+| [`79adacb982f4ac3aa7a5c4bccf1704c30bb0a1e3`](https://github.com/ludovic111/horizon/commit/79adacb982f4ac3aa7a5c4bccf1704c30bb0a1e3) | Cache particle light by exact block within each draw | 2026-11-03 |
+| [`eb2b96b6b2551be8494f0ef34189175c4c0e1685`](https://github.com/ludovic111/horizon/commit/eb2b96b6b2551be8494f0ef34189175c4c0e1685) | Reuse map sprite names and borrow framed-map decorations | 2026-11-03 |
+| [`11eecf5a6a90e4e412da9da4cf966d26e5cecd0c`](https://github.com/ludovic111/horizon/commit/11eecf5a6a90e4e412da9da4cf966d26e5cecd0c) | Reject ZIP traversal and invalid resource-pack overlays | 2026-11-03 |
+| [`04bc30606d09fa618f5e9fef8aec99839b895639`](https://github.com/ludovic111/horizon/commit/04bc30606d09fa618f5e9fef8aec99839b895639) | Keep resource metadata with its owning pack or a higher pack | 2026-11-03 |
+| [`11b36e38671f8f3fd22704b586c9402f1bd1fa23`](https://github.com/ludovic111/horizon/commit/11b36e38671f8f3fd22704b586c9402f1bd1fa23) | Use separate saved-NBT limits without relaxing network bounds | 2026-11-03 |
+| [`9f0d819f6ba6392fcde3b6ec730be663a2114936`](https://github.com/ludovic111/horizon/commit/9f0d819f6ba6392fcde3b6ec730be663a2114936) | Persist sanitized region headers on chunk write and clear | 2026-11-03 |
+| [`be35f0cd18fcce995c7a97706b757f02615fda0f`](https://github.com/ludovic111/horizon/commit/be35f0cd18fcce995c7a97706b757f02615fda0f) | Never infer imported-world ownership from another player file | 2026-11-03 |
+| [`be7de6230c1610a8790968f449a9ecf6a1abd7b4`](https://github.com/ludovic111/horizon/commit/be7de6230c1610a8790968f449a9ecf6a1abd7b4) | Load the named world owner before the joining profile | 2026-11-03 |
+| [`7ca3d989013018000e7f7f99c14635b3ba7cafcd`](https://github.com/ludovic111/horizon/commit/7ca3d989013018000e7f7f99c14635b3ba7cafcd) | Save the owner file that will be reloaded and recover guest backups | 2026-11-03 |
+| [`152617ece70af3670b46b2345e4683fd4defaf65`](https://github.com/ludovic111/horizon/commit/152617ece70af3670b46b2345e4683fd4defaf65) | Log player save failures (adapted player-save portion) | 2026-11-03 |
+| [`698e7fd662ba0a6502f0965ea660994f4f11092f`](https://github.com/ludovic111/horizon/commit/698e7fd662ba0a6502f0965ea660994f4f11092f) | Release held input on server disconnect, including physical modifiers | 2026-11-03 |
+| [`b70cb22e9d094319f71c541be9a6ca7a9e5c9647`](https://github.com/ludovic111/horizon/commit/b70cb22e9d094319f71c541be9a6ca7a9e5c9647) | Allow server offhand swaps in normal containers | 2026-11-03 |
+| [`d9f93b474f36138c590eb518f36fe4f9a4a4a5b9`](https://github.com/ludovic111/horizon/commit/d9f93b474f36138c590eb518f36fe4f9a4a4a5b9) | Shift-click equippable items into an empty offhand | 2026-11-03 |
+| [`8987ae75eb3e29aa02ecf876832757dac8d20f72`](https://github.com/ludovic111/horizon/commit/8987ae75eb3e29aa02ecf876832757dac8d20f72) | Cover offhand shift-click destinations and occupied fallback | 2026-11-03 |
+| [`34e889990df1910043044c1507c01d0a1d50a58a`](https://github.com/ludovic111/horizon/commit/34e889990df1910043044c1507c01d0a1d50a58a) | Shift-click offhand armor into its equipment slot | 2026-11-03 |
+| [`c686e9eeef95dc2d0f8d8d987bd211a7d725b519`](https://github.com/ludovic111/horizon/commit/c686e9eeef95dc2d0f8d8d987bd211a7d725b519) | Cover armor-from-offhand and occupied equipment fallback | 2026-11-03 |
+| [`e550c9d85c09efc5c52417563deabf5b2fb2cbea`](https://github.com/ludovic111/horizon/commit/e550c9d85c09efc5c52417563deabf5b2fb2cbea) | Reject invalid or repeated server quick-craft starts | 2026-11-03 |
+| [`078bdb45f4a0349735ccecd682b4832097db9458`](https://github.com/ludovic111/horizon/commit/078bdb45f4a0349735ccecd682b4832097db9458) | Cover invalid drag types and normal quick-craft behavior | 2026-11-03 |
+| [`e6c1a91a6549d6fb3128f95ae5b7c88dba4a4e6d`](https://github.com/ludovic111/horizon/commit/e6c1a91a6549d6fb3128f95ae5b7c88dba4a4e6d) | Reset creative search and scrolling when reopening the inventory | 2026-11-03 |
 
 ## Latest comparison
 
-The 2026-11-02 comparison focused on browser-relevant rendering, inventory/input and save/load
-fixes, including prerequisites and later corrections. This batch also keeps the fork's PR #10
-review corrections: retained GUI model identities and respawn-aware item-level caching.
+The 2026-11-03 comparison used merged fork main `5af117e792bb65b79d6cd48f640d89f006a6a536` and
+examined browser-relevant rendering, inventory/input and save/load changes among the 836 non-merge
+commits since the previous assessed tip, `90d7eb16355904d4b78258bdb071d37ec5a2fbd9`. Older deferred
+fixes were revisited too. The source table records the selective fixes now implemented on this branch. The backport pointer
+advances by upstream integration order, independently of the order of our imports. The merged code retains the PR #10 model-identity and
+respawn-cache corrections, and PR #18's real display-click/carried-stack regression setup.
 
 The save imports are adapted to preserve readable backups through a subsequent save, validate
 level/player NBT roots, retain legacy generator/version checks, and keep recoverable worlds visible
-in the world picker. They cover the single-player owner in both execution modes; LAN guest
-player-file recovery and upstream's newer owner-identity pipeline remain separate work.
+in the world picker. They cover the single-player owner in both execution modes and LAN guest
+player-file recovery, including preserving readable backups during the next save.
 
-Further candidates include disconnect input reset (`698e7fd662ba0a6502f0965ea660994f4f11092f`),
-resource-pack metadata precedence (`04bc30606d09fa618f5e9fef8aec99839b895639`), and server block/entity
-picking (`f92cf816b17e8376d497c67a4d9edea9f2facb25` plus
-`0543cf0345e840087283e2c8795af6e319f232c0`). These are **not imported**. Native staging-buffer changes,
-the client crate split, and worker-based GUI atlas compression need separate browser evaluation.
+Imported-world owner identity now uses the named owner file or the joining profile's own file,
+with validated backup recovery. Both in-frame and integrated loading avoid selecting another
+player's file by modification time; player saves preserve corrupt originals and readable backups.
+
+The new station panic fix `b04bd9a0e33b61509d50509c0ce5064d57442ba8` does not apply: the offending
+upstream result-slot snapshot is absent here. Server block/entity picking, bulk teleport/occlusion
+removal, worker cancellation on exit, native staging buffers and worker-based GUI atlas compression
+remain separate work requiring their dependencies and browser evaluation.
+
+The initial comparison checked source/history, patch applicability and prepared R2 item definitions.
+Implementation verification is recorded in the backport PRs. Runtime checks use isolated temporary
+worlds and the prepared R2 resources; vanilla-oracle execution additionally requires the game JARs.
 
 ## Maintaining the record
 

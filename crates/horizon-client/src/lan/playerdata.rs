@@ -3,7 +3,7 @@
 use super::guest::{Guest, SavedBody};
 use crate::{
     items::ItemStack,
-    save::{Level, read_dat, write_dat},
+    save::{Level, read_player_dat},
 };
 #[allow(unused_imports)]
 use horizon_core::fs::PathExt as _;
@@ -37,7 +37,7 @@ pub fn exists(world: &Path, uuid: u128) -> bool {
 
 /// Load a guest's saved state, if they have been here before.
 pub fn load(guest: &mut Guest, world: &Path) -> bool {
-    let Some(tag) = read_dat(&path(world, guest.uuid)) else {
+    let Some(tag) = read_player_dat(&path(world, guest.uuid)) else {
         return false;
     };
     let mut level = Level {
@@ -50,6 +50,34 @@ pub fn load(guest: &mut Guest, world: &Path) -> bool {
     level.player_extra = Some(tag);
     apply(guest, &level);
     true
+}
+
+/// The integrated owner loads the named file before their own file; other
+/// players are never candidates. Legacy Data.Player remains the last fallback.
+pub fn load_owner(guest: &mut Guest, world: &Path, saved: Option<&Level>) -> bool {
+    if let Some(level) = saved.filter(|l| l.singleplayer_file) {
+        apply(guest, level);
+        return level.position.is_some();
+    }
+    if load(guest, world) {
+        return true;
+    }
+    saved.is_some_and(|level| {
+        apply(guest, level);
+        level.position.is_some()
+    })
+}
+
+/// Leaving must update the same named file that the next owner join loads.
+pub fn save_owner(guest: &Guest, level: &mut Level, world: &Path) {
+    level.player_uuid.get_or_insert(uuid_ints(guest.uuid));
+    store(guest, level);
+    if let Err(e) = level.write_player(world) {
+        log::warn!("Horizon: the owner's playerdata is not saved: {e}");
+    }
+    if level.player_uuid != Some(uuid_ints(guest.uuid)) {
+        save(guest, world);
+    }
 }
 
 /// Give a guest the player state read into `level`.
@@ -130,11 +158,14 @@ pub fn save(guest: &Guest, world: &Path) {
         ..Level::default()
     };
     store(guest, &mut level);
-    let file = path(world, guest.uuid);
-    if let Some(dir) = file.parent() {
-        let _ = horizon_core::fs::create_dir_all(dir);
+    // Use the same recovery/preservation path as the named owner: a corrupt
+    // primary must never rotate over the readable backup just loaded.
+    if let Err(e) = level.write_player(world) {
+        log::warn!(
+            "Horizon: {} is not saved: {e}",
+            path(world, guest.uuid).display()
+        );
     }
-    let _ = write_dat(&file, level.player_tag());
 }
 
 /// Put a guest's state in `level`'s player fields.
@@ -210,6 +241,7 @@ pub fn store(guest: &Guest, level: &mut Level) {
 mod tests {
     use super::*;
     use crate::lan::{Joined, PlayerSender};
+    use crate::save::write_dat;
     use horizon_protocol::packets::configuration::ClientInformation;
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
@@ -231,6 +263,266 @@ mod tests {
             [0.0, 64.0, 0.0],
             8,
         )
+    }
+
+    fn holding(uuid: u128, item: &str, count: u32) -> Guest {
+        let mut g = guest();
+        g.uuid = uuid;
+        g.position = [10.5, 70.0, -3.5];
+        g.inventory[0] = Some(ItemStack {
+            item: Arc::from(item),
+            count,
+            damage: 0,
+            extra: None,
+        });
+        g
+    }
+    fn world(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("horizon-owner-{name}-{}", std::process::id()));
+        let _ = horizon_core::fs::remove_dir_all(&dir);
+        dir
+    }
+    fn first_item(g: &Guest) -> Option<(&str, u32)> {
+        g.inventory[0].as_ref().map(|s| (&*s.item, s.count))
+    }
+    fn imported_world(dir: &Path) {
+        Level::default().write(dir).unwrap();
+        let mut tag = crate::save::read_dat(&dir.join("level.dat")).unwrap();
+        if let Some(horizon_world::nbt::Tag::Compound(data)) = tag.get_mut("Data") {
+            data.remove(&"singleplayer_uuid".into());
+        }
+        write_dat(&dir.join("level.dat"), tag).unwrap();
+    }
+
+    #[test]
+    fn imported_owner_never_adopts_or_overwrites_a_friend_in_either_path() {
+        let owner = horizon_protocol::crypto::offline_uuid("Owner");
+        let friend = horizon_protocol::crypto::offline_uuid("Friend");
+        for in_frame in [false, true] {
+            let dir = world(if in_frame {
+                "import-frame"
+            } else {
+                "import-server"
+            });
+            imported_world(&dir);
+            save(&holding(friend, "minecraft:netherite_ingot", 9), &dir);
+            let before = horizon_core::fs::read(path(&dir, friend)).unwrap();
+            let mut level = Level::read(&dir).unwrap();
+            assert!(level.inventory.is_empty());
+            assert!(level.position.is_none());
+            if in_frame {
+                level.load_owner_player(&dir, owner);
+                assert_eq!(level.player_uuid, Some(uuid_ints(owner)));
+                level.write(&dir).unwrap();
+            } else {
+                let mut g = guest();
+                g.uuid = owner;
+                assert!(!load_owner(&mut g, &dir, Some(&level)));
+                assert_eq!(first_item(&g), None);
+                save_owner(&g, &mut level, &dir);
+                assert_eq!(level.player_uuid, Some(uuid_ints(owner)));
+                level.write(&dir).unwrap();
+            }
+            assert_eq!(horizon_core::fs::read(path(&dir, friend)).unwrap(), before);
+            let reopened = Level::read(&dir).unwrap();
+            assert_eq!(reopened.player_uuid, Some(uuid_ints(owner)));
+            assert!(reopened.inventory.is_empty());
+            horizon_core::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn named_owner_beats_stale_own_file_and_leave_updates_both() {
+        let owner = horizon_protocol::crypto::offline_uuid("Owner");
+        let dir = world("named-leave");
+        save(&holding(owner, "minecraft:diamond", 5), &dir);
+        let mut level = Level::default();
+        store(&holding(owner, "minecraft:gold_ingot", 7), &mut level);
+        level.write(&dir).unwrap();
+        let named = level.player_uuid.unwrap();
+        assert_ne!(named, uuid_ints(owner));
+        let mut read = Level::read(&dir).unwrap();
+        assert!(read.singleplayer_file);
+        read.load_owner_player(&dir, owner);
+        assert_eq!(read.inventory[0].1, "minecraft:gold_ingot");
+        let mut g = guest();
+        g.uuid = owner;
+        assert!(load_owner(&mut g, &dir, Some(&read)));
+        assert_eq!(first_item(&g), Some(("minecraft:gold_ingot", 7)));
+        g.inventory[0] = holding(owner, "minecraft:emerald", 3).inventory[0].clone();
+        save_owner(&g, &mut read, &dir);
+        let reopened = Level::read(&dir).unwrap();
+        let mut g = guest();
+        g.uuid = owner;
+        assert!(load_owner(&mut g, &dir, Some(&reopened)));
+        assert_eq!(first_item(&g), Some(("minecraft:emerald", 3)));
+        assert!(load(&mut g, &dir));
+        assert_eq!(first_item(&g), Some(("minecraft:emerald", 3)));
+        horizon_core::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn owner_save_rotates_shared_profile_path_only_once() {
+        let owner = horizon_protocol::crypto::offline_uuid("Owner");
+        let dir = world("owner-single-write");
+        save(&holding(owner, "minecraft:diamond", 5), &dir);
+        let file = path(&dir, owner);
+        let original = horizon_core::fs::read(&file).unwrap();
+        horizon_core::fs::rename(&file, file.with_extension("dat_old")).unwrap();
+        let corrupt = b"truncated owner NBT";
+        horizon_core::fs::write(&file, corrupt).unwrap();
+        let mut g = guest();
+        g.uuid = owner;
+        assert!(load(&mut g, &dir));
+        g.inventory[0] = holding(owner, "minecraft:emerald", 3).inventory[0].clone();
+        let mut level = Level {
+            player_uuid: Some(uuid_ints(owner)),
+            ..Level::default()
+        };
+        save_owner(&g, &mut level, &dir);
+        assert_eq!(
+            horizon_core::fs::read(file.with_extension("dat_old")).unwrap(),
+            original
+        );
+        assert!(
+            horizon_core::fs::read_dir(file.parent().unwrap())
+                .unwrap()
+                .flatten()
+                .any(
+                    |entry| entry.file_name().to_string_lossy().contains("_corrupted_")
+                        && horizon_core::fs::read(entry.path()).unwrap() == corrupt
+                )
+        );
+        assert!(load(&mut g, &dir));
+        assert_eq!(first_item(&g), Some(("minecraft:emerald", 3)));
+        horizon_core::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn own_player_replaces_optional_legacy_respawn_rotation_dimension_and_mode() {
+        use horizon_world::nbt::Tag;
+        let owner = horizon_protocol::crypto::offline_uuid("Owner");
+        for dimension in ["minecraft:overworld", "minecraft:the_nether"] {
+            let dir = world(if dimension.ends_with("overworld") {
+                "legacy-bed"
+            } else {
+                "legacy-anchor"
+            });
+            imported_world(&dir);
+            let mut root = crate::save::read_dat(&dir.join("level.dat")).unwrap();
+            if let Some(Tag::Compound(data)) = root.get_mut("Data") {
+                data.insert(
+                    "spawn".into(),
+                    Tag::compound([("pos", Tag::IntArray(vec![1, 64, 2]))]),
+                );
+                data.insert(
+                    "Player".into(),
+                    Tag::compound([
+                        (
+                            "respawn",
+                            Tag::compound([
+                                ("pos", Tag::IntArray(vec![8, 80, 9])),
+                                ("dimension", Tag::String(dimension.into())),
+                            ]),
+                        ),
+                        ("Dimension", Tag::String("minecraft:the_end".into())),
+                        (
+                            "Rotation",
+                            Tag::List(vec![
+                                Tag::Float(90f32.to_bits()),
+                                Tag::Float(45f32.to_bits()),
+                            ]),
+                        ),
+                        ("playerGameType", Tag::Int(1)),
+                    ]),
+                );
+            }
+            write_dat(&dir.join("level.dat"), root).unwrap();
+            let own = Tag::compound([(
+                "Pos",
+                Tag::List(vec![
+                    Tag::Double(10f64.to_bits()),
+                    Tag::Double(70f64.to_bits()),
+                    Tag::Double(3f64.to_bits()),
+                ]),
+            )]);
+            write_dat(&path(&dir, owner), own).unwrap();
+            let saved = Level::read(&dir).unwrap();
+            assert!(saved.respawn_elsewhere.is_some());
+            let mut frame = saved.clone();
+            frame.load_owner_player(&dir, owner);
+            assert_eq!(frame.spawn, Some([1.0, 64.0, 2.0]));
+            assert_eq!(frame.respawn_elsewhere, None);
+            assert_eq!(frame.rotation, [0.0; 2]);
+            assert_eq!(frame.dimension, "minecraft:overworld");
+            assert_eq!(frame.game_mode, 0);
+            assert!(!frame.creative);
+            let mut g = guest();
+            g.uuid = owner;
+            assert!(load_owner(&mut g, &dir, Some(&saved)));
+            assert_eq!(g.respawn_elsewhere, None);
+            assert_eq!(g.spawn, None);
+            assert_eq!(g.yaw, 0.0);
+            assert_eq!(g.dimension, "minecraft:overworld");
+            assert_eq!(g.game_mode, 0);
+            horizon_core::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn guest_save_preserves_corrupt_primary_and_readable_backup() {
+        let owner = horizon_protocol::crypto::offline_uuid("Guest");
+        let dir = world("guest-save-backup");
+        save(&holding(owner, "minecraft:diamond", 5), &dir);
+        let file = path(&dir, owner);
+        let original = horizon_core::fs::read(&file).unwrap();
+        horizon_core::fs::rename(&file, file.with_extension("dat_old")).unwrap();
+        let corrupt = b"truncated guest NBT";
+        horizon_core::fs::write(&file, corrupt).unwrap();
+        let mut g = guest();
+        g.uuid = owner;
+        assert!(load(&mut g, &dir));
+        assert_eq!(first_item(&g), Some(("minecraft:diamond", 5)));
+        g.inventory[0] = holding(owner, "minecraft:emerald", 3).inventory[0].clone();
+        save(&g, &dir);
+        assert_eq!(
+            horizon_core::fs::read(file.with_extension("dat_old")).unwrap(),
+            original
+        );
+        let preserved = horizon_core::fs::read_dir(file.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .any(|entry| {
+                entry.file_name().to_string_lossy().contains("_corrupted_")
+                    && horizon_core::fs::read(entry.path()).unwrap() == corrupt
+            });
+        assert!(preserved, "the broken primary was preserved before saving");
+        assert!(load(&mut g, &dir));
+        assert_eq!(first_item(&g), Some(("minecraft:emerald", 3)));
+        horizon_core::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn missing_named_file_recovers_only_owners_validated_backup_in_both_paths() {
+        let owner = horizon_protocol::crypto::offline_uuid("Owner");
+        let dir = world("own-backup");
+        imported_world(&dir);
+        save(&holding(owner, "minecraft:diamond", 5), &dir);
+        let file = path(&dir, owner);
+        horizon_core::fs::rename(&file, file.with_extension("dat_old")).unwrap();
+        // A parseable non-compound primary must not hide the validated backup.
+        write_dat(&file, horizon_world::nbt::Tag::Int(123)).unwrap();
+        let mut read = Level::read(&dir).unwrap();
+        assert!(!read.singleplayer_file);
+        let mut g = guest();
+        g.uuid = owner;
+        assert!(load_owner(&mut g, &dir, Some(&read)));
+        assert_eq!(first_item(&g), Some(("minecraft:diamond", 5)));
+        assert!(load(&mut g, &dir)); // non-owner guest recovery uses same rule
+        read.load_owner_player(&dir, owner);
+        assert_eq!(read.inventory[0].1, "minecraft:diamond");
+        assert_eq!(read.player_uuid, Some(uuid_ints(owner)));
+        horizon_core::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

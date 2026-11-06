@@ -1558,7 +1558,7 @@ fn compress_records(
     let compress = |record: &Record| {
         record
             .tag()
-            .map(|tag| ChunkRecord::from_nbt(&tag, Compression::Zlib, timestamp, Limits::default()))
+            .map(|tag| ChunkRecord::from_nbt(&tag, Compression::Zlib, timestamp, Limits::saved()))
             .transpose()
     };
     let helpers = std::thread::available_parallelism()
@@ -1754,7 +1754,7 @@ impl SaveDir {
         let path = self.region_path(folder, key.0, key.1);
         let region = cached_region(cache, key, &path, false).ok()??;
         let record = region.lock().ok()?.read(ChunkPos::new(x, z)).ok()??;
-        record.nbt(Limits::default()).ok()
+        record.nbt(Limits::saved()).ok()
     }
     pub fn load(&self, x: i32, z: i32, registry: &BlockRegistry, biomes: &Biomes) -> Option<Chunk> {
         let root = self.read_record("region", x, z)?;
@@ -2005,11 +2005,11 @@ impl Drop for SaveDir {
 
 pub fn read_dat(path: &Path) -> Option<Tag> {
     let bytes = fs::read(path).ok()?;
-    let raw = match Compression::Gzip.decode(&bytes, 64 << 20) {
+    let raw = match Compression::Gzip.decode(&bytes, Limits::saved().max_bytes) {
         Ok(raw) => raw,
         Err(_) => bytes,
     };
-    Some(nbt::read_named(&raw, Limits::default()).ok()?.0.tag)
+    Some(nbt::read_named(&raw, Limits::saved()).ok()?.0.tag)
 }
 /// `FileNameDateFormatter`: names of preserved unreadable files.
 fn backup_stamp() -> String {
@@ -2035,7 +2035,7 @@ fn read_level_dat(dir: &Path) -> Option<Tag> {
 fn read_player_file(path: &Path) -> Option<Tag> {
     read_dat(path).filter(|root| matches!(root, Tag::Compound(_)))
 }
-fn read_player_dat(path: &Path) -> Option<Tag> {
+pub(crate) fn read_player_dat(path: &Path) -> Option<Tag> {
     read_player_file(path).or_else(|| read_player_file(&path.with_extension("dat_old")))
 }
 /// Preserve an unreadable level.dat before restoring its readable backup.
@@ -2089,7 +2089,7 @@ pub fn write_dat(path: &Path, tag: Tag) -> Result<()> {
             name: "".into(),
             tag,
         },
-        Limits::default(),
+        Limits::saved(),
     )
     .map_err(|e| e.to_string())?;
     let compressed = Compression::Gzip.encode(&bytes)?;
@@ -2524,8 +2524,46 @@ pub struct Level {
     /// The player compound as loaded, for fields Horizon does not model
     /// (ender chest, effects, abilities, recipe book, attributes, ...).
     pub player_extra: Option<Tag>,
+    /// Loaded the named single-player file (including its validated backup).
+    pub singleplayer_file: bool,
 }
 impl Level {
+    /// Select the owner's own file only when the world's named file is absent.
+    /// Called before in-frame world setup, so its dimension and position agree.
+    pub fn load_owner_player(&mut self, dir: &Path, owner: u128) {
+        if self.singleplayer_file {
+            return;
+        }
+        if let Some(tag) = read_player_dat(&crate::lan::playerdata::path(dir, owner)) {
+            // The own file replaces legacy Data.Player, rather than overlaying
+            // its optional fields (bed/anchor, rotation, dimension, mode).
+            self.rotation = [0.0; 2];
+            self.dimension = "minecraft:overworld".into();
+            self.spawn = self.world_spawn.map(|p| p.map(f64::from));
+            self.respawn_elsewhere = None;
+            self.game_mode = read_level_dat(dir)
+                .and_then(|root| number(root.get("Data").and_then(|d| d.get("GameType"))))
+                .unwrap_or(0) as i32;
+            self.creative = self.game_mode == 1;
+            self.read_player(&tag);
+            self.player_extra = Some(tag);
+            self.player_uuid = Some(crate::lan::playerdata::uuid_ints(owner));
+        } else if self.player_extra.is_none() {
+            // A server import with no legacy player belongs to this profile.
+            self.player_uuid = Some(crate::lan::playerdata::uuid_ints(owner));
+        }
+    }
+
+    /// Save only the named owner file, preserving unreadable originals/backups.
+    pub fn write_player(&mut self, dir: &Path) -> Result<()> {
+        let uuid = self.ensure_player_uuid();
+        let file = dir
+            .join("players/data")
+            .join(format!("{}.dat", uuid_text(uuid)));
+        back_up_unreadable_player(&file)?;
+        write_dat(&file, self.player_tag())
+    }
+
     /// Initialize the offline single-player identity before saving or dropping items.
     pub fn ensure_player_uuid(&mut self) -> [i32; 4] {
         *self.player_uuid.get_or_insert_with(|| {
@@ -2638,33 +2676,13 @@ impl Level {
             rain_level: if raining { (1.0, 1.0) } else { (0.0, 0.0) },
             thunder_level: if thundering { (1.0, 1.0) } else { (0.0, 0.0) },
         };
-        // The player: players/data/<singleplayer_uuid>.dat, the newest player
-        // file of a server world, or the legacy Data.Player.
+        // Never guess the owner from another player's modification time.
         let uuid = uuid_from_tag(data.get("singleplayer_uuid"));
         let player_dir = dir.join("players").join("data");
-        // PlayerDataStorage.load: the named file, else the same player's .dat_old.
         let owner =
             uuid.and_then(|u| read_player_dat(&player_dir.join(format!("{}.dat", uuid_text(u)))));
-        let player = owner
-            .or_else(|| {
-                fs::read_dir(&player_dir)
-                    .ok()
-                    .and_then(|d| {
-                        d.flatten()
-                            .filter(|e| {
-                                let path = e.path();
-                                path.extension().is_some_and(|x| x == "dat")
-                                    && path
-                                        .file_stem()
-                                        .and_then(|s| s.to_str())
-                                        .and_then(uuid_from_text)
-                                        .is_some()
-                            })
-                            .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
-                    })
-                    .and_then(|e| read_player_dat(&e.path()))
-            })
-            .or_else(|| data.get("Player").cloned());
+        level.singleplayer_file = owner.is_some();
+        let player = owner.or_else(|| data.get("Player").cloned());
         level.player_uuid = uuid_from_tag(player.as_ref().and_then(|p| p.get("UUID"))).or(uuid);
         let spawn = level
             .world_spawn
@@ -3172,12 +3190,7 @@ impl Level {
             }
             write_saved_data(dir, "game_rules", rules)?;
         }
-        let player_file = dir
-            .join("players")
-            .join("data")
-            .join(format!("{}.dat", uuid_text(uuid)));
-        back_up_unreadable_player(&player_file)?;
-        write_dat(&player_file, self.player_tag())?;
+        self.write_player(dir)?;
         write_dat(&dir.join("level.dat"), Tag::compound([("Data", data)]))?;
         Ok(())
     }
@@ -3621,6 +3634,34 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn saved_nbt_over_a_million_nodes_roundtrips_dat_and_region() {
+        let dir = std::env::temp_dir().join(format!("horizon-large-nbt-{}", std::process::id()));
+        let _ = horizon_core::fs::remove_dir_all(&dir);
+        horizon_core::fs::create_dir_all(&dir).unwrap();
+        let tag = Tag::compound([("values", Tag::List(vec![Tag::Int(37); 1_000_001]))]);
+        let named = NamedTag {
+            name: "".into(),
+            tag: tag.clone(),
+        };
+        // Default limits remain appropriate for untrusted/network NBT.
+        assert!(nbt::write_named(&named, Limits::default()).is_err());
+        let bytes = nbt::write_named(&named, Limits::saved()).unwrap();
+        assert!(nbt::read_named(&bytes, Limits::default()).is_err());
+        super::write_dat(&dir.join("large.dat"), tag.clone()).unwrap();
+        assert_eq!(super::read_dat(&dir.join("large.dat")), Some(tag));
+        let save = super::SaveDir::new(dir.clone());
+        // Exercise compress_records and the on-disk read path, not pending reads.
+        save.save_entities_later(vec![((1, 2), vec![named.tag.clone()])])
+            .unwrap();
+        save.flush().unwrap();
+        drop(save);
+        let reopened = super::SaveDir::new(dir.clone());
+        assert_eq!(reopened.load_entities(1, 2), vec![named.tag]);
+        drop(reopened);
+        horizon_core::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn saved_and_client_heightmaps_use_dimension_bounds_without_resources() {
         let tables = SaveTables::for_heightmaps(crate::assets::Properties::for_tests(&[

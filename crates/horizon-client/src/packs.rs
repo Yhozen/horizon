@@ -250,6 +250,13 @@ fn overlays_of(meta: &serde_json::Value) -> Vec<String> {
         .flatten()
         .filter(|e| overlay_applies(e))
         .filter_map(|e| e["directory"].as_str().map(str::to_owned))
+        // OverlayMetadataSection's DIR_VALIDATOR: one folder of the pack, `[-_a-zA-Z0-9.]+`.
+        .filter(|d| {
+            stays_inside(d)
+                && !d.contains('/')
+                && d.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+        })
         .collect()
 }
 fn filter_of(meta: &serde_json::Value) -> Vec<Filter> {
@@ -361,7 +368,7 @@ fn pack_files(pack: &Pack) -> io::Result<BTreeMap<String, Provided>> {
             let zip = Zip::open(z)?;
             for root in &roots {
                 let prefix = format!("{root}assets/");
-                for name in zip.names() {
+                for name in zip.names().filter(|name| stays_inside(name)) {
                     if let Some(rest) = name.strip_prefix(&prefix) {
                         out.insert(format!("assets/{rest}"), (None, name.to_owned()));
                     }
@@ -370,6 +377,15 @@ fn pack_files(pack: &Pack) -> io::Result<BTreeMap<String, Provided>> {
         }
     }
     Ok(out)
+}
+/// Whether a zip entry's name, joined to the overlay folder, stays in it: `/`-separated parts
+/// (zip.rs turns `\` into `/`), none empty, `.` or `..`, and no `:` (a drive or a stream on
+/// Windows). A pack, a server's too, may name entries anything.
+fn stays_inside(name: &str) -> bool {
+    !name.contains([':', '\0'])
+        && name
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
 }
 #[cfg(unix)]
 fn link(target: &Path, at: &Path) -> io::Result<()> {
@@ -417,6 +433,22 @@ fn build_overlay_uncached(
             }
             files.insert(name, (i, provided));
         }
+    }
+    // FallbackResourceManager: a file's `.mcmeta` counts only from the pack that
+    // supplies the file or one above it; vanilla's own sits below every pack.
+    let hidden: BTreeSet<String> = files
+        .iter()
+        .filter(|(name, _)| !name.ends_with(".mcmeta"))
+        .filter_map(|(name, (owner, _))| {
+            let meta = format!("{name}.mcmeta");
+            match files.get(&meta) {
+                Some((meta_owner, _)) if meta_owner >= owner => None,
+                _ => Some(meta),
+            }
+        })
+        .collect();
+    for name in &hidden {
+        files.remove(name);
     }
     // Vanilla sits below every pack, so filters hide its files too.
     let filters: Vec<&Filter> = packs.iter().flat_map(|p| &p.filter).collect();
@@ -469,6 +501,7 @@ fn build_overlay_uncached(
         vanilla: &Path,
         out: &Path,
         touched: &BTreeSet<String>,
+        hidden: &BTreeSet<String>,
         files: &BTreeMap<String, (usize, Provided)>,
         merged: &BTreeMap<String, Vec<u8>>,
         filters: &[&Filter],
@@ -505,6 +538,9 @@ fn build_overlay_uncached(
         }
         for name in names {
             let child = format!("{prefix}{name}");
+            if hidden.contains(&child) {
+                continue;
+            }
             if let Some(bytes) = merged.get(&child) {
                 fs::write(out.join(&child), bytes)?;
             } else if let Some((owner, (path, inner))) = files.get(&child) {
@@ -525,6 +561,7 @@ fn build_overlay_uncached(
                     vanilla,
                     out,
                     touched,
+                    hidden,
                     files,
                     merged,
                     filters,
@@ -548,6 +585,7 @@ fn build_overlay_uncached(
         vanilla,
         out,
         &touched_dirs,
+        &hidden,
         &files,
         &merged,
         &filters,
@@ -994,6 +1032,19 @@ mod tests {
             {"min_format":97,"max_format":[97,5],"directory":"also"},
             {"formats":50,"directory":"no"}]}}"#);
         assert_eq!(overlays_of(&meta), ["new", "also"]);
+        // Only one plain folder of the pack, as vanilla's DIR_VALIDATOR has it.
+        let meta = v(r#"{"overlays":{"entries":[
+            {"formats":97,"directory":""},
+            {"formats":97,"directory":"."},
+            {"formats":97,"directory":".."},
+            {"formats":97,"directory":"a\\b"},
+            {"formats":97,"directory":"é"},
+            {"formats":97,"directory":"../outside"},
+            {"formats":97,"directory":"/etc"},
+            {"formats":97,"directory":"a/b"},
+            {"formats":97,"directory":"C:"},
+            {"formats":97,"directory":"ok_1.21-x"}]}}"#);
+        assert_eq!(overlays_of(&meta), ["ok_1.21-x"]);
         let base = std::env::temp_dir().join(format!("horizon-packs-ov-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         let vanilla = base.join("vanilla");

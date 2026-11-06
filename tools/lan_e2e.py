@@ -1887,20 +1887,26 @@ def check_clicks(host, guest, out):
     guest.raw('key', 'esc', 'tap')
     guest.wait(10)
     in_chest, _ = open_container(guest, chest, out, 'clicks-chest-after')
-    # Coal into the fuel slot, raw iron into the input.
-    guest.raw('interact', *furnace)
-    guest.raw('wait-for', 'screen', 'container', '--timeout', 10)
-    guest.wait(10)
-    mouse(guest, hotbar_slot(guest, 'minecraft:coal'))
-    mouse(guest, 301)
-    mouse(guest, hotbar_slot(guest, 'minecraft:raw_iron'))
-    mouse(guest, 300)
-    guest.wait(10)
-    guest.shot(out, 'clicks-furnace')
-    guest.raw('key', 'esc', 'tap')
-    guest.wait(10)
-    # Opening the furnace again resends the whole menu: the server's own view.
-    in_furnace, _ = open_container(guest, furnace, out, 'clicks-furnace-after')
+    # Smelting is unrelated to mouse routing. Freeze simulation while checking
+    # these slots so a slow renderer cannot turn input into output before reopen.
+    host('command', command='tick freeze')
+    try:
+        # Coal into the fuel slot, raw iron into the input.
+        guest.raw('interact', *furnace)
+        guest.raw('wait-for', 'screen', 'container', '--timeout', 10)
+        guest.wait(10)
+        mouse(guest, hotbar_slot(guest, 'minecraft:coal'))
+        mouse(guest, 301)
+        mouse(guest, hotbar_slot(guest, 'minecraft:raw_iron'))
+        mouse(guest, 300)
+        guest.wait(10)
+        guest.shot(out, 'clicks-furnace')
+        guest.raw('key', 'esc', 'tap')
+        guest.wait(10)
+        # Opening the furnace again resends the whole menu: the server's own view.
+        in_furnace, _ = open_container(guest, furnace, out, 'clicks-furnace-after')
+    finally:
+        host('command', command='tick unfreeze')
     # Two planks dragged over the 2x2 grid's left column: one each, four sticks.
     guest.raw('key', 'e', 'tap')
     guest.raw('wait-for', 'screen', 'inventory')
@@ -5672,6 +5678,219 @@ def check_creative_throw(host, guest, out):
 
 CHECKS += ['creative_throw']
 CHECK_FNS['creative_throw'] = check_creative_throw
+
+
+def check_offhand_menu(host, guest, out):
+    """Normal guest menus: F in a chest, shield auto-equip and armor from offhand."""
+    guest('command', command='gamemode survival')
+    guest('command', command='clear @s')
+    x, y, z = (int(v // 1) for v in pos_of(guest))
+    chest = (x, y, z + 2)
+    at = ' '.join(map(str, chest))
+    guest('command', command=f'setblock {at} minecraft:chest')
+    guest('command', command=f'item replace block {at} container.0 with minecraft:diamond')
+    guest('command', command='item replace entity @s weapon.offhand with minecraft:shield')
+    guest.wait(10)
+
+    def open_chest():
+        guest.raw('interact', *chest)
+        guest.raw('wait-for', 'screen', 'container', '--timeout', 10)
+        guest.wait(5)
+
+    def close():
+        guest.raw('key', 'esc', 'tap')
+        guest.wait(5)
+
+    def swap(slot):
+        guest.raw('scroll-at', *slot_point(guest, slot), 0)
+        guest.raw('key', 'f', 'tap')
+        guest.wait(5)
+
+    def shift(slot):
+        guest.raw('key', 'shift', 'down')
+        try:
+            guest.raw('click-at', *slot_point(guest, slot))
+        finally:
+            guest.raw('key', 'shift', 'up')
+        guest.wait(5)
+
+    seen = {}
+    open_chest()
+    swap(300)
+    close()
+    seen['chest'] = server_reply(guest, f'data get block {at} Items', 'minecraft:shield')
+    seen['offhand'] = server_reply(guest, 'data get entity @s equipment.offhand', 'minecraft:diamond')
+    open_chest()  # authoritative resend, then F over an empty chest slot
+    slots = {s['slot']: s.get('item') for s in guest('screen')['slots']}
+    assert slots[300] == 'minecraft:shield', slots
+    swap(301)
+    close()
+    assert guest('status')['offhand'] is None
+    seen['empty'] = server_reply(guest, f'data get block {at} Items', 'minecraft:diamond')
+    guest('command', command='item replace entity @s weapon.offhand with minecraft:shield')
+    guest('command', command='item replace entity @s hotbar.0 with minecraft:apple')
+    guest.wait(5)
+    open_chest()
+    swap(0)  # inventory row below the chest
+    close()
+    seen['row'] = server_reply(guest, 'data get entity @s equipment.offhand', 'minecraft:apple')
+    guest('command', command='clear @s')
+    guest('command', command='item replace entity @s weapon.offhand with minecraft:air')
+    guest('command', command='item replace entity @s inventory.0 with minecraft:shield')
+    guest.wait(5)
+    guest.raw('key', 'e', 'tap')
+    guest.raw('wait-for', 'screen', 'inventory', '--timeout', 10)
+    shift(9)
+    close()
+    seen['equipped'] = server_reply(guest, 'data get entity @s equipment.offhand', 'minecraft:shield')
+    guest('command', command='item replace entity @s inventory.0 with minecraft:shield')
+    guest.wait(5)
+    guest.raw('key', 'e', 'tap')
+    shift(9)
+    close()
+    assert guest('inventory')['hotbar'][0].get('item') == 'minecraft:shield'
+    guest('command', command='item replace entity @s weapon.offhand with minecraft:diamond_helmet')
+    guest.wait(5)
+    guest.raw('key', 'e', 'tap')
+    shift(504)
+    close()
+    seen['helmet'] = server_reply(guest, 'data get entity @s equipment.head', 'minecraft:diamond_helmet')
+    assert guest('status')['offhand'] is None
+    guest('command', command='item replace entity @s weapon.offhand with minecraft:diamond_helmet')
+    guest.wait(5)
+    guest.raw('key', 'e', 'tap')
+    shift(504)
+    close()
+    assert guest('status')['offhand'] is None
+    assert any(s.get('item') == 'minecraft:diamond_helmet' for s in guest('inventory')['main'])
+    return seen
+
+
+CHECKS += ['offhand_menu']
+CHECK_FNS['offhand_menu'] = check_offhand_menu
+
+
+def check_creative_reopen(host, guest, out):
+    """The search tab persists, while reopening rebuilds its query and scrollbar."""
+    seen = {}
+    for label, player in (('host', host), ('guest', guest)):
+        player('command', command='gamemode creative')
+        # Guests receive game-mode changes asynchronously from the server.
+        for _ in range(40):
+            if player('state').get('gamemode') == 'creative':
+                break
+            player.wait(2)
+        assert player('state').get('gamemode') == 'creative'
+        player.raw('key', 'e', 'tap')
+        player.raw('wait-for', 'screen', 'creative', '--timeout', 10)
+        sx, sy = slot_point(player, 0)
+        # Creative slot 0 center is (17,120); Search is the top-right tab.
+        player.raw('click-at', sx - 17 + 182, sy - 120 - 14)
+        player.wait(3)
+        def shown():
+            return {w['id']: w.get('stack') for w in player.raw('ui')['widgets']
+                    if w['id'].startswith('slot-9') and int(w['id'][5:]) >= 900}
+        initial = shown()
+        assert initial.get('slot-900'), initial
+        player.raw('scroll-at', *slot_point(player, 900), -20)
+        player.wait(3)
+        scrolled = shown()
+        assert scrolled.get('slot-900') != initial['slot-900'], scrolled
+        player.raw('type', 'horizon_no_item_matches_this_query')
+        player.wait(3)
+        assert not any(shown().values()), shown()
+        player.raw('key', 'esc', 'tap')
+        player.wait(3)
+        player.raw('key', 'e', 'tap')
+        player.wait(3)
+        reopened = shown()
+        assert reopened == initial, (initial, reopened)
+        # Text input succeeds only on the retained Search tab.
+        player.raw('type', 'horizon_no_item_matches_this_query')
+        player.wait(3)
+        assert not any(shown().values()), shown()
+        player.shot(out, f'creative-reopen-{label}')
+        player.raw('key', 'esc', 'tap')
+        player.wait(3)
+        seen[label] = {'first': initial['slot-900'], 'scrolled_first': scrolled['slot-900'],
+                       'reopened_first': reopened['slot-900']}
+    return seen
+
+
+CHECKS += ['creative_reopen']
+CHECK_FNS['creative_reopen'] = check_creative_reopen
+
+
+def check_keys_released(host, guest, out):
+    """Held input follows ordinary key/mouse lifecycle through disconnect/rejoin."""
+    port = host.raw('lan', 'status')['port']
+    for key in ('w', 'space', 'shift', 'ctrl'):
+        guest.raw('key', key, 'down')
+    for button in ('left', 'right'):
+        guest.raw('mouse', button, 'down')
+    held = guest('status')
+    assert set(held['physical_keys']) >= {'KeyW', 'Space', 'ShiftLeft', 'ControlLeft'}, held
+    assert held['attack_down'] and held['use_down'], held
+    guest.raw('disconnect')
+    left = guest('status')
+    # Do not send keys/clear or synthetic releases: that would mask leave_server.
+    guest.raw('connect', f'127.0.0.1:{port}', GUEST_NAME)
+    guest.raw('wait-for', 'loaded', '--timeout', 300)
+    guest.wait(20)
+    rejoined = guest('status')
+    for status in (left, rejoined):
+        assert status['keys'] == [] and status['physical_keys'] == [], status
+        assert not status['attack_down'] and not status['use_down'], status
+    start = pos_of(guest)
+    guest.wait(20)
+    end = pos_of(guest)
+    walked = round(math.hypot(end[0] - start[0], end[2] - start[2]), 3)
+    assert walked < 0.1, f'guest walked after rejoining: {walked}'
+    return {'held': held['physical_keys'], 'left': left['physical_keys'],
+            'rejoined': rejoined['physical_keys'], 'walked': walked}
+
+
+def check_toggles_released(host, guest, out):
+    """Toggle-enabled keyboard mappings must not restore a previous server's state."""
+    port = host.raw('lan', 'status')['port']
+    for key in ('toggleCrouch', 'toggleSprint'):
+        guest.raw('options-set', key, 'true')
+    try:
+        for key in ('shift', 'ctrl'):
+            guest.raw('key', key, 'tap')
+        guest.wait(2)
+        held = guest('status')
+        assert set(held['keys']) >= {'ShiftLeft', 'ControlLeft'}, held
+        assert not held['physical_keys'], held  # toggled, rather than physically held
+        # Opening a screen remembers keyboard toggle state for restoration.
+        guest.raw('key', 'e', 'tap')
+        guest.wait(2)
+        guest.raw('disconnect')
+        guest.raw('connect', f'127.0.0.1:{port}', GUEST_NAME)
+        guest.raw('wait-for', 'loaded', '--timeout', 300)
+        guest.wait(20)
+        rejoined = guest('status')
+        assert not {'ShiftLeft', 'ControlLeft'} & set(rejoined['keys']), rejoined
+        # A later screen close must not restore the remembered old toggle state either.
+        guest.raw('key', 'e', 'tap')
+        guest.wait(2)
+        guest.raw('key', 'esc', 'tap')
+        guest.wait(2)
+        after_screen = guest('status')
+        assert not {'ShiftLeft', 'ControlLeft'} & set(after_screen['keys']), after_screen
+        return {'toggled': held['keys'], 'rejoined': rejoined['keys'],
+                'after_screen': after_screen['keys']}
+    finally:
+        for key in ('toggleCrouch', 'toggleSprint'):
+            guest.raw('options-set', key, 'false')
+
+
+CHECKS += ['toggles_released']
+CHECK_FNS['toggles_released'] = check_toggles_released
+
+
+CHECKS += ['keys_released']
+CHECK_FNS['keys_released'] = check_keys_released
 
 
 if __name__ == '__main__':
