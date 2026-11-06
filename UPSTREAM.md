@@ -73,6 +73,7 @@ commit has different content. Each row is present in this branch.
 | [`3f529b7d808c0ac9adfdc49bd533769a878bdf14`](https://github.com/ludovic111/horizon/commit/3f529b7d808c0ac9adfdc49bd533769a878bdf14) | Keep SNBT depth safe for server stacks and valid nested items | 2026-11-06 |
 | [`6bf332f5c5246b2412858c416145e0a6271d8cee`](https://github.com/ludovic111/horizon/commit/6bf332f5c5246b2412858c416145e0a6271d8cee) | Reject excessively nested command redirects before stack overflow | 2026-11-06 |
 | [`45af2b23b2a0d341563325def664e40be127d51c`](https://github.com/ludovic111/horizon/commit/45af2b23b2a0d341563325def664e40be127d51c) | Bound network NBT tag allocations within a conservative quota | 2026-11-06 |
+| [`d55c2840a7884404324ed4bf4e5fdefb4bfa2277`](https://github.com/ludovic111/horizon/commit/d55c2840a7884404324ed4bf4e5fdefb4bfa2277) | Map unknown server block states to air before indexed lookups | 2026-11-06 |
 
 ## Latest comparison
 
