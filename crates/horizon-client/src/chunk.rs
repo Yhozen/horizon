@@ -207,8 +207,8 @@ impl Chunk {
     }
     #[inline]
     pub fn get(&self, x: i32, y: i32, z: i32) -> u32 {
-        let s = (y - MIN_Y) >> 4;
-        if !(0..SECTIONS as i32).contains(&s) {
+        let s = (i64::from(y) - i64::from(MIN_Y)) >> 4;
+        if !(0..SECTIONS as i64).contains(&s) {
             return 0;
         }
         self.sections[s as usize].get(index(x, y, z))
@@ -231,8 +231,8 @@ impl Chunk {
             })
     }
     pub fn set(&mut self, x: i32, y: i32, z: i32, v: u32) -> u32 {
-        let s = (y - MIN_Y) >> 4;
-        if !(0..SECTIONS as i32).contains(&s) {
+        let s = (i64::from(y) - i64::from(MIN_Y)) >> 4;
+        if !(0..SECTIONS as i64).contains(&s) {
             return v;
         }
         let previous = Arc::make_mut(&mut self.sections[s as usize]).set(index(x, y, z), v);
@@ -295,11 +295,11 @@ impl Chunk {
     }
     #[inline]
     pub fn light(&self, x: i32, y: i32, z: i32) -> u8 {
-        let s = (y - MIN_Y) >> 4;
+        let s = (i64::from(y) - i64::from(MIN_Y)) >> 4;
         if s < 0 {
             return 0;
         }
-        if s >= SECTIONS as i32 {
+        if s >= SECTIONS as i64 {
             return 0xF0;
         }
         self.sections[s as usize].light(index(x, y, z))
@@ -312,7 +312,8 @@ impl Chunk {
     /// the quart y clamped to the column).
     #[inline]
     pub fn biome(&self, x: i32, y: i32, z: i32) -> u16 {
-        let qy = ((y - MIN_Y) >> 2).clamp(0, HEIGHT / 4 - 1);
+        let qy =
+            ((i64::from(y) - i64::from(MIN_Y)) >> 2).clamp(0, i64::from(HEIGHT / 4 - 1)) as i32;
         self.sections[(qy >> 2) as usize]
             .biomes
             .get(((qy & 3) << 4 | ((z & 15) >> 2) << 2 | (x & 15) >> 2) as usize) as u16
@@ -448,5 +449,22 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod extreme_y_tests {
+    use super::*;
+    #[test]
+    fn extreme_y_does_not_overflow_or_modify_column() {
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.set(0, MIN_Y, 0, 7);
+        for y in [i32::MIN, i32::MAX] {
+            assert_eq!(chunk.get(0, y, 0), 0);
+            assert_eq!(chunk.light(0, y, 0), if y < MIN_Y { 0 } else { 0xf0 });
+            chunk.set(0, y, 0, 9);
+            let _ = chunk.biome(0, y, 0);
+        }
+        assert_eq!(chunk.get(0, MIN_Y, 0), 7);
     }
 }

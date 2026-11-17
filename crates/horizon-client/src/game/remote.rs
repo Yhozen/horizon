@@ -1143,10 +1143,9 @@ impl Game<'_> {
     /// view centre, `calculateStorageRange` (the server's radius, at least
     /// two, plus three) chunks each way.
     fn remote_chunk_in_range(&self, x: i32, z: i32) -> bool {
-        self.remote.as_ref().is_none_or(|r| {
-            let range = r.view_distance.max(2) + 3;
-            (x - r.chunk_center.0).abs() <= range && (z - r.chunk_center.1).abs() <= range
-        })
+        self.remote
+            .as_ref()
+            .is_none_or(|r| in_storage_range(r.view_distance, r.chunk_center, x, z))
     }
     /// The columns a moved or resized storage no longer holds.
     fn drop_remote_chunks_out_of_range(&mut self) {
@@ -1643,8 +1642,11 @@ impl Game<'_> {
                     r.entity_id = p.player_id;
                     r.view_distance = p.chunk_radius;
                 }
-                self.streaming.radius =
-                    self.settings.render_distance.min(p.chunk_radius + 1).max(2);
+                self.streaming.radius = self
+                    .settings
+                    .render_distance
+                    .min(p.chunk_radius.saturating_add(1))
+                    .max(2);
                 self.enter_remote_dimension(&p.spawn, false);
                 let view = client_view_distance(self.settings.render_distance);
                 if let Some(r) = self.remote.as_mut() {
@@ -2583,7 +2585,11 @@ impl Game<'_> {
             },
             C::SetPlayerTeam(p) => self.remote_team(p),
             C::SetChunkCacheRadius(p) => {
-                self.streaming.radius = self.settings.render_distance.min(p.distance + 1).max(2);
+                self.streaming.radius = self
+                    .settings
+                    .render_distance
+                    .min(p.distance.saturating_add(1))
+                    .max(2);
                 if let Some(r) = self.remote.as_mut() {
                     r.view_distance = p.distance;
                 }
@@ -5405,8 +5411,32 @@ impl Remote {
     }
 }
 
+/// `ClientChunkCache.Storage.inRange`: radius at least two, plus three columns.
+/// A server can send any `i32` radius or centre; distance arithmetic must not overflow.
+fn in_storage_range(view_distance: i32, center: (i32, i32), x: i32, z: i32) -> bool {
+    let range = view_distance.max(2).saturating_add(3).unsigned_abs();
+    x.abs_diff(center.0) <= range && z.abs_diff(center.1) <= range
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_chunk_storage_takes_any_radius_and_centre_a_server_sends() {
+        use super::in_storage_range;
+        assert!(in_storage_range(10, (0, 0), 13, -13));
+        assert!(!in_storage_range(10, (0, 0), 14, 0));
+        assert!(in_storage_range(-5, (100, 100), 105, 95));
+        assert!(!in_storage_range(0, (100, 100), 106, 100));
+        assert!(in_storage_range(i32::MAX, (0, 0), i32::MAX, i32::MIN + 1));
+        assert!(!in_storage_range(10, (i32::MIN, 0), i32::MAX, 0));
+        assert!(in_storage_range(
+            10,
+            (i32::MIN, i32::MAX),
+            i32::MIN + 13,
+            i32::MAX - 13
+        ));
+    }
+
     use super::Game;
 
     /// Number keys and Q can arrive before the next simulation tick. Exercise

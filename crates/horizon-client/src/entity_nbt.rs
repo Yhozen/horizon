@@ -1435,7 +1435,21 @@ pub fn vehicle_to_nbt(
     .tag(raw)
 }
 pub fn boat_from_nbt(tag: &Tag) -> Option<(Vec3, Vec3, f32)> {
-    Some((position(tag)?, motion(tag), rotation(tag)[0]))
+    let p = position(tag)?;
+    let p = Vec3::new(
+        p.x.clamp(-30_000_512.0, 30_000_512.0),
+        p.y.clamp(-20_000_000.0, 20_000_000.0),
+        p.z.clamp(-30_000_512.0, 30_000_512.0),
+    );
+    let m = motion(tag);
+    let component = |v: f64| if v.abs() > 10.0 { 0.0 } else { v };
+    p.is_finite().then(|| {
+        (
+            p,
+            Vec3::new(component(m.x), component(m.y), component(m.z)),
+            rotation(tag)[0],
+        )
+    })
 }
 
 /// `VillagerData`: type, profession and level.
@@ -2139,5 +2153,36 @@ mod sheep_nbt_tests {
             .collect();
         let back = mob_from_nbt(&tag, &types, 2).unwrap();
         assert_eq!((back.extra.color, back.extra.sheared), (14, true));
+    }
+}
+
+#[cfg(test)]
+mod boat_load_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn load_clamps_each_position_axis_and_only_motion_over_ten() {
+        let doubles = |v: [f64; 3]| Tag::List(v.map(|v| Tag::Double(v.to_bits())).to_vec());
+        for (raw, expected) in [
+            (
+                [40_000_000.0, 30_000_000.0, -40_000_000.0],
+                [30_000_512.0, 20_000_000.0, -30_000_512.0],
+            ),
+            (
+                [-40_000_000.0, -30_000_000.0, 40_000_000.0],
+                [-30_000_512.0, -20_000_000.0, 30_000_512.0],
+            ),
+            ([1.25, -64.0, -3.5], [1.25, -64.0, -3.5]),
+        ] {
+            let tag = Tag::compound([
+                ("Pos", doubles(raw)),
+                ("Motion", doubles([10.0, -10.0, 10.00001])),
+            ]);
+            let (p, m, _) = boat_from_nbt(&tag).unwrap();
+            assert_eq!(p.components(), expected);
+            assert_eq!(m, Vec3::new(10.0, -10.0, 0.0));
+        }
+        let tag = Tag::compound([("Pos", doubles([0.0, f64::NAN, 0.0]))]);
+        assert!(boat_from_nbt(&tag).is_none());
     }
 }
