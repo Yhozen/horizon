@@ -78,6 +78,8 @@ commit has different content. Each row is present in this branch.
 | [`a7f6ecbdfbf11c5626c69d3b5c159deac690657f`](https://github.com/ludovic111/horizon/commit/a7f6ecbdfbf11c5626c69d3b5c159deac690657f) | Synchronize the selected hotbar slot before an immediate Q drop | 2026-11-06 |
 | [`53b7a6768de77939e2e191cd9ef4f03d4a4a4968`](https://github.com/horizon-rust/horizon/commit/53b7a6768de77939e2e191cd9ef4f03d4a4a4968) | Resync the selected slot after a predicted drop and immediate pickup | 2026-11-17 |
 | [`fbfa055effff0800b0223652751268551a1f4344`](https://github.com/horizon-rust/horizon/commit/fbfa055effff0800b0223652751268551a1f4344) | Prevent loot item-count arithmetic from overflowing | 2026-11-17 |
+| [`70865d77e8fabcb097a48066d81e1b8f01b48e89`](https://github.com/horizon-rust/horizon/commit/70865d77e8fabcb097a48066d81e1b8f01b48e89) | Bound saved boat values and widen chunk coordinate arithmetic (partial import; newer void lifecycle excluded) | 2026-11-17 |
+| [`04449d8b7380875dc594a0c0f60c9354c2d97b4b`](https://github.com/horizon-rust/horizon/commit/04449d8b7380875dc594a0c0f60c9354c2d97b4b) | Prevent server chunk radius and centre arithmetic overflow | 2026-11-17 |
 
 ## Latest comparison
 
