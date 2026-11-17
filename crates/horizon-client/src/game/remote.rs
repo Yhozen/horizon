@@ -5514,6 +5514,7 @@ mod tests {
             dev_mods: Vec::new(),
             server_thread: false,
             integrated: false,
+            profile: Default::default(),
         };
         let mut game = Game::new(
             &loaded.resources,
