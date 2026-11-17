@@ -437,11 +437,13 @@ impl BlockFacts {
         ))
     }
     pub fn get(&self, id: BlockStateId) -> &StateFacts {
-        &self.states[id.0 as usize]
+        self.states
+            .get(id.0 as usize)
+            .unwrap_or_else(|| &self.states[self.air.0 as usize])
     }
     pub fn is_air(&self, id: BlockStateId) -> bool {
         matches!(
-            &*self.states[id.0 as usize].name,
+            &*self.get(id).name,
             "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
         )
     }
