@@ -11,7 +11,7 @@ async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), "horizon-package-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, "dist"));
-  for (const file of ["index.html", "loader.js", "cache.js", "release.js"]) await writeFile(join(root, file), "fixture");
+  for (const file of ["index.html", "cache.js", "release.js"]) await writeFile(join(root, file), "fixture");
   await writeFile(join(root, "dist/horizon-client.js"), "export default () => {};");
   await writeFile(join(root, "dist/horizon-client_bg.wasm"), Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]));
   const archive = join(root, "archive.bin");
@@ -44,10 +44,13 @@ test("packaging bundles the shell and matching manifest as importable Worker cod
   const release = await packageRelease(root, archive);
   const code = await readFile(join(root, ".build/shell.ts"));
   const { shell } = await import(`data:text/javascript;base64,${code.toString("base64")}`);
-  assert.deepEqual(Object.keys(shell).sort(), ["/cache.js", "/index.html", "/loader.js", "/release.js", "/release.json"]);
+  assert.deepEqual(Object.keys(shell).sort(), ["/cache.js", "/index.html", "/menu.css", "/menu.js", "/release.js", "/release.json"]);
   assert.equal(shell["/index.html"].body, html);
   assert.equal(shell["/index.html"].contentType, "text/html");
-  assert.equal(shell["/loader.js"].contentType, "text/javascript");
+  assert.equal(shell["/menu.js"].contentType, "text/javascript");
+  assert.equal(shell["/menu.css"].contentType, "text/css");
+  // The private site's menu carries its own art; the open site's never does (tests/open.test.mjs).
+  assert.match(shell["/menu.css"].body, /\.art-village\{background-image:url\("data:image\/webp;base64,/);
   assert.equal(shell["/release.json"].contentType, "application/json");
   assert.deepEqual(validateRelease(JSON.parse(shell["/release.json"].body)), release);
 });

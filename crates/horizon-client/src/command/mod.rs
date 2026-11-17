@@ -760,6 +760,17 @@ impl Dispatcher {
         }
         d
     }
+    /// The tree with only the root commands named in `keep`, as a server sends
+    /// a player only the commands they may run.
+    pub fn with_root_commands(&self, keep: &[&str]) -> Dispatcher {
+        let mut d = self.clone();
+        let children = std::mem::take(&mut d.nodes[0].children);
+        d.nodes[0].children = children
+            .into_iter()
+            .filter(|&c| keep.contains(&self.nodes[c].name()))
+            .collect();
+        d
+    }
     /// A root literal by name.
     pub fn find(&self, name: &str) -> Option<usize> {
         self.nodes[0]

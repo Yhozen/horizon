@@ -147,6 +147,21 @@ impl Environment {
     pub fn load(root: &Path) -> Result<Self> {
         Self::load_dimension(root, "overworld", true)
     }
+    /// A dimension these resources do not have (Horizon Open Creative has only
+    /// the overworld): the built-in base attributes, no timeline. Nothing can
+    /// travel there, so nothing samples it; it only fills the slot.
+    pub fn unavailable() -> Self {
+        let mut environment = Self {
+            period: 24000,
+            tracks: HashMap::new(),
+            base: HashMap::new(),
+        };
+        environment.base.insert(
+            "minecraft:visual/sky_light_factor".into(),
+            [1.0, 0.0, 0.0, 0.0],
+        );
+        environment
+    }
     /// A dimension's base attributes, optionally driven by the day timeline.
     pub fn load_dimension(root: &Path, dimension: &str, day_cycle: bool) -> Result<Self> {
         let timeline: Value = if day_cycle {

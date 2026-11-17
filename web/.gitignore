@@ -1,4 +1,8 @@
 /node_modules/
 /.alchemy/
 /.build/
+/.build-open/
 /dist/
+/.env*
+!/.env.example
+/.posthog-wizard-cache/

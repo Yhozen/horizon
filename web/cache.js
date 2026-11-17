@@ -55,7 +55,9 @@ export async function retainRelease(release, storage = globalThis.caches,
     const history = await storage.open(HISTORY);
     const key = new URL("/__horizon_cache_history__", origin).href;
     const previous = await (await history.match(key))?.json() ?? [];
-    const releases = [{ id: release.id, urls: [release.assets.wasm.url, release.assets.resources.url] },
+    const urls = [release.assets.wasm.url, release.assets.resources.url];
+    if (release.assets.sharedResources) urls.push(release.assets.sharedResources.url);
+    const releases = [{ id: release.id, urls },
       ...previous.filter((r) => r.id !== release.id)].slice(0, 2);
     await history.put(key, Response.json(releases));
     const keep = new Set(releases.flatMap((r) => r.urls.map((url) => new URL(url, origin).href)));

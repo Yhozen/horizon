@@ -1,0 +1,360 @@
+//! Translation tests on the invented fixture registries (`tables::fixture`).
+use crate::{
+    tables::fixture::tables,
+    translate::{Clientbound, Phase, Serverbound, body},
+};
+use horizon_protocol::{
+    buf::{Reader, Writer},
+    chunk::{ChunkData, LightData, Paletted, Section, Strategy},
+    ids::{configuration::clientbound as cfg_cb, play::clientbound as cb},
+    item::{Component, Hashed, Stack},
+    packets::{
+        configuration::{self as cfg, RegistryData, RegistryEntry},
+        play,
+    },
+};
+
+fn split(body: &[u8]) -> (i32, Vec<u8>) {
+    let mut r = Reader::new(body);
+    let id = r.varint().unwrap();
+    (id, r.rest().to_vec())
+}
+
+/// A client translator already in play, with a 1-section dimension and
+/// one biome.
+fn playing(t: &crate::tables::Tables) -> Clientbound<'_> {
+    let mut c = Clientbound::new(t);
+    let dim = RegistryData {
+        registry: "minecraft:dimension_type".into(),
+        entries: vec![RegistryEntry {
+            id: "minecraft:tiny".into(),
+            data: Some(horizon_world::nbt::Tag::Compound({
+                let mut m = horizon_world::nbt::Compound::new();
+                m.insert("min_y".into(), horizon_world::nbt::Tag::Int(0));
+                m.insert("height".into(), horizon_world::nbt::Tag::Int(16));
+                m
+            })),
+        }],
+    };
+    let biomes = RegistryData {
+        registry: "minecraft:worldgen/biome".into(),
+        entries: vec![RegistryEntry {
+            id: "minecraft:plains".into(),
+            data: None,
+        }],
+    };
+    for p in [dim, biomes] {
+        let (id, payload) = split(&cfg::Clientbound::RegistryData(p).encode());
+        assert!(c.translate(id, &payload).is_some());
+    }
+    assert!(c.translate(cfg_cb::FINISH_CONFIGURATION, &[]).is_some());
+    assert_eq!(c.phase, Phase::Play);
+    let login = play::Clientbound::Login(play::Login {
+        player_id: 1,
+        hardcore: false,
+        levels: vec!["minecraft:overworld".into()],
+        max_players: 10,
+        chunk_radius: 4,
+        simulation_distance: 4,
+        reduced_debug_info: false,
+        show_death_screen: true,
+        limited_crafting: false,
+        spawn: play::SpawnInfo {
+            dimension_type: 0,
+            dimension: "minecraft:overworld".into(),
+            seed: 0,
+            game_type: 0,
+            previous_game_type: None,
+            debug: false,
+            flat: false,
+            last_death: None,
+            portal_cooldown: 0,
+            sea_level: 63,
+        },
+        online_mode: false,
+        enforces_secure_chat: false,
+    });
+    let (id, payload) = split(&login.encode());
+    assert!(c.translate(id, &payload).is_some());
+    c
+}
+
+fn decode(out: Option<Vec<u8>>) -> play::Clientbound {
+    let (id, payload) = split(&out.expect("sent"));
+    play::Clientbound::decode(id, &payload).unwrap()
+}
+
+fn send(c: &mut Clientbound, p: play::Clientbound) -> Option<Vec<u8>> {
+    let (id, payload) = split(&p.encode());
+    c.translate(id, &payload)
+}
+
+#[test]
+fn brand_is_the_open_brand_and_tags_are_dropped() {
+    let t = tables();
+    let mut c = Clientbound::new(&t);
+    let mut w = Writer::new();
+    w.string("Paper");
+    let (id, payload) = split(
+        &cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+            channel: "minecraft:brand".into(),
+            data: w.data,
+        })
+        .encode(),
+    );
+    let (id, payload) = split(&c.translate(id, &payload).unwrap());
+    let cfg::Clientbound::CustomPayload(p) = cfg::Clientbound::decode(id, &payload).unwrap() else {
+        panic!()
+    };
+    assert_eq!(Reader::new(&p.data).string(64).unwrap(), t.brand);
+    assert!(t.brand.starts_with("horizon-open/"));
+    let tags = cfg::Clientbound::UpdateTags(cfg::UpdateTags { registries: vec![] });
+    let (id, payload) = split(&tags.encode());
+    assert!(c.translate(id, &payload).is_none());
+}
+
+#[test]
+fn chunk_sections_are_remapped_and_counted() {
+    let t = tables();
+    let mut c = playing(&t);
+    // Vanilla: stone, dark oak logs on z, a torch and lava, the rest air.
+    let mut values = vec![0i32; 4096];
+    values[0] = 1;
+    values[1] = 8;
+    values[2] = 9;
+    values[3] = 14;
+    values[4] = 13;
+    let section = Section {
+        non_empty: 4,
+        fluids: 1,
+        states: Paletted::from_values(&values, Strategy::Blocks, t.vanilla_state_bits),
+        biomes: Paletted::from_values(&[0; 64], Strategy::Biomes, 0),
+    };
+    let chunk = play::LevelChunkWithLight {
+        x: 0,
+        z: 0,
+        chunk: ChunkData {
+            heightmaps: vec![],
+            buffer: ChunkData::from_sections(&[section]),
+            block_entities: vec![],
+        },
+        light: LightData {
+            sky_mask: vec![],
+            block_mask: vec![],
+            empty_sky_mask: vec![],
+            empty_block_mask: vec![],
+            sky: vec![],
+            block: vec![],
+        },
+    };
+    let play::Clientbound::LevelChunkWithLight(out) =
+        decode(send(&mut c, play::Clientbound::LevelChunkWithLight(chunk)))
+    else {
+        panic!()
+    };
+    let s = &out.chunk.sections(1, t.open_state_bits, 0).unwrap()[0];
+    assert_eq!(
+        (0..5).map(|i| s.states.get(i)).collect::<Vec<_>>(),
+        vec![1, 6, 0, 8, 7],
+        "stone, spruce log z, torch → air, lava → orange wool, water"
+    );
+    assert_eq!((s.non_empty, s.fluids), (4, 1));
+}
+
+#[test]
+fn global_palette_sections_are_repacked() {
+    let t = tables();
+    let c = playing(&t);
+    let values: Vec<i32> = (0..4096).map(|i| i % 16).collect();
+    let section = Section {
+        non_empty: 0,
+        fluids: 0,
+        states: Paletted {
+            bits: 16,
+            palette: vec![],
+            data: Paletted::from_values(&values, Strategy::Blocks, 16).data,
+        },
+        biomes: Paletted::from_values(&[0; 64], Strategy::Biomes, 0),
+    };
+    // from_values of 16 values chooses a palette; rebuild a global one.
+    let global = Paletted {
+        bits: 16,
+        palette: vec![],
+        data: {
+            let per = 4;
+            values
+                .chunks(per)
+                .map(|w| {
+                    w.iter()
+                        .enumerate()
+                        .fold(0u64, |acc, (k, v)| acc | (*v as u64) << (k * 16))
+                        as i64
+                })
+                .collect()
+        },
+    };
+    let out = c.section(Section {
+        states: global,
+        ..section
+    });
+    for i in 0..16 {
+        assert_eq!(out.states.get(i), t.state(i as i32));
+    }
+}
+
+#[test]
+fn block_updates_are_remapped() {
+    let t = tables();
+    let mut c = playing(&t);
+    let play::Clientbound::BlockUpdate(p) = decode(send(
+        &mut c,
+        play::Clientbound::BlockUpdate(play::BlockUpdate {
+            pos: [1, 2, 3],
+            state: 7,
+        }),
+    )) else {
+        panic!()
+    };
+    assert_eq!(p.state, 5);
+    let change = (8i64 << 12) | 0x123;
+    let play::Clientbound::SectionBlocksUpdate(p) = decode(send(
+        &mut c,
+        play::Clientbound::SectionBlocksUpdate(play::SectionBlocksUpdate {
+            section: [0, 0, 0],
+            changes: vec![change],
+        }),
+    )) else {
+        panic!()
+    };
+    assert_eq!(p.changes, vec![(6i64 << 12) | 0x123]);
+}
+
+fn add_entity(id: i32, kind: i32, data: i32) -> play::Clientbound {
+    play::Clientbound::AddEntity(play::AddEntity {
+        id,
+        uuid: id as u128,
+        kind,
+        position: [0.0; 3],
+        velocity: [0.0; 3],
+        pitch: 0,
+        yaw: 0,
+        head_yaw: 0,
+        data,
+    })
+}
+
+#[test]
+fn creatures_the_bundle_lacks_stay_invisible() {
+    let t = tables();
+    let mut c = playing(&t);
+    // A zombie (vanilla 0): never spawned, and its movement is dropped.
+    assert!(send(&mut c, add_entity(5, 0, 0)).is_none());
+    let mut w = Writer::new();
+    w.varint(5);
+    w.bytes(&[0; 7]);
+    assert!(c.translate(cb::MOVE_ENTITY_POS, &w.data).is_none());
+    let mut w = Writer::new();
+    w.i32(5);
+    w.i8(3);
+    assert!(c.translate(cb::ENTITY_EVENT, &w.data).is_none());
+    // A player (vanilla 3 → open 0) and a falling block whose state maps.
+    let play::Clientbound::AddEntity(p) = decode(send(&mut c, add_entity(6, 3, 0))) else {
+        panic!()
+    };
+    assert_eq!(p.kind, 0);
+    let play::Clientbound::AddEntity(p) = decode(send(&mut c, add_entity(7, 2, 7))) else {
+        panic!()
+    };
+    assert_eq!((p.kind, p.data), (3, 5));
+    let mut w = Writer::new();
+    w.varint(6);
+    w.bytes(&[0; 7]);
+    assert!(c.translate(cb::MOVE_ENTITY_POS, &w.data).is_some());
+    // Sounds and particles never reach the open client.
+    assert!(c.translate(cb::SOUND, &[0; 8]).is_none());
+    assert!(c.translate(cb::LEVEL_PARTICLES, &[0; 8]).is_none());
+}
+
+#[test]
+fn stacks_are_remapped_and_stand_ins_named() {
+    let t = tables();
+    let c = playing(&t);
+    let golden = Stack {
+        item: 2,
+        count: 3,
+        added: vec![
+            (1, Component::Int(16)),
+            (2, Component::Ident("minecraft:golden_apple".into())),
+        ],
+        removed: vec![3],
+    };
+    let out = c.stack(Some(golden)).unwrap();
+    assert_eq!((out.item, out.count), (4, 3));
+    // max_stack_size kept; item_model and the food removal dropped; the
+    // fixture bundle has no item_name component, so no label.
+    assert_eq!(out.added, vec![(1, Component::Int(16))]);
+    assert!(out.removed.is_empty());
+    assert!(c.stack(Some(Stack::new(0, 1))).is_none(), "air is empty");
+}
+
+#[test]
+fn clicks_and_creative_slots_go_back_to_vanilla_items() {
+    let t = tables();
+    let mut s = Serverbound::new(&t);
+    assert!(s.translate(3, &[]).is_some(), "finish configuration");
+    assert_eq!(s.phase, Phase::Play);
+    let click = play::Serverbound::ContainerClick(play::ContainerClick {
+        container: 0,
+        state: 1,
+        slot: 36,
+        button: 0,
+        input: 0,
+        changed: vec![(
+            36,
+            Some(Hashed {
+                item: 4,
+                count: 1,
+                added: vec![],
+                removed: vec![],
+            }),
+        )],
+        carried: Some(Hashed {
+            item: 3,
+            count: 1,
+            added: vec![],
+            removed: vec![],
+        }),
+    });
+    let (id, payload) = split(&click.encode());
+    let (id, payload) = split(&s.translate(id, &payload).unwrap());
+    let play::Serverbound::ContainerClick(p) = play::Serverbound::decode(id, &payload).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(p.changed[0].1.as_ref().unwrap().item, 7, "apple");
+    assert!(
+        p.carried.is_none(),
+        "spruce log has no vanilla twin in the fixture"
+    );
+    let creative = play::Serverbound::SetCreativeModeSlot(play::SetCreativeModeSlot {
+        slot: 36,
+        item: Some(Stack::new(1, 64)),
+    });
+    let (id, payload) = split(&creative.encode());
+    let (id, payload) = split(&s.translate(id, &payload).unwrap());
+    let play::Serverbound::SetCreativeModeSlot(p) =
+        play::Serverbound::decode(id, &payload).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(p.item.unwrap().item, 1);
+    // Other packets pass as they came.
+    assert_eq!(
+        s.translate(sb_chat(), &[1, 2]),
+        Some(body(sb_chat(), &[1, 2]))
+    );
+}
+
+fn sb_chat() -> i32 {
+    horizon_protocol::ids::play::serverbound::CHAT
+}

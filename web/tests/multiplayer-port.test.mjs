@@ -1,6 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { openMinecraftPort } from "../src/multiplayer-port.ts";
+import { openExternalMinecraftPort, openMinecraftPort } from "../src/multiplayer-port.ts";
+
+test("external TCP waits for the configured server and closes failed connections", async () => {
+  let resolveOpen, closed = 0, opened = false;
+  const socket = { opened: new Promise(resolve => { resolveOpen = resolve; }), closed: Promise.resolve(),
+    close() { closed++; } };
+  const opening = openExternalMinecraftPort("chosen.example:25565", address => {
+    assert.equal(address, "chosen.example:25565"); return socket;
+  }).then(result => { opened = true; return result; });
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(opened, false);
+  resolveOpen();
+  assert.equal(await opening, socket);
+  assert.equal(closed, 0);
+  await assert.rejects(openExternalMinecraftPort("offline.example:25565", () => ({
+    opened: Promise.reject(new Error("connection refused")), closed: Promise.reject(new Error("connection refused")),
+    close() { closed++; throw new Error("already closed"); },
+  })), /connection refused/);
+  assert.equal(closed, 1);
+});
+
+test("an external TCP connection that never opens times out and closes its socket", async () => {
+  let closed = 0;
+  await assert.rejects(openExternalMinecraftPort("unreachable.example:25565", () => ({
+    opened: new Promise(() => {}), closed: new Promise(() => {}), close() { closed++; },
+  }), 10), /connection timed out/);
+  assert.equal(closed, 1);
+});
 
 test("cold container retries synchronous connect errors, failed opens, and throwing close methods", async () => {
   let attempts = 0, starts = 0, closes = 0;

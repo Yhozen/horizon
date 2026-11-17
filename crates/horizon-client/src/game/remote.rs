@@ -840,6 +840,26 @@ impl Game<'_> {
                     }
                 }
                 Event::Brand(brand) => {
+                    // Network ids only agree between the same content: an open
+                    // player stays only on a server with its bundle, a vanilla one
+                    // never joins an open server.
+                    let ours = horizon_client::assets::server_brand(&self.options.resources);
+                    let open = horizon_client::assets::OPEN_BRAND;
+                    let mismatch = if ours.starts_with(open) {
+                        (brand != ours).then(|| if brand.starts_with(open) {
+                            "This server runs other Horizon Open Creative content: update the game or the server".to_owned()
+                        } else {
+                            "Horizon Open Creative can only join Horizon Open Creative servers".to_owned()
+                        })
+                    } else {
+                        brand.starts_with(open).then(|| {
+                            "This is a Horizon Open Creative server: join it with the open edition".to_owned()
+                        })
+                    };
+                    if let Some(reason) = mismatch {
+                        log::warn!("Horizon: leaving a server whose brand is {brand:?}: {reason}");
+                        return self.leave_server(Some(reason));
+                    }
                     if let Some(remote) = &mut self.remote {
                         remote.brand = brand;
                     }

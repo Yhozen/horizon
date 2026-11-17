@@ -467,6 +467,10 @@ pub struct Renderer {
     /// Resolution scale and FXAA (Horizon settings).
     world_post: world_post::Post,
     pub hud: HudRenderer,
+    /// Interface atlas patches (glyphs rasterized, maps drawn) of frames that
+    /// were not drawn: uploaded with the next drawn frame, since nothing makes
+    /// them again (the glyph caches keep their places in the atlas).
+    held_patches: Vec<crate::font::Patch>,
     /// Vanilla's menu background blur, made on first use.
     menu_blur: Option<crate::menu_blur::MenuBlur>,
     pub info: wgpu::AdapterInfo,
@@ -2518,6 +2522,7 @@ impl Renderer {
             occlusion: occlusion::Occlusion::new(crate::chunk::MIN_Y, crate::chunk::HEIGHT / 16),
             world_post,
             hud,
+            held_patches: Vec::new(),
             menu_blur: None,
             info,
             suspended: size.width == 0 || size.height == 0,
@@ -3083,6 +3088,9 @@ impl Renderer {
     }
     pub fn render(&mut self, frame: &Frame) -> Result<bool> {
         let rendered = self.draw_frame(frame);
+        if !matches!(rendered, Ok(true)) {
+            self.held_patches.extend(frame.hud.patches.iter().cloned());
+        }
         // A frame that was not drawn still submits the section copies.
         if let Some(copies) = self.take_section_copies() {
             self.queue.submit([copies]);
@@ -3768,6 +3776,9 @@ impl Renderer {
                 bytemuck::cast_slice(&vertices),
             );
         }
+        let held = std::mem::take(&mut self.held_patches);
+        self.hud
+            .upload_patches(&mut self.uploads, &mut encoder, &held);
         self.hud.prepare(
             &self.device,
             &mut self.uploads,

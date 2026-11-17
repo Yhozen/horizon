@@ -1,6 +1,12 @@
 export const YEAR = 31536000;
-export const assetPath = /^\/assets\/[a-f0-9]{64}\/(horizon-data\.bin|horizon-client_bg\.wasm|horizon-client\.js)$/;
+export const assetPath = /^\/assets\/[a-f0-9]{64}\/(horizon-data\.bin|horizon-open-data\.bin|horizon-client_bg\.wasm|horizon-client\.js)$/;
 export type Shell = Readonly<Record<string, { readonly body: string; readonly contentType: string }>>;
+
+/** The worlds the page's menu may offer: the deployment's configuration, never a guess. */
+export function worldList(worlds: readonly string[]) {
+  return new Response(JSON.stringify({ worlds }), { headers: { "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+}
 
 export function failure(message: string, status: number) {
   return new Response(message, { status, headers: { "Cache-Control": "no-store" } });
@@ -39,7 +45,8 @@ export interface GatewayContext {
 }
 
 export async function gateway(request: Request, env: GatewayEnv, ctx: GatewayContext, shell: Shell,
-  multiplayer?: (request: Request) => Promise<Response>): Promise<Response> {
+  multiplayer?: (request: Request, world: string | null) => Promise<Response>,
+  worlds: readonly string[] = []): Promise<Response> {
   // The platform-populated Access context cannot be forged by supplying HTTP headers.
   try {
     const identity = await ctx.access?.getIdentity();
@@ -57,9 +64,12 @@ export async function gateway(request: Request, env: GatewayEnv, ctx: GatewayCon
       }
       if (request.headers.get("Origin") !== url.origin) return failure("Invalid connection origin", 403);
       if (!multiplayer) return failure("Multiplayer unavailable", 503);
+      const world = url.searchParams.get("world");
+      if (world !== null && !worlds.includes(world)) return failure("Unknown world", 404);
       // Forward only the upgrade. Access cookies and assertions never reach the server.
-      return await multiplayer(new Request("https://minecraft.internal/connect", { headers: { Upgrade: "websocket" } }));
+      return await multiplayer(new Request("https://minecraft.internal/connect", { headers: { Upgrade: "websocket" } }), world);
     }
+    if (url.pathname === "/worlds.json") return worldList(worlds);
     return await route(request, ctx, shell);
   } catch { return failure("Content unavailable", 502); }
 }

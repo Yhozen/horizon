@@ -786,8 +786,8 @@ fn login_and_configure(
             channel: "minecraft:brand".into(),
             data: {
                 let mut w = horizon_protocol::buf::Writer::new();
-                // MinecraftServer.getServerModName.
-                w.string("vanilla");
+                // MinecraftServer.getServerModName; an open server names its content.
+                w.string(&sync.brand);
                 w.data
             },
         }),

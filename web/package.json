@@ -10,6 +10,11 @@
     "build": "node scripts/build.mjs",
     "assets:fetch": "node scripts/fetch-resources.ts",
     "package": "node scripts/package.mjs",
+    "build:open": "node scripts/build-open.mjs",
+    "package:open": "node scripts/package-open.mjs",
+    "serve:open": "node scripts/serve-open.mjs",
+    "serve:open:multiplayer": "node scripts/multiplayer-dev.mjs --open",
+    "deploy:open": "node scripts/deploy-open.mjs",
     "check": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
     "test:browser": "node --test tests/browser.test.mjs",
@@ -19,11 +24,15 @@
     "bench": "node scripts/bench.mjs"
   },
   "dependencies": {
-    "@alchemy.run/cloudflare": "2.0.0-beta.84",
-    "@effect/platform-bun": "4.0.6",
-    "@effect/platform-node": "4.0.6",
-    "alchemy": "2.0.0-beta.84",
-    "effect": "4.0.6"
+    "@alchemy.run/cloudflare": "2.0.0-beta.87",
+    "@effect/platform-browser": "4.1.4",
+    "@effect/platform-bun": "4.1.4",
+    "@effect/platform-node": "4.1.4",
+    "@foldkit/ui": "0.170.0",
+    "alchemy": "2.0.0-beta.87",
+    "effect": "4.1.4",
+    "foldkit": "0.170.0",
+    "posthog-js": "^1.438.23"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261024.1",

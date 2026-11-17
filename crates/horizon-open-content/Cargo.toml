@@ -1,0 +1,18 @@
+[package]
+name = "horizon-open-content"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Horizon Open Creative: builds the independent resource bundle (open artwork, original data) the client loads without any Minecraft files"
+
+[dependencies]
+horizon-core = { path = "../horizon-core" }
+horizon-protocol = { path = "../horizon-protocol" }
+horizon-world = { path = "../horizon-world" }
+png = "0.18"
+serde_json = "1.0.151"
+sha2 = "0.10"
+
+[lints]
+workspace = true

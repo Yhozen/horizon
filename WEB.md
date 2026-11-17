@@ -7,12 +7,20 @@
 What it does: the page downloads the prepared resources, mounts them in an in-memory file system,
 opens the WebGPU device, creates a fresh single-player world, ticks it on the page's own frame loop
 (`--in-frame`), streams and meshes chunks on the main thread, and draws terrain on `<canvas id="horizon">`.
-Join multiplayer in the page's session bar to use the shared server instead. Choppy is expected:
+The page opens on a menu (`web/menu/`, below) where the player names themselves and chooses a world
+before anything downloads. Choppy is expected:
 one browser thread handles the client simulation and rendering.
 
 [UPSTREAM.md](UPSTREAM.md) records the upstream source commits backported into this browser fork,
 the most recent backport, and the upstream tip last assessed. Update that record with each import;
 its backport pointer represents selective fixes, not a complete upstream sync.
+
+**Horizon Open Creative** is a separate browser edition that needs none of the game data below:
+its resources come from `horizon-prepare open` (openly licensed artwork and original data), it
+builds with `pnpm build:open` into `web/.build-open/static`, and it never fetches the private archive.
+It has this preview's single player and shared survival world, served publicly at
+https://open.rccpr.tech with its own server (Horizon's dedicated server on the open bundle).
+See [docs/open-creative.md](docs/open-creative.md).
 
 ## 1. Toolchain
 
@@ -109,6 +117,12 @@ The `HorizonWeb` stack in stage `preview` references the existing bucket owned b
 object is `horizon-data.bin`; bucket coordinates and the preview's email allowlist are in
 `web/scripts/config.mjs`.
 
+To invite another viewer, add their exact email to `allowedEmails` there and redeploy. Alchemy uses
+that list for both the Access Allow policy and the Worker's identity check. The Zero Trust **Users**
+page lists users who have signed in; it does not grant access. The dashboard policy is under
+**Access controls > Applications > Horizon private preview > Policies**. A dashboard-only policy
+edit does not update the Worker's list and can be overwritten by the next Alchemy deployment.
+
 Enable Cloudflare Zero Trust/Access for the account first. Configure credentials in Alchemy's stored
 `default` profile (Workers, R2 and Access permissions), using its interactive prompts:
 
@@ -172,19 +186,91 @@ Before calling a release live, check an authenticated cold start, a reload and b
 an anonymous request to the same warm asset URL. Check the internal edge-cache header independently
 of the browser cache. Keep later update/rollback checks local unless another deployment is approved.
 
+### The landing menu
+
+Both sites open on the same menu, `web/menu/`: a [Foldkit](https://foldkit.dev) program on Effect 4.1
+(`main.ts`: Model, Messages, update, view; `game.ts`: loading and starting the game; `edition.ts`:
+what differs between horizon.rccpr.tech and open.rccpr.tech). The player picks a name and one of three
+worlds, reads "How to play" (full screen, controls, the worlds, the opt-in diagnostics; the open site
+adds its credits), and only then presses Play, which downloads and starts the game on the
+full-window `canvas#horizon`. `scripts/menu.mjs` bundles it per site into `menu.js` and `menu.css`
+(fonts, icons and that site's own art inlined; the open site never carries the private pictures), and
+packaging puts both in the Worker's shell. `?name=` and `?world=` preselect; `?args=` still starts at
+once with those game arguments, for the dev tools.
+
+The worlds a deployment serves come from `/worlds.json`; the page connects with
+`/connect?world=survival|shared` (`src/worlds.ts`), a name from that fixed list, never a host:
+
+| World | horizon.rccpr.tech | open.rccpr.tech |
+|---|---|---|
+| **Survival** | `MINECRAFT_SERVER`: the Lightsail Paper server, directly | the `SurvivalRelay` container: `crates/horizon-open-relay` in front of the same server ([docs/open-creative.md](docs/open-creative.md#joining-a-java-server-through-the-relay)) |
+| **Horizon world** | `SHARED_WORLD`: open.rccpr.tech's `SharedWorld` entrypoint | the `OpenServer` container |
+| **Single player** | in the tab | in the tab |
+
 ### Multiplayer
 
-Choose a name in the page's session bar and click **Join multiplayer**. Each simultaneous player
+**Horizon world** goes to the shared Horizon world: Horizon's own dedicated server on the Horizon
+Open Creative bundle, the same server and world that https://open.rccpr.tech's players join
+([docs/open-creative.md](docs/open-creative.md#the-shared-world)). The Worker's `SHARED_WORLD`
+binding (`alchemy.run.ts`: `Cloudflare.Worker.lookup` of `horizon-open`, entrypoint `SharedWorld`)
+takes the browser's `/connect` there. Both sites' players must number blocks and items alike, so
+this page plays multiplayer on the open bundle, which the release carries as `sharedResources`
+(`horizon-open-data.bin`, packed from `web/.build-open/horizon-data.bin`: run `pnpm package:open`
+before `pnpm build`), wearing this preview's own art: `start_overlaid` (`crates/horizon-client/src/web.rs`)
+lays every texture the open bundle also has, and the English text, over it, tinting vanilla's grey
+grass and foliage with plains colours. Single player is unchanged. Deploy the open site first when
+the open bundle changes, so the server and both pages share it (an open player or server with other
+content refuses the join by brand).
+
+**Survival** goes to the Java server described below, the world Java players at
+survival.minecraft.rccpr.tech use.
+
+Choose a name in the menu, pick **Survival** and press **Join Survival**. Each simultaneous player
 needs a different name (1–16 ASCII letters, digits or underscores). Reloading the resulting URL keeps
 that name. The initial server start can take up to three minutes; the connecting screen stays open
 while the server downloads Minecraft and generates its world.
 
-The preview stack runs the pinned `itzg/minecraft-server` Java 25 image with vanilla **26.3**, protocol
-**777**, offline login, creative mode and peaceful difficulty. One container-backed Durable Object
-named `preview-world` is shared by all three allowed Access users. Its native TCP port is private:
-the authenticated `/connect` WebSocket route is the browser's only entry. The Worker checks Access
-and the request's origin before opening the connection, strips credentials, and never accepts a
-client-supplied TCP destination. RCON is disabled in the deployed server.
+The preview uses Gabriel's AWS Lightsail **Paper 26.3** server at **54.144.229.38:25565**, protocol
+**777**, in Survival mode. Java friends use **Multiplayer > Add Server >
+survival.minecraft.rccpr.tech**, with an unmodified **26.3** client and no tunnel software.
+Browser players choose **Survival** in the preview's menu. Both paths reach the same
+Lightsail server and world.
+
+`web/scripts/config.mjs` contains the public `javaServer` configuration. Alchemy manages a DNS-only
+A record pointing at Lightsail and a Minecraft SRV record for port 25565. Keep the A record
+unproxied: the native game uses ordinary TCP. Lightsail's networking and the host firewall must
+allow inbound TCP 25565. Minecraft configuration, world storage and backups belong to the Lightsail
+server; this stack manages the browser app, gateway and DNS. No SSH access is needed for deployment.
+
+The authenticated `/connect` WebSocket route bridges browser bytes to the configured TCP address.
+The Worker checks Access and the request's origin, strips credentials, and never accepts a
+client-supplied TCP destination. Native Java TCP access is outside Cloudflare's email login.
+The current server accepts offline-mode clients, so it does not verify Microsoft account ownership.
+Browser clients require `online-mode=false` and `enforce-secure-profile=false`.
+
+#### Override or roll back the backend
+
+An unset `HORIZON_MINECRAFT_SERVER` uses the configured Lightsail hostname. To choose a different
+shared **26.3** backend, set the following in ignored `web/.env.local` before planning and deploying:
+
+```dotenv
+HORIZON_MINECRAFT_SERVER=mc.example.com:25565
+```
+
+Use the actual reachable TCP host and port, not an HTTP URL or a Cloudflare-proxied DNS record.
+The destination is a deployment binding; browser parameters cannot change it. The browser currently
+supports offline-mode servers only (`online-mode=false`, `enforce-secure-profile=false`). The host
+sets Survival, Normal difficulty and `force-gamemode=true`, and should persist its `/data` directory.
+Java's **Multiplayer > Add Server** address is the exact same `HOST:PORT`, with no client helper.
+Native TCP access is governed by the Minecraft host's own access controls, outside Cloudflare Access;
+offline mode does not verify Microsoft account ownership.
+
+The previous Cloudflare `preview-world` container is retained for rollback and has no keepalive.
+An external connection failure returns an error rather than silently putting players in a different
+world. An explicitly empty `HORIZON_MINECRAFT_SERVER=` selects that private container; this does not
+migrate either server's world. Its pinned vanilla 26.3 image uses Survival, Normal difficulty and
+`force-gamemode=true`, with RCON disabled. Its world is ephemeral when the container is replaced or
+stopped. `alchemy deploy` reports the selected Java address.
 
 `net/browser.rs` handles incremental TCP framing, compression and the existing Rust login,
 configuration and play codecs. `net/web.rs` supplies asynchronous WebSocket callbacks: keep-alives
@@ -207,7 +293,8 @@ pnpm build
 pnpm serve:multiplayer
 ```
 
-Open <http://127.0.0.1:8081/?mode=multiplayer> in two tabs, choosing different names. The local
+Open <http://127.0.0.1:8081/> in two tabs, choosing different names. `--shared HOST:PORT` also
+offers the Horizon world, bridged to a local open server. The local
 gateway binds only to loopback, simulates Access locally and uses the same Worker WebSocket/TCP
 bridge as production. `--server HOST:PORT`, `--port` and `--assets-port` configure that development
 gateway. This differs from the game's `--server`: a browser game argument chooses the handshake
@@ -368,3 +455,30 @@ with `/tp` jumps, then Save & Quit, re-entering the world from the list, walking
 Web Workers with `SharedArrayBuffer` (cross-origin isolation) for the chunk pool and the integrated
 server; OPFS for saves; persistent multiplayer world backups; Web Audio for sound; trimming or splitting
 the data archive.
+
+## Browser diagnostics and session recordings
+
+The `web/` package optionally bundles `posthog-js`. Configure its public project token and ingestion
+host in ignored `web/.env.local`, using the variable names in `web/.env.example`:
+`NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` and `NEXT_PUBLIC_POSTHOG_HOST`. Both are required when either is
+set. Local configuration takes precedence over inherited values from another project. Personal API
+keys never enter the browser bundle. Run `pnpm package` after changing browser configuration; the
+shell/telemetry release changes while unchanged game assets retain their immutable URLs.
+
+**Share diagnostics** and **Record sessions** are separate choices, both off initially, following
+`docs/telemetry.md`. Choices persist in browser storage. Nothing connects to PostHog before a player
+opts in. Revoking both choices stops capture. Diagnostics cover caught startup failures, unhandled
+errors/rejections and console errors (including Rust panic-hook output), cache outcomes, playable
+readiness, screen/join transitions, and foreground FPS/chunk summaries roughly every 30 seconds.
+Exception reports are capped at 20 per minute. The SDK retains its bot filter in production; the
+loopback development server allows automated ingestion checks.
+
+Session recordings mask inputs and omit network payloads and raw console logs. A player separately
+consenting to recordings may share on-screen game content, including chat. Cloudflare's sign-in page
+is outside the app recording. PostHog's current canvas support documents 2D/WebGL: WebGPU game
+footage is not guaranteed even when the project has canvas capture enabled. Verify a recording's
+actual contents before relying on it for gameplay debugging.
+
+The telemetry module is served through the same authenticated Worker shell. Its SDK network requests
+run independently of game startup; blocking telemetry must not prevent play. JavaScript loader/cache
+errors remain readable without source maps; full Rust/WASM stack symbolication is not configured.
