@@ -34,11 +34,37 @@ impl Screen {
 
 /// PauseScreen buttons: (x, y, width, label key, action id, active).
 /// https://mcsrc.dev/2/26.3/net/minecraft/client/gui/screens/PauseScreen
-fn pause_buttons(w: f32, h: f32, remote: bool) -> Vec<(f32, f32, f32, &'static str, u8, bool)> {
+fn pause_buttons(
+    w: f32,
+    h: f32,
+    remote: bool,
+    open: bool,
+) -> Vec<(f32, f32, f32, &'static str, u8, bool)> {
     // GridLayout of two 98px columns (padding 4), aligned at (0.5, 0.25).
     let (grid_w, grid_h) = (212.0, 166.0);
     let x0 = ((w - grid_w) * 0.5).floor();
     let y0 = ((h - grid_h) * 0.25).floor();
+    if open {
+        // Horizon Open Creative: no advancements, world options or LAN; its credits.
+        return vec![
+            (x0 + 4.0, y0 + 50.0, 204.0, "menu.returnToGame", 0, true),
+            (x0 + 4.0, y0 + 74.0, 98.0, "menu.options", 1, true),
+            (x0 + 110.0, y0 + 74.0, 98.0, "open.credits", 11, true),
+            (x0 + 4.0, y0 + 98.0, 98.0, "gui.stats", 3, true),
+            (
+                x0 + 110.0,
+                y0 + 98.0,
+                98.0,
+                if remote {
+                    "menu.disconnect"
+                } else {
+                    "menu.returnToMenu"
+                },
+                2,
+                true,
+            ),
+        ];
+    }
     vec![
         (x0 + 4.0, y0 + 50.0, 204.0, "menu.returnToGame", 0, true),
         (x0 + 4.0, y0 + 74.0, 98.0, "gui.advancements", 4, true),
@@ -112,7 +138,8 @@ impl Game<'_> {
             u32::MAX,
             true,
         );
-        for (x, y, bw, key, _, active) in pause_buttons(w, h, self.external_server()) {
+        let open = self.options.profile.is_open();
+        for (x, y, bw, key, _, active) in pause_buttons(w, h, self.external_server(), open) {
             let hover = active && ui::hovered(self.cursor, x, y, bw, 20.0);
             ui::button(
                 batch,
@@ -127,7 +154,12 @@ impl Game<'_> {
             );
         }
         let mut tooltip = None;
-        for (i, (x, y, sprite)) in pause_icons(w, h).into_iter().enumerate() {
+        let icons = if open {
+            Vec::new()
+        } else {
+            pause_icons(w, h).to_vec()
+        };
+        for (i, (x, y, sprite)) in icons.into_iter().enumerate() {
             let active = i == FRIENDS_ICON && friends;
             let hover = ui::hovered(self.cursor, x, y, 20.0, 20.0);
             // The icon has no label: name it for controller focus and the
@@ -173,12 +205,14 @@ impl Game<'_> {
             (b.width, b.height)
         };
         let friends = pause_icons(w, h)[FRIENDS_ICON];
-        let hit = pause_buttons(w, h, self.external_server())
+        let open = self.options.profile.is_open();
+        let hit = pause_buttons(w, h, self.external_server(), open)
             .into_iter()
             .find(|b| b.5 && ui::hovered(self.cursor, b.0, b.1, b.2, 20.0))
             .map(|b| b.4)
             .or_else(|| {
-                (self.friends_view().shown
+                (!open
+                    && self.friends_view().shown
                     && ui::hovered(self.cursor, friends.0, friends.1, 20.0, 20.0))
                 .then_some(10)
             });
@@ -193,6 +227,7 @@ impl Game<'_> {
             Some(9) => self.open_world_options(),
             Some(10) => self.screen = Screen::Friends,
             Some(2) => self.close_world()?,
+            Some(11) => self.open_win_screen(false, super::win::Finish::Closed),
             _ => {}
         }
         if hit.is_some() {
@@ -372,7 +407,7 @@ mod tests {
     #[test]
     fn pause_menu_uses_disconnect_for_servers_and_keeps_world_options() {
         for (remote, label) in [(false, "menu.returnToMenu"), (true, "menu.disconnect")] {
-            let buttons = pause_buttons(427.0, 240.0, remote);
+            let buttons = pause_buttons(427.0, 240.0, remote, false);
             let quit = buttons.iter().find(|b| b.4 == 2).unwrap();
             assert_eq!(quit.3, label);
             assert!(quit.5);

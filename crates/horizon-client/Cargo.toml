@@ -112,3 +112,5 @@ workspace = true
 [dev-dependencies]
 # Every WGSL shader translated as wgpu's DirectX 12 backend does (gfx.rs tests).
 naga = { version = "30.0.1", features = ["wgsl-in", "hlsl-out", "msl-out", "spv-out"] }
+# Horizon Open Creative's bundle, built and loaded by tests/open_content.rs.
+horizon-open-content = { path = "../horizon-open-content" }

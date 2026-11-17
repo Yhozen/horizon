@@ -146,6 +146,9 @@ pub struct Title {
     splash: Option<String>,
     /// The saves listed for Home, re-read every couple of seconds.
     recent: std::cell::RefCell<Option<(web_time::Instant, Vec<WorldEntry>)>>,
+    /// Horizon Open Creative's resources: no Realms, friends' invite codes or
+    /// languages beyond the bundle's English.
+    open: bool,
 }
 pub(crate) struct Button {
     x: f32,
@@ -233,7 +236,9 @@ impl Title {
         let today = chrono::Local::now();
         let mode = Mode::Main;
         let now = web_time::Instant::now();
+        let open = crate::assets::profile_at(resources).is_ok_and(|p| p.is_open());
         Self {
+            open,
             mode,
             last_server: String::new(),
             saves,
@@ -589,6 +594,14 @@ impl Title {
             Mode::Main => {
                 let cx = (w / 2.0).floor();
                 let y = (h / 4.0).floor() + 48.0;
+                if self.open {
+                    return vec![
+                        b(cx - 100.0, y, 200.0, "Singleplayer", true, 1),
+                        b(cx - 100.0, y + 24.0, 200.0, "Multiplayer", true, 4),
+                        b(cx - 100.0, y + 72.0, 98.0, "Options...", true, 3),
+                        b(cx + 2.0, y + 72.0, 98.0, "Quit Game", true, 2),
+                    ];
+                }
                 let mut buttons = vec![
                     b(cx - 100.0, y, 200.0, "Singleplayer", true, 1),
                     b(cx - 100.0, y + 24.0, 200.0, "Multiplayer", true, 4),

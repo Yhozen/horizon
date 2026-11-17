@@ -1000,6 +1000,9 @@ pub struct OptionsUi {
     pub graphics: crate::graphics_ui::GraphicsUi,
     /// The AI Agent page's status lines (set by the game while it shows).
     pub agent_status: Vec<String>,
+    /// Horizon Open Creative: the main page offers only the pages it supports
+    /// (no online, skins, sound, language, packs, Horizon settings or mods).
+    pub open_edition: bool,
 }
 impl Default for OptionsUi {
     fn default() -> Self {
@@ -1029,6 +1032,7 @@ impl Default for OptionsUi {
             center_language: false,
             graphics: Default::default(),
             agent_status: Vec::new(),
+            open_edition: false,
         }
     }
 }
@@ -1544,14 +1548,23 @@ impl OptionsUi {
                     list: false,
                 });
                 out.push(option_widget(s, Opt::Fov, cx - 154.0, 29.0, 150.0));
-                out.push(inactive(button(
-                    cx + 4.0,
-                    29.0,
-                    150.0,
-                    tr("options.online"),
-                    Act::None,
-                )));
-                let entries = [
+                if !self.open_edition {
+                    out.push(inactive(button(
+                        cx + 4.0,
+                        29.0,
+                        150.0,
+                        tr("options.online"),
+                        Act::None,
+                    )));
+                }
+                let open_entries = [
+                    ("options.video", Some(Page::Video)),
+                    ("options.controls", Some(Page::Controls)),
+                    ("options.chat", Some(Page::Chat)),
+                    ("options.accessibility", Some(Page::Accessibility)),
+                    ("options.credits_and_attribution", Some(Page::Credits)),
+                ];
+                let full_entries = [
                     ("options.skinCustomisation", None),
                     ("options.sounds", Some(Page::Sound)),
                     ("options.video", Some(Page::Video)),
@@ -1567,6 +1580,11 @@ impl OptionsUi {
                     ("Mods...", Some(Page::Mods)),
                     ("options.credits_and_attribution", Some(Page::Credits)),
                 ];
+                let entries: &[(&str, Option<Page>)] = if self.open_edition {
+                    &open_entries
+                } else {
+                    &full_entries
+                };
                 let rows = entries.len().div_ceil(2) as f32;
                 let gy = (61.0 + 30.0f32).min(h - 33.0 - rows * 24.0);
                 for (i, (key, page)) in entries.iter().enumerate() {

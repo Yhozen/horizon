@@ -6,10 +6,16 @@ license = "MIT"
 description = "Prepares Horizon's resources from the player's own Minecraft: imports and checks the pinned jars, runs the vanilla exporters, writes the resource folder"
 
 [dependencies]
+# `horizon-prepare open` (Horizon Open Creative); the launcher links the library without it.
+horizon-open-content = { path = "../horizon-open-content", optional = true }
 regex = { version = "1", default-features = false, features = ["std", "unicode-perl"] }
 sha1 = "0.10"
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[features]
+default = ["open"]
+open = ["dep:horizon-open-content"]
 
 [build-dependencies]
 sha2 = "0.10"

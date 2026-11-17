@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 
 BUILD_DIR = Path(__file__).resolve().parents[2] / "web" / ".build"
-SHELL_PATHS = {"/", "/index.html", "/loader.js", "/cache.js", "/release.js", "/release.json"}
+SHELL_PATHS = {"/", "/index.html", "/menu.js", "/menu.css", "/cache.js", "/release.js", "/release.json"}
 ASSET_PATH = re.compile(r"/assets/[a-f0-9]{64}/(?:horizon-data\.bin|horizon-client_bg\.wasm|horizon-client\.js)")
 
 

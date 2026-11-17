@@ -71,6 +71,8 @@ pub struct SyncData {
     /// ClientboundUpdateRecipesPacket's payload.
     pub recipes: Vec<u8>,
     pub advancements: super::advancements::ServerAdvancements,
+    /// The server's `minecraft:brand` (`crate::assets::server_brand`).
+    pub brand: String,
 }
 
 /// Every `*.json` under `dir`, as (path without extension relative to dir, value), sorted.
@@ -156,6 +158,7 @@ impl SyncData {
             commands: super::commands::CommandTree::load(resources),
             recipes: Vec::new(),
             advancements: super::advancements::ServerAdvancements::load(resources),
+            brand: crate::assets::server_brand(resources),
         };
         sync.recipes = super::recipes::update_recipes(resources, &sync);
         Ok(sync)

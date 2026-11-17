@@ -1192,10 +1192,17 @@ impl Recipes {
             Ok(files)
         };
         // Vanilla's recipes by bare name, then content mods' as `<ns>:<name>`.
-        let mut files: Vec<(String, PathBuf)> = json_files(&root.join("data/minecraft/recipe"))?
-            .into_iter()
-            .map(|p| (String::new(), p))
-            .collect();
+        // Like RecipeManager listing resources, no recipe folder is no recipes
+        // (Horizon Open Creative has no crafting).
+        let base = root.join("data/minecraft/recipe");
+        let mut files: Vec<(String, PathBuf)> = if base.is_dir_vfs() {
+            json_files(&base)?
+        } else {
+            Vec::new()
+        }
+        .into_iter()
+        .map(|p| (String::new(), p))
+        .collect();
         for namespace in crate::mod_content::namespaces(root) {
             let dir = root.join(format!("data/{namespace}/recipe"));
             if dir.is_dir_vfs() {

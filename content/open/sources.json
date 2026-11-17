@@ -1,0 +1,2052 @@
+{
+  "schema": 1,
+  "media": [
+    {
+      "file": "media/minetest_game/default/default_stone.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_stone.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "0803a6cd3e8a07ec5d7885735800ee9578a3fa9019d4deb8838290a744e2318a",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/stone.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "Cisoun's texture pack"
+    },
+    {
+      "file": "media/minetest_game/default/default_cobble.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_cobble.png"
+      },
+      "author": "Neuromancer, based on a texture by Brane praefect",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "ce9e03d6786da33b1a16fbf26dd809a21e19d70958e50d73803a61d481de7826",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/cobblestone.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_dirt.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_dirt.png"
+      },
+      "author": "random-geek, derived from a texture by Neuromancer",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "d2f693ff1e1bfd3cee0697d753b9cdd6270e6a374eccda791c8767674d5c3949",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/dirt.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_grass.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_grass.png"
+      },
+      "author": "TumeniNodes",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "4bc38f157e38eae07cac20beb8309d5050d571f2c35690a54dde213548ca0e1b",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/grass_block_top.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_grass_side.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_grass_side.png"
+      },
+      "author": "paramat, derived from a texture by TumeniNodes",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "1a52f427483c6a2e313de0370bfdb6320516e7822cd97058e7e2d38b13936c29",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/grass_block_side.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; composited over default_dirt.png (its transparent lower part shows the dirt), as Minetest Game layers it"
+    },
+    {
+      "file": "media/minetest_game/default/default_sand.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_sand.png"
+      },
+      "author": "VanessaE",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "d2d18f62db97b01cfae9a09f4cfd275c3615045012b76e388112949eb0f707be",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/sand.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_gravel.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_gravel.png"
+      },
+      "author": "sofar, derived from Gambit's PixelBOX texture pack light gravel",
+      "license": "CC0-1.0",
+      "sha256": "69e4e086f69de5dcd14c2947f4f82bd4d19744bbc44d2ceb18b8766672faf0c6",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/gravel.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_sandstone.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_sandstone.png"
+      },
+      "author": "celeron55, Perttu Ahola (default author of unlisted media)",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "db0bacd9fa12845d2d4014b5da45a4a9a869ce677a8a1a1772696fd7463008ef",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/sandstone.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_stone_block.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_stone_block.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "0f830d8e3eaf3278abcffe64feed208f11bfc27d63c7dec448412c8c5dba19ef",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/smooth_stone.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_obsidian.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_obsidian.png"
+      },
+      "author": "jojoa1997",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "271eebc2b6ed57c2c1ba4d622569563d6403d7a4ad3d15a6909b16f46ef7f355",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/obsidian.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_tree.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tree.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "26b1051fb141b031cb05c30ea24b8adc904d358c615a85829467844da0897cd7",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/oak_log.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "Cisoun's texture pack"
+    },
+    {
+      "file": "media/minetest_game/default/default_tree_top.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tree_top.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "610b79ba51ec122460b2463eb7ee0564043e6181ff2c578718fa4d12c2b9a4a7",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/oak_log_top.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "Cisoun's texture pack"
+    },
+    {
+      "file": "media/minetest_game/default/default_wood.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_wood.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "4540d1d39328d23a881f2b9180c11fdf92e6414bf93cbfe1383b786e60af874e",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/oak_planks.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_leaves.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_leaves.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "805048f7e1026a9e9cd38d782f9bc61766b285f0096a47488ddf243b82f0b4e0",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/oak_leaves.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "Cisoun's texture pack"
+    },
+    {
+      "file": "media/minetest_game/default/default_brick.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_brick.png"
+      },
+      "author": "Calinou",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "32a1fdd1155e7630c1333a24d99d2c9659eddb9bd32213984d577716e4f484fe",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/bricks.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_glass.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_glass.png"
+      },
+      "author": "Krock",
+      "license": "CC0-1.0",
+      "sha256": "cd770db5c3a3e1b9cf7405d28ac55ee1629f255179c5e0e9a913857df081af87",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/glass.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_meselamp.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_meselamp.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "ca2a883591dabc7e2c2e3a708ae31b8341088f1d301209b508f903d46659faff",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/glowstone.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_water_source_animated.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_water_source_animated.png"
+      },
+      "author": "RealBadAngel",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "6c09523837dcb8646565616cd52ca0f1cd1b0a9f9d7312ca6066b649812dcc1b",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/water_still.png",
+        "assets/minecraft/textures/block/water_flow.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged; frame animation metadata (.mcmeta) generated",
+      "note": "RealBadAngel's animated water"
+    },
+    {
+      "file": "media/minetest_game/default/default_grass_3.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_grass_3.png"
+      },
+      "author": "Gambit",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "7033726878a6c13d4bcf44364ddd9202573644ea59e73b0f11088f569c2855d3",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/short_grass.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_white.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_white.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "6409a07b47a4056da3128fc50c1de2ee8b6952a8d77ffca97237c5fe285b851e",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/white_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_black.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_black.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "2f87db1670cce7366faa45abb89587003748682c79a577f4be26a713e50efe68",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/black_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_red.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_red.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "36cf7d423c9869cdc76c457a787292244d20d79d6cdb6adc01fcde5f54580f18",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/red_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_orange.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_orange.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "bf0a95dea16f85f8bddcb25a0215c36c93d6756266bb386b9aa0534ea272ca81",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/orange_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_yellow.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_yellow.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "ed8f4739d97f00c61eb8eb62800dd2f72337d39e9282b9720cd56b179cf282f3",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/yellow_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_green.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_green.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "aeecfb000656310f67db4213865a0cc8dbe15fad07585ea507cd5aa70283e327",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/lime_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_blue.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_blue.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "2f27f938508d75684889022d984981ef69fe1a237db4639ebf4821f7d595c87e",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/blue_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_violet.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_violet.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "6ea13e7e19b59e0c9740628fe32b385eee98f66b612a854a65bc26ff32d2ac07",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/purple_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_mossycobble.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_mossycobble.png"
+      },
+      "author": "Neuromancer, based on a texture by Brane praefect",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "e552477a150e676c73155c913ddb8dbda694267b4bd48bf9923cd077e2120909",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/mossy_cobblestone.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_stone_brick.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_stone_brick.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "71493a7ec3ddb724f41c3a0a015622a5fe3c5bbe2916e4f2b9c893d6b0b4a082",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/stone_bricks.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_desert_stone.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_desert_stone.png"
+      },
+      "author": "VanessaE",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "84bc66a66dae23a452b433131cf52d8e6c31a75ca02b4b85f52df56138d5f1f8",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/granite.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_desert_stone_block.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_desert_stone_block.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "e741bc27f84a787f1f0d55573a727c16aaa8819964d09c02a8fa6a304f820d6f",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/polished_granite.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_sandstone_brick.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_sandstone_brick.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "365715ce402b321f5828b37f91961a80af14ad843a89683f0789f748920515f6",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/chiseled_sandstone.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_sandstone_block.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_sandstone_block.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "7385484ea2dc1fe4bce2c1f31d654b82a4c62f976b988d9d4d289a59dc0a4212",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/cut_sandstone.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_desert_sand.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_desert_sand.png"
+      },
+      "author": "VanessaE",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "57cf802aa391b158da7ebcb1519d56aaef799dd236699c296068e52b862ccf3a",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/red_sand.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_desert_sandstone.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_desert_sandstone.png"
+      },
+      "author": "kaeza",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "075816e82ec87b09e6cb1bc5ba5511bbb9167db2bc8e040226f6d8d6785f804f",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/red_sandstone.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_desert_sandstone_brick.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_desert_sandstone_brick.png"
+      },
+      "author": "kaeza",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "234d060af8203e9f3936b7cc2b4f5f570632dcaed9be12a83fbb954bbdd35c5e",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/chiseled_red_sandstone.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_desert_sandstone_block.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_desert_sandstone_block.png"
+      },
+      "author": "kaeza",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "090187f2ecbf91635779222eb41efff1fa4e45929cfdb99e5b91b68c0952efb2",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/cut_red_sandstone.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_clay.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_clay.png"
+      },
+      "author": "celeron55, Perttu Ahola (the README's default author for media it does not list)",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "926642b43c5dd6fbbe0e251b9e1ecfa78e9d9013097f4c1117a608939b01166e",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/clay.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_snow.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_snow.png"
+      },
+      "author": "Gambit",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "75316364cbe8b953d667c33bda62ebb363568c32c20b16f6deeced17d38d0e18",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/snow_block.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_ice.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_ice.png"
+      },
+      "author": "asl97",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "e43b9fd2672302443a49f98c3276d5f5f6191777ff5b67d3b7bbc47df306a557",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/ice.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_pine_tree.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_pine_tree.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "760d771193e1358f0d900580faccf5c9a9e1be450c639bd7194adfaa251f9fc4",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/spruce_log.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "listed in the README under its earlier name default_pinetree.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_pine_tree_top.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_pine_tree_top.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "f6e9b21cf30aa9d422fa49dc0c57d7aa1071f3beffd98ba29dd67fde3d8f3e6b",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/spruce_log_top.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "listed in the README under its earlier name default_pinetree_top.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_pine_wood.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_pine_wood.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "d42fb831a998bafadca375f1f3e54c5ba59bac57e00f18edb817cbbc25e2ce17",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/spruce_planks.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "listed in the README under its earlier name default_pinewood.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_pine_needles.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_pine_needles.png"
+      },
+      "author": "Splizard",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "c22b03808d6731f3bf5eb00c79172248ab7e700c33666adbf68193a48d2611a9",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/spruce_leaves.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_aspen_tree.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_aspen_tree.png"
+      },
+      "author": "sofar",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "10750f31872ef0a63cb11d10302806e412ec0bc3622b087c37958c04692306af",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/birch_log.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_aspen_tree_top.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_aspen_tree_top.png"
+      },
+      "author": "sofar, derived from default_pine_tree_top by paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "62b938c97c485afd7831b0f14a80b4e2aa5af17367cd12911a17060e3e996fca",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/birch_log_top.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_aspen_wood.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_aspen_wood.png"
+      },
+      "author": "sofar, derived from default_pine_wood by paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "a44a0f116f830a2e0e9895111524e152bcbdbd49d0572bec2bcd7d935f2fc684",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/birch_planks.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_aspen_leaves.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_aspen_leaves.png"
+      },
+      "author": "BlockMen, derived from a texture by sofar",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "db5bf86464c7370b6645f1fa7586fadc9b421bd4166922d0397845a66a343c96",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/birch_leaves.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_jungletree.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_jungletree.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "01d6165dfe20bd522d3fb9f642a6881f38a7718df5ca37d6cfd2fa13cd46f5df",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/jungle_log.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "Cisoun's texture pack"
+    },
+    {
+      "file": "media/minetest_game/default/default_jungletree_top.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_jungletree_top.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "ffa80ca7c352c0d08b95253b9584a28f71a3fb9526887166aead668da1d05fa9",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/jungle_log_top.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_junglewood.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_junglewood.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "f7f30806a9ad46e2050638259c4c271b4897eedefff43c0a33ce2e64b08f8386",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/jungle_planks.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_jungleleaves.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_jungleleaves.png"
+      },
+      "author": "PilzAdam",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "aaca53c761ebb695a316169491147eb014ebafdde10bc56e8b9740f774ad4cb5",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/jungle_leaves.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_acacia_tree.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_acacia_tree.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "3ad03feef0032ec96c27f907a1b3fad940f5d1f28c147b845e115a8261e335ad",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/acacia_log.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_acacia_tree_top.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_acacia_tree_top.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "0ae1c051a48031e1093c93a49a6aa917c2e6829ad1385de96b5862256b4fbc72",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/acacia_log_top.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_acacia_wood.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_acacia_wood.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "eee592d2cc72db5fdb84057e4114a9e05b3a932b9f34f37b8613379a597326d0",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/acacia_planks.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_acacia_leaves.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_acacia_leaves.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "ca31299e4e2040168897cebde30446e9906192d47c2697008f4300d905c8e7ed",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/acacia_leaves.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_bookshelf.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_bookshelf.png"
+      },
+      "author": "celeron55, Perttu Ahola (the README's default author for media it does not list)",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "bb459b0bfe5086d4ac0d50340c1284f80a375e6dfddae11d2e4294e03b442bc7",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/bookshelf.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_obsidian_glass.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_obsidian_glass.png"
+      },
+      "author": "PilzAdam",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "2b68ddd6cc4391ef4798df9576a578ff0293d2041789a1561598c1bcb385598e",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/tinted_glass.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_sapling.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_sapling.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "4f24eb4a4ba7f39a82760e6ebc8ed1ac4c695db50d1759c9ca42a45432a098f5",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/oak_sapling.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "Cisoun's texture pack"
+    },
+    {
+      "file": "media/minetest_game/default/default_pine_sapling.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_pine_sapling.png"
+      },
+      "author": "Splizard",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "9c780b671aa5813e944a2ed3213d0f18a2871e2cab1a5c8b8378f373c829c372",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/spruce_sapling.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_aspen_sapling.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_aspen_sapling.png"
+      },
+      "author": "sofar",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "05360e2e9e44bfc02620b802c3020779d9c26c959bc11e6f35d05d0ad801d3ef",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/birch_sapling.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_junglesapling.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_junglesapling.png"
+      },
+      "author": "PilzAdam",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "548e9141f38703ef25dabfa0528bc9f570f8453cbb4137c5a8e06fd7cdf620eb",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/jungle_sapling.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_acacia_sapling.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_acacia_sapling.png"
+      },
+      "author": "paramat",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "75cab79653c6b1fdc88f37e85edad016571de1cdfb9a4552cdc30c6e4e8b5fb2",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/acacia_sapling.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_fern_1.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_fern_1.png"
+      },
+      "author": "Mossmanikin",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "57a02789f346716b1e6961f4db2836914eae6badf5f0c9a96714e2acacb4ec14",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/fern.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_dry_shrub.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_dry_shrub.png"
+      },
+      "author": "Extex101, derived from the original texture by celeron55",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "48a8ad92def5558e1709c0d861cf8ed7b52b2b2d98502fb1556505eb4f454319",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/dead_bush.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_papyrus.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_papyrus.png"
+      },
+      "author": "Calinou",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "7820e10c28d19634f6fde548430bf6db2bf0e5e72f1b42160ff2f11150df39f1",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/sugar_cane.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_cactus_side.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_cactus_side.png"
+      },
+      "author": "celeron55, Perttu Ahola (the README's default author for media it does not list)",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "82568dbb216b111c35b6dc3e7e8564449bf4b5e28099a7926399cb2f9f850ba2",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/cactus_side.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_cactus_top.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_cactus_top.png"
+      },
+      "author": "celeron55, Perttu Ahola (the README's default author for media it does not list)",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "20fc53d2f9058a316d922561dcb6b568b74995133860330ce46827caae45be28",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/cactus_top.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_mineral_coal.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_mineral_coal.png"
+      },
+      "author": "celeron55, Perttu Ahola (the README's default author for media it does not list)",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "ba09ff6a6ede71b486e15d998e2c7ae1a6688a450b08289bc643239c71effa56",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/coal_ore.png"
+      ],
+      "transformation": "composited over default_stone.png (as Minetest Game layers its minerals) and re-encoded as 8-bit RGBA PNG"
+    },
+    {
+      "file": "media/minetest_game/default/default_mineral_copper.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_mineral_copper.png"
+      },
+      "author": "Calinou",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "f32e171bb88695fc5f3479bb689c3b70eef006e360234efce02b3d643cac96ee",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/copper_ore.png"
+      ],
+      "transformation": "composited over default_stone.png (as Minetest Game layers its minerals) and re-encoded as 8-bit RGBA PNG"
+    },
+    {
+      "file": "media/minetest_game/default/default_mineral_iron.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_mineral_iron.png"
+      },
+      "author": "celeron55, Perttu Ahola (the README's default author for media it does not list)",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "ebfc0d78f5a7c71bc74787b5a6bce043ccbee0fe80c67c212c5b9c03bee8e523",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/iron_ore.png"
+      ],
+      "transformation": "composited over default_stone.png (as Minetest Game layers its minerals) and re-encoded as 8-bit RGBA PNG"
+    },
+    {
+      "file": "media/minetest_game/default/default_mineral_gold.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_mineral_gold.png"
+      },
+      "author": "PilzAdam",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "ab8f4c098b640297e5e32431964ac51aa9efef707692cb7caf80ba8961f9510c",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/gold_ore.png"
+      ],
+      "transformation": "composited over default_stone.png (as Minetest Game layers its minerals) and re-encoded as 8-bit RGBA PNG"
+    },
+    {
+      "file": "media/minetest_game/default/default_mineral_diamond.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_mineral_diamond.png"
+      },
+      "author": "InfinityProject",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "1610647a28bf6d487ddd8593606d2325a03a0fbad757fa0bcbd7f6d6c2ee0b5e",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/diamond_ore.png"
+      ],
+      "transformation": "composited over default_stone.png (as Minetest Game layers its minerals) and re-encoded as 8-bit RGBA PNG"
+    },
+    {
+      "file": "media/minetest_game/default/default_coal_block.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_coal_block.png"
+      },
+      "author": "Zeg9",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "a7ad668c9e0dce53ecfff19e2643446479f6f5b7fe4d1c63812c2fe03626b1aa",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/coal_block.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_copper_block.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_copper_block.png"
+      },
+      "author": "kilbith",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "529e101fe1be40c2057287132722f418e6c2fb415197ceff17fdfeb06ca50bd0",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/copper_block.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_steel_block.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_steel_block.png"
+      },
+      "author": "kilbith",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "2ea2a1dbb8a576776d7e0ee67f808b188c09df428db8110b080963435b286580",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/iron_block.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_gold_block.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_gold_block.png"
+      },
+      "author": "kilbith",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "b3fadf50419b836df4a6bc3ab09f0d93e1dc672dc3464758ae8efd9f3fdeb20a",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/gold_block.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_diamond_block.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_diamond_block.png"
+      },
+      "author": "Gambit",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "9f7c2774767c20edce3c307154ea2648b3a74318e2ca547de38ef849de89e950",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/diamond_block.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/flowers/flowers_dandelion_yellow.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/flowers/textures/flowers_dandelion_yellow.png"
+      },
+      "author": "paramat, derived from a texture by RHRhino",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "4749a3c62340bd3d2a525247809aa0b2c4974814108f796184011a4623524a2e",
+      "credits": "mods/flowers/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/dandelion.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/flowers/flowers_dandelion_white.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/flowers/textures/flowers_dandelion_white.png"
+      },
+      "author": "RHRhino",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "898547f89ffe5b39f3d19a0cea7652974649855c605b48c5e3dbeaff02a3a7ec",
+      "credits": "mods/flowers/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/oxeye_daisy.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/flowers/flowers_rose.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/flowers/textures/flowers_rose.png"
+      },
+      "author": "RHRhino",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "37913e27ecc2753b9bfbecb9891201828927d8b5df137fb9cf7070d273d7574e",
+      "credits": "mods/flowers/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/poppy.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/flowers/flowers_tulip.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/flowers/textures/flowers_tulip.png"
+      },
+      "author": "RHRhino",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "5b3ec63bc2b6aa165ea111a33ffac0d5c4701b2a499e76c35c08e85299c46aab",
+      "credits": "mods/flowers/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/orange_tulip.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/flowers/flowers_geranium.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/flowers/textures/flowers_geranium.png"
+      },
+      "author": "RHRhino",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "b42c5f5c0b214c241a32b6854185538bfef7a3245fb1250b3b7903cbd72a045b",
+      "credits": "mods/flowers/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/cornflower.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/flowers/flowers_viola.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/flowers/textures/flowers_viola.png"
+      },
+      "author": "RHRhino",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "1926868b8a70d5342dabc4aabcc6b52454ecf2b335082b1cbdfd302873a6d4f6",
+      "credits": "mods/flowers/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/allium.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/flowers/flowers_mushroom_brown.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/flowers/textures/flowers_mushroom_brown.png"
+      },
+      "author": "Gambit",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "e092edd1b2572e8c4bffbc3316b5221a81ba7c304c073ddb5bb0ed0d81e6c10e",
+      "credits": "mods/flowers/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/brown_mushroom.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/flowers/flowers_mushroom_red.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/flowers/textures/flowers_mushroom_red.png"
+      },
+      "author": "Gambit",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "5bd0779191cbe1f7affa581fc9ae452a55f2a3495e4c9a1babbe99e89d13cc3c",
+      "credits": "mods/flowers/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/red_mushroom.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_grey.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_grey.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "e398f409d3fefc43aab4b06412636fd7dae5cdf06d61b801799af6eeffd6b0d2",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/light_gray_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_dark_grey.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_dark_grey.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "069d73e7ba7b9c24ab3ca32f11e83303e3f8fed72aa190a61602967987b11c32",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/gray_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_brown.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_brown.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "feca712ec496ab4c9fc79a580a79d950ede4125c84d08416a5403076a31ef860",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/brown_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_pink.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_pink.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "5b04dd21a3ff8920786b73ec65d1c2895e07edd831b87f5ee75a347e2a5ae67c",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/pink_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_magenta.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_magenta.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "33427b91ed1f89c61d7ad28db7f490cbf282d15b801e6869ba0b0bb0847722e5",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/magenta_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_cyan.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_cyan.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "d28e480a60a9832f7e3e8adf621838171fdee2408d6cca48ff02b53ee6a41bb4",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/cyan_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/wool/wool_dark_green.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/textures/wool_dark_green.png"
+      },
+      "author": "Cisoun",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "40cc205649e63f5f69c333cd1f70e1027ddd73d158c51a7a2029d6a191c5aaf0",
+      "credits": "mods/wool/README.md",
+      "destinations": [
+        "assets/minecraft/textures/block/green_wool.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_apple.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_apple.png"
+      },
+      "author": "celeron55, Perttu Ahola (the README's default author for media it does not list)",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "d0ce76d0c9c4da313a19af98420a0e010d6978fdfacaa0e68426a41fa12e2b41",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/apple.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_stick.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_stick.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "a0f025ef8d281071815ab3d74d8bcd05fbff9d5c7838782b7860e711b2602420",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/stick.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_coal_lump.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_coal_lump.png"
+      },
+      "author": "Gambit",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "df88345ddf3c30cc6e9703a973ccc077c0d1a893a160e6e359b4f595db5aefd1",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/coal.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_copper_lump.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_copper_lump.png"
+      },
+      "author": "Gambit",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "f50b559a5601b96be598bd2aba3981b9c74f53f717bd945cae702eda9450ac81",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/raw_copper.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_iron_lump.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_iron_lump.png"
+      },
+      "author": "Gambit",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "e1c64831426e5a239f4fbce2812c428a91f31340b222e0e3e336f735a7be2051",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/raw_iron.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_gold_lump.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_gold_lump.png"
+      },
+      "author": "Gambit",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "2a7a22338ac3515f70ca5e39097df3481f27d790704aebe40d4ed013eb8002a8",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/raw_gold.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_copper_ingot.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_copper_ingot.png"
+      },
+      "author": "Gambit",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "596b3442c02a00f81e0b69ec8bff3359ed3be2fff664169d23d5122d81f20c18",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/copper_ingot.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_steel_ingot.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_steel_ingot.png"
+      },
+      "author": "celeron55, Perttu Ahola (the README's default author for media it does not list)",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "cbb71e7f969455c65c2914cda85328e77d82e0842273fbd284dd02401c979586",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/iron_ingot.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "the README credits BlockMen for default_iron_ingot.png, an earlier name"
+    },
+    {
+      "file": "media/minetest_game/default/default_gold_ingot.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_gold_ingot.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "484e30dca4bd553dd46172af4177032fd94a022200bff11f9146ee6953249d4b",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/gold_ingot.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_diamond.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_diamond.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "4ad77fd27fce83fbb86d468ae159d2befdc007dac2190503c7d12b13bc42cc71",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/diamond.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_clay_lump.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_clay_lump.png"
+      },
+      "author": "Gambit",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "d0d683f758fe6f60828ebce5a427e64663ede0fffe2eaed8ea4da3663e028884",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/clay_ball.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_clay_brick.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_clay_brick.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "5047de932e9a66a50434dae9cc537da8f598520b91b10cf30e3b6f4462d8b314",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/brick.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_woodpick.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_woodpick.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "e25c7bf2dc5c6ef8e3f720ca4de1b5ad5e1f528c084eacbd2417e0f45c48e5b3",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/wooden_pickaxe.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_woodaxe.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_woodaxe.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "de18b39860291d64a03588db983ee12f4401232e77efdbaaef3ac71dafd2650b",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/wooden_axe.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_woodshovel.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_woodshovel.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "f7262ff463bd842a013b86194951f73f2374a450d1998af85e33619dcfa50039",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/wooden_shovel.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_woodsword.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_woodsword.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "07ebc3569e067b1b4a0b59827c2be3d5aaf21ceac0dd8cf97954745630d82462",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/wooden_sword.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_stonepick.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_stonepick.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "02fcd9ec24ab0cd9a456a92fad21146353a9a7847ac3175927cd94063f9c6c96",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/stone_pickaxe.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_stoneaxe.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_stoneaxe.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "f8a70350cef7b73d29f2fc7e96b220223b5513941d0f8694232e5d4ed0855b3e",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/stone_axe.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_stoneshovel.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_stoneshovel.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "c76f4bca384bb8b58e1ebb17dca7fa1a215cfca3344cf1ac21a38e71a33601dd",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/stone_shovel.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_stonesword.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_stonesword.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "4a0e9e435bad9c13dc56023f5c1348690e1249bfb2649258f96f0ebbf50303e7",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/stone_sword.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_steelpick.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_steelpick.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "28d5e8914a75ee34a526b8e1759b3401b76a2b30dea38011939e8dbde4d643eb",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/iron_pickaxe.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_steelaxe.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_steelaxe.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "fee391ea3ac062a3960c6f758fbb2312c1d979422ec1a4f85c01ef556bf7ba56",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/iron_axe.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_steelshovel.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_steelshovel.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "285e730856060d487b9df9d91021c3bcc5d4d3c8ee396b1d958afc03c5abbd18",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/iron_shovel.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_steelsword.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_steelsword.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "1053fef924d2ddc5e6b872d34fdfc77b4deb0dce03c2936d219207841a86e462",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/iron_sword.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_diamondpick.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_diamondpick.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "8d5ff217b9fe96fc08a70547a6ef0384255cda2a86a1b1073c41f4158cf14c42",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/diamond_pickaxe.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_diamondaxe.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_diamondaxe.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "3597e7a43572980c04814c3e8ee7d049bae625504604847c6f56031c7bcae8fc",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/diamond_axe.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_diamondshovel.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_diamondshovel.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "2d311c8f08d16cfb57f613d4b8aed0bd520b179df1399fea7bc5a964439f5016",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/diamond_shovel.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    },
+    {
+      "file": "media/minetest_game/default/default_tool_diamondsword.png",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/textures/default_tool_diamondsword.png"
+      },
+      "author": "BlockMen",
+      "license": "CC-BY-SA-3.0",
+      "sha256": "c73e01bf0181331bc62aa2841c0db27ad6d8f050bd655737cf22a843f72f1974",
+      "credits": "mods/default/README.md",
+      "destinations": [
+        "assets/minecraft/textures/item/diamond_sword.png"
+      ],
+      "transformation": "re-encoded as 8-bit RGBA PNG; pixels unchanged",
+      "note": "README: default_tool_*.png"
+    }
+  ],
+  "notices": [
+    {
+      "file": "notices/minetest_game-default-README.md",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/README.md"
+      },
+      "sha256": "5165b9590f20d4e2068380177d78c17f4a94bed98c97ddf9cc893818006a55d3"
+    },
+    {
+      "file": "notices/minetest_game-default-license.txt",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/default/license.txt"
+      },
+      "sha256": "bc382898f83c59701b9ca2ca3e21e82e34b4a9442f6d37332177caea61d32a43"
+    },
+    {
+      "file": "notices/minetest_game-wool-README.md",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/README.md"
+      },
+      "sha256": "78872b655c7566b87ae2607181470a4e91a7fd3307b7623cc125f7b33b95c1d5"
+    },
+    {
+      "file": "notices/minetest_game-wool-license.txt",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/wool/license.txt"
+      },
+      "sha256": "d682dc7e8b42c2e45cbd625f85000f09c7a1fd7bc517e8b1f51e1da9ed76ace0"
+    },
+    {
+      "file": "notices/minetest_game-flowers-README.md",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/flowers/README.md"
+      },
+      "sha256": "dba7e3a7ad8ab9c58bb3daa38b976c856d10a9db0d4660f41b28f00524f12d04"
+    },
+    {
+      "file": "notices/minetest_game-flowers-license.txt",
+      "origin": {
+        "repository": "https://github.com/luanti-org/minetest_game",
+        "revision": "9e895af6e9feb98332fa1a778001442f5669bc20",
+        "path": "mods/flowers/license.txt"
+      },
+      "sha256": "23daeabffdd7ac9a2b9f9fcfa2afd9f8c87bf8cceaf35a2297fe7fae4d724354"
+    }
+  ],
+  "licenses": [
+    {
+      "id": "CC-BY-SA-3.0",
+      "file": "licenses/CC-BY-SA-3.0.txt",
+      "origin": "https://creativecommons.org/licenses/by-sa/3.0/legalcode.txt",
+      "sha256": "3f941b3b89cf7b8370ceb83cc76d2120d471b58735d8ca60238a751a48d7f72f"
+    },
+    {
+      "id": "CC0-1.0",
+      "file": "licenses/CC0-1.0.txt",
+      "origin": "https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+    }
+  ],
+  "fonts": [
+    {
+      "file": "crates/horizon-theme/fonts/PixelifySans-Medium.ttf",
+      "license": "OFL-1.1",
+      "notice": "crates/horizon-theme/fonts/OFL-PixelifySans.txt",
+      "destinations": [
+        "assets/minecraft/font/open/pixelify_sans.ttf"
+      ],
+      "sha256": "5219b5ad08fde84e82b4a926614766c253379757eca86f56b766b0bdbfff69af",
+      "notice_sha256": "b66ba46f511a851ab09998b5a5a9fdbb102545a3864cb993095e1745996873a7",
+      "author": "The Pixelify Sans Project Authors"
+    }
+  ]
+}

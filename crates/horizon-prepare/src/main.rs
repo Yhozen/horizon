@@ -20,6 +20,7 @@ Usage: horizon-prepare [--prepare] [--server-jar PATH] [--minecraft-dir PATH] [-
        horizon-prepare panorama [--minecraft-dir PATH] [--root PATH]
        horizon-prepare fonts [--minecraft-dir PATH] [--root PATH]
        horizon-prepare packs [--minecraft-dir PATH] [--root PATH]
+       horizon-prepare open --out PATH [--root PATH] [--check] [--archive FILE]
 
   --prepare             Import the pinned game files from your own copy first
   --server-jar PATH     The pinned server jar you downloaded yourself
@@ -37,6 +38,11 @@ horizon-prepare panorama repairs the classic menu background in existing resourc
 horizon-prepare fonts adds the GNU Unifont glyphs (characters the bitmap fonts lack) the same way.
 horizon-prepare packs adds the built-in Programmer Art and High Contrast resource packs the same way.
 Full preparation also imports all three after extracting the client JAR's placeholders.
+
+horizon-prepare open builds Horizon Open Creative's resources (docs/open-creative.md) from the
+repository's content/open folder alone: no Minecraft install, Java or download. --check only
+verifies an existing open bundle at --out against its provenance record; --archive also packs the
+verified bundle into the browser's data archive (WEB.md).
 
 horizon-prepare sounds copies the pinned version's sounds (about 380 MB) from the official
 launcher's asset store into the same folder, checking every file. It is optional: without it the
@@ -58,7 +64,104 @@ fn default_root() -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+/// `horizon-prepare open`: the independent bundle. Reads only the repository's
+/// open inputs; never looks for Minecraft, its launcher or a JDK.
+#[cfg(not(feature = "open"))]
+fn open(_: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
+    eprintln!("horizon-prepare open: error: this build has no open bundle (the `open` feature)");
+    ExitCode::from(2)
+}
+#[cfg(feature = "open")]
+fn open(mut args: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
+    let (mut out, mut root, mut check, mut archive) = (None, None, false, None);
+    while let Some(arg) = args.next() {
+        let text = arg.to_string_lossy().into_owned();
+        let (flag, inline) = match text.split_once('=') {
+            Some((flag, value)) if flag.starts_with("--") => {
+                (flag.to_string(), Some(value.to_string()))
+            }
+            _ => (text.clone(), None),
+        };
+        let mut value = || {
+            inline
+                .clone()
+                .map(PathBuf::from)
+                .or_else(|| args.next().map(PathBuf::from))
+        };
+        match flag.as_str() {
+            "--out" => out = value(),
+            "--root" => root = value(),
+            "--check" => check = true,
+            "--archive" => archive = value(),
+            "-h" | "--help" => {
+                print!("{HELP}");
+                return ExitCode::SUCCESS;
+            }
+            _ => {
+                eprintln!("horizon-prepare open: error: unrecognized argument: {text}\n\n{HELP}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let Some(out) = out else {
+        eprintln!("horizon-prepare open: error: --out PATH is required\n\n{HELP}");
+        return ExitCode::from(2);
+    };
+    let pack = |files: usize| -> Result<usize, String> {
+        if let Some(path) = &archive {
+            let bytes = horizon_open_content::archive(&out)?;
+            if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("{}: {e}", parent.display()))?;
+            }
+            std::fs::write(path, &bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+            println!("{}: {} bytes", path.display(), bytes.len());
+        }
+        Ok(files)
+    };
+    if check {
+        return match horizon_open_content::verify(&out).and_then(pack) {
+            Ok(files) => {
+                println!(
+                    "{}: open bundle verified ({files} files, every one attributed)",
+                    out.display()
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let Some(root) = root.or_else(default_root) else {
+        eprintln!("horizon-prepare open: error: no research-lock.json beside this program or above the current folder; pass --root");
+        return ExitCode::from(2);
+    };
+    let result = horizon_open_content::build(&horizon_open_content::Inputs::at(&root))
+        .and_then(|bundle| horizon_open_content::write(&bundle, &out))
+        .and_then(|_| horizon_open_content::verify(&out))
+        .and_then(pack);
+    match result {
+        Ok(files) => {
+            println!(
+                "Horizon Open Creative resources: {files} files in {}",
+                out.display()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
+    // The open bundle needs none of what follows (Minecraft, its launcher, Java).
+    if std::env::args_os().nth(1).is_some_and(|a| a == "open") {
+        return open(std::env::args_os().skip(2));
+    }
     let mut options = horizon_prepare::Options {
         root: PathBuf::new(),
         import: false,

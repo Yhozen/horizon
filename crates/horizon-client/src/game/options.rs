@@ -104,6 +104,7 @@ impl Game<'_> {
         self.screen = Screen::Options;
         self.options_from_title = from_title;
         let ui = &mut self.ui.options;
+        ui.open_edition = self.options.profile.is_open();
         ui.open_at(!from_title && self.title.is_none(), page);
         let root = self.options.resources.clone();
         ui.languages = lang::available(&[&root]);

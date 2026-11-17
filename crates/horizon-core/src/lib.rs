@@ -6,6 +6,7 @@
 
 pub mod biome;
 pub mod carving;
+pub mod content_profile;
 pub mod density;
 pub mod fs;
 pub mod geometry;

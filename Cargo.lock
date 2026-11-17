@@ -1286,6 +1286,7 @@ dependencies = [
  "horizon-dualsense",
  "horizon-friends",
  "horizon-mods",
+ "horizon-open-content",
  "horizon-protocol",
  "horizon-server-files",
  "horizon-telemetry",
@@ -1379,6 +1380,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-open-content"
+version = "0.1.0"
+dependencies = [
+ "horizon-core",
+ "horizon-protocol",
+ "horizon-world",
+ "png",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "horizon-open-relay"
+version = "0.1.0"
+dependencies = [
+ "horizon-core",
+ "horizon-protocol",
+ "horizon-world",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "ureq",
+]
+
+[[package]]
 name = "horizon-port-pack"
 version = "0.1.0"
 dependencies = [
@@ -1395,6 +1421,7 @@ dependencies = [
 name = "horizon-prepare"
 version = "0.1.0"
 dependencies = [
+ "horizon-open-content",
  "regex",
  "sha1",
  "sha2",

@@ -1,7 +1,36 @@
 import { DurableObject } from "cloudflare:workers";
-import { closeSocket, openMinecraftPort } from "./multiplayer-port.ts";
+import { connect } from "cloudflare:sockets";
+import { closeSocket, openExternalMinecraftPort, openMinecraftPort } from "./multiplayer-port.ts";
+import type { World } from "./worlds.ts";
+export { availableWorlds, parseWorld, WORLDS, type World } from "./worlds.ts";
 
 type TcpConnection = Pick<Socket, "readable" | "writable" | "close" | "closed">;
+
+export interface MultiplayerEnv {
+  /** The shared Horizon world (open.rccpr.tech's `SharedWorld` entrypoint). */
+  SHARED_WORLD?: Fetcher;
+  /** The Java server Java Edition players join too (`host:port`). */
+  MINECRAFT_SERVER?: string;
+  MINECRAFT?: DurableObjectNamespace<Minecraft>;
+}
+
+// Java players use the same Java server address directly.
+export async function connectMultiplayer(request: Request, env: MultiplayerEnv,
+  waitUntil: (task: Promise<unknown>) => void, world?: World): Promise<Response> {
+  // Without a choice (older pages), the shared world when bound, as before.
+  const chosen = world ?? (env.SHARED_WORLD ? "shared" : "survival");
+  if (chosen === "shared") {
+    if (!env.SHARED_WORLD) throw new Error("The shared world is not configured");
+    return env.SHARED_WORLD.fetch(new Request("https://shared-world.internal/connect",
+      { headers: { Upgrade: "websocket" } }));
+  }
+  const address = env.MINECRAFT_SERVER;
+  if (address) {
+    return bridgeWebSocket(() => openExternalMinecraftPort(address, connect), waitUntil);
+  }
+  if (!env.MINECRAFT) throw new Error("Minecraft server is not configured");
+  return env.MINECRAFT.getByName("preview-world").fetch(request);
+}
 
 // The connector chooses the one trusted destination; no client-controlled host is accepted.
 export function bridgeWebSocket(open: () => Promise<TcpConnection>, waitUntil: (task: Promise<unknown>) => void): Response {
@@ -69,6 +98,9 @@ export class Minecraft extends DurableObject<unknown> {
       void ctx.blockConcurrencyWhile(() => ctx.container!.setInactivityTimeout(5 * 60 * 1000));
     }
   }
+
+  // Clear any keepalive left by the retired Java relay.
+  async alarm() { await this.ctx.storage.deleteAlarm(); }
 
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {

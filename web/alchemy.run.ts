@@ -3,8 +3,9 @@ import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as Effect from "effect/Effect";
 import { readFile } from "node:fs/promises";
 import { api } from "./scripts/cloudflare.ts";
-import { source, allowedEmails } from "./scripts/config.mjs";
+import { source, allowedEmails, javaServer } from "./scripts/config.mjs";
 import { uploadAssets } from "./scripts/artifacts.mjs";
+import { minecraftServer } from "./scripts/multiplayer-config.mjs";
 
 interface Upload {
   releaseId: string;
@@ -31,6 +32,8 @@ export default Alchemy.Stack("HorizonWeb", {
     name: "Horizon email code", type: "onetimepin", config: {},
   });
   const published = yield* PublishAssets({ ...upload, bucket: bucket.bucketName });
+  const server = yield* Effect.tryPromise(() => minecraftServer(undefined, undefined,
+    `${javaServer.hostname}:${javaServer.port}`)).pipe(Effect.orDie);
   const game = yield* Cloudflare.Worker("Game", {
     name: "horizon-web-preview",
     domain: "horizon.rccpr.tech",
@@ -45,6 +48,10 @@ export default Alchemy.Stack("HorizonWeb", {
     entrypoints: { default: { cache: { enabled: false } }, Assets: { cache: { enabled: true } } },
     env: {
       BUCKET: bucket, ALLOWED_EMAILS: allowedEmails.join(","), RELEASE_ID: published.releaseId,
+      // Multiplayer is the shared Horizon world that open.rccpr.tech's players use too: its
+      // Worker (web/scripts/deploy-open.mjs, outside this stack) serves it to this binding.
+      SHARED_WORLD: Cloudflare.WorkerEntrypoint(Cloudflare.Worker.lookup({ name: "horizon-open" }), "SharedWorld"),
+      MINECRAFT_SERVER: server,
       MINECRAFT: Cloudflare.Container("Minecraft", {
         className: "Minecraft",
         image: "docker.io/itzg/minecraft-server@sha256:0501cb2609925a658432eb31b4a64452c3f37761893f5873ec60df80c91e434e",
@@ -53,12 +60,24 @@ export default Alchemy.Stack("HorizonWeb", {
         env: {
           EULA: "TRUE", TYPE: "VANILLA", VERSION: "26.3", ONLINE_MODE: "FALSE",
           ENFORCE_SECURE_PROFILE: "FALSE", MEMORY: "1536M", VIEW_DISTANCE: "4",
-          SIMULATION_DISTANCE: "4", MODE: "creative", DIFFICULTY: "peaceful",
+          SIMULATION_DISTANCE: "4", MODE: "survival", FORCE_GAMEMODE: "TRUE", DIFFICULTY: "normal",
           MAX_PLAYERS: "10", SPAWN_PROTECTION: "0", ENABLE_RCON: "FALSE", ENABLE_WHITELIST: "FALSE",
         },
       }),
     },
     observability: { enabled: true },
   });
-  return { url: game.url, bucketName: bucket.bucketName, releaseId: published.releaseId };
+  if (javaServer.address) {
+    yield* Cloudflare.DNS.Record("JavaHostname", {
+      zoneId: javaServer.zoneId, type: "A", name: javaServer.hostname,
+      content: javaServer.address, proxied: false, ttl: 60,
+    });
+    yield* Cloudflare.DNS.Record("JavaDiscovery", {
+      zoneId: javaServer.zoneId, type: "SRV", name: `_minecraft._tcp.${javaServer.hostname}`,
+      content: { priority: 0, weight: 0, port: javaServer.port, target: javaServer.hostname }, ttl: 60,
+    });
+  }
+  return { url: game.url, bucketName: bucket.bucketName, releaseId: published.releaseId,
+    javaServer: server === `${javaServer.hostname}:${javaServer.port}` ? javaServer.hostname
+      : server || "Not configured; browser-only Cloudflare container" };
 }));

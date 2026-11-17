@@ -1290,8 +1290,21 @@ impl HudRenderer {
         batch: &HudBatch,
         size: [u32; 2],
     ) {
+        self.upload_patches(uploads, encoder, &batch.patches);
+        if batch.vertices.is_empty() || size.contains(&0) {
+            return;
+        }
+        self.prepare_vertices(device, uploads, encoder, batch, size);
+    }
+    /// Copy atlas patches into the interface atlas.
+    pub fn upload_patches(
+        &mut self,
+        uploads: &mut crate::gfx::upload::Uploads,
+        encoder: &mut wgpu::CommandEncoder,
+        patches: &[crate::font::Patch],
+    ) {
         if let Some(texture) = &self.atlas_texture {
-            for p in &batch.patches {
+            for p in patches {
                 uploads.texture(
                     encoder,
                     wgpu::TexelCopyTextureInfo {
@@ -1310,9 +1323,15 @@ impl HudRenderer {
                 );
             }
         }
-        if batch.vertices.is_empty() || size.contains(&0) {
-            return;
-        }
+    }
+    fn prepare_vertices(
+        &mut self,
+        device: &wgpu::Device,
+        uploads: &mut crate::gfx::upload::Uploads,
+        encoder: &mut wgpu::CommandEncoder,
+        batch: &HudBatch,
+        size: [u32; 2],
+    ) {
         let count = batch.vertices.len() as u64;
         if count > self.capacity {
             self.capacity = count.next_power_of_two();

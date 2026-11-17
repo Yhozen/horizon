@@ -84,6 +84,9 @@ fn format_double(v: f64) -> String {
 impl Game<'_> {
     /// Commands.performCommand for a line without its slash.
     pub(super) fn run_command(&mut self, command: &str) {
+        if !self.open_allows_command(command) {
+            return;
+        }
         if self.mod_command(command) {
             return;
         }

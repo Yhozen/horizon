@@ -30,8 +30,8 @@ class WebServeTests(unittest.TestCase):
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_bytes(name.encode())
             self.assets[name] = {"url": url}
-        (site / "index.html").write_text("<script src='/loader.js'></script>")
-        (site / "loader.js").write_text("fetch('/release.json')")
+        (site / "index.html").write_text("<script type='module' src='/menu.js'></script>")
+        (site / "menu.js").write_text("fetch('/release.json')")
         (site / "release.json").write_text(json.dumps({"assets": self.assets}))
         # Internal packaging files must not become public URLs.
         (root / "upload.json").write_text("internal")
@@ -57,7 +57,7 @@ class WebServeTests(unittest.TestCase):
             conn.close()
 
     def test_shell_manifest_and_every_asset_load(self):
-        for path in ("/", "/loader.js"):
+        for path in ("/", "/menu.js"):
             self.assertEqual(self.request(path)[0], 200)
         status, headers, data = self.request("/release.json")
         self.assertEqual(status, 200)

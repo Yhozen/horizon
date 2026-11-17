@@ -7,7 +7,7 @@ const path = `/assets/${"a".repeat(64)}/horizon-data.bin`;
 const request = (suffix = path, init) => new Request(`https://game.test${suffix}`, init);
 const env = { ALLOWED_EMAILS: allowedEmails.join(",") };
 const shell = Object.fromEntries([["index.html", "text/html"], ["release.json", "application/json"],
-  ["loader.js", "text/javascript"], ["cache.js", "text/javascript"], ["release.js", "text/javascript"]]
+  ["menu.js", "text/javascript"], ["cache.js", "text/javascript"], ["release.js", "text/javascript"]]
   .map(([name, contentType]) => [`/${name}`, { body: "shell ✓", contentType }]));
 const gateway = (request, env, ctx) => handleGateway(request, env, ctx, shell);
 const identity = { getIdentity: async () => ({ email: allowedEmails[0] }) };
@@ -33,6 +33,37 @@ test("multiplayer requires native Access and same origin, and strips credentials
   assert.equal((await handleGateway(request("/connect"), env, ctx, shell, connect)).status, 426);
   assert.equal((await handleGateway(request("/connect?host=attacker.test", { headers }), env, ctx, shell, connect)).status, 200);
   assert.equal(calls, 1);
+});
+
+test("a page chooses among the deployment's worlds by name, and learns which exist", async () => {
+  const chosen = [];
+  const connect = async (incoming, world) => { chosen.push(world); return new Response("accepted"); };
+  const headers = { Upgrade: "websocket", Origin: "https://game.test" };
+  const ctx = { exports: {}, access: identity };
+  const worlds = ["survival", "shared"];
+  for (const query of ["", "?world=survival", "?world=shared"]) {
+    assert.equal((await handleGateway(request(`/connect${query}`, { headers }), env, ctx, shell, connect, worlds)).status, 200);
+  }
+  assert.deepEqual(chosen, [null, "survival", "shared"]);
+  for (const query of ["?world=solo", "?world=attacker.test:25565"]) {
+    assert.equal((await handleGateway(request(`/connect${query}`, { headers }), env, ctx, shell, connect, worlds)).status, 404);
+  }
+  assert.equal((await handleGateway(request("/connect?world=shared", { headers }), env, ctx, shell, connect, ["survival"])).status, 404);
+  assert.equal(chosen.length, 3);
+  const list = await handleGateway(request("/worlds.json"), env, ctx, shell, connect, worlds);
+  assert.deepEqual(await list.json(), { worlds });
+  // Like the rest of the site, the list needs Access.
+  assert.equal((await handleGateway(request("/worlds.json"), env, { exports: {} }, shell, connect, worlds)).status, 403);
+});
+
+test("the private Worker offers the worlds its configuration has", async () => {
+  const { availableWorlds, parseWorld } = await import("../src/worlds.ts");
+  assert.deepEqual(availableWorlds({}), []);
+  assert.deepEqual(availableWorlds({ MINECRAFT_SERVER: "survival.example:25565" }), ["survival"]);
+  assert.deepEqual(availableWorlds({ MINECRAFT_SERVER: "survival.example:25565", SHARED_WORLD: {} }), ["survival", "shared"]);
+  assert.equal(parseWorld("shared"), "shared");
+  assert.equal(parseWorld("elsewhere"), undefined);
+  assert.equal(parseWorld(null), undefined);
 });
 
 test("anonymous and forged-header requests never reach assets or a warm internal cache", async () => {

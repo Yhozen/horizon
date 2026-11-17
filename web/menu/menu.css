@@ -1,0 +1,160 @@
+/* The landing menu (menu/main.ts): the chosen world's picture fills the screen, the choices
+   sit on glass, and "How to play" slides in from the right. Tokens from crates/horizon-theme
+   (dark). scripts/menu.mjs fills in the fonts, icons and art. */
+:root {
+  --page: #0f0d17; --surface: #1a1727; --plate: #2b2641; --plate-soft: #221e34;
+  --ink: #ecedf3; --ink-soft: #c5c7d1; --muted: #a29cb8; --accent: #9a86ff; --face: #5b3fd6; --face-hover: #6a50e4;
+  --success: #45c27a; --danger: #f07a68; --warn: #e2b04a; --rule: rgba(255, 255, 255, 0.08);
+  --font: Geist, ui-sans-serif, system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
+  --radius: 8px; --radius-plate: 12px;
+  --quick: 150ms; --ease-quick: cubic-bezier(0.4, 0, 0.2, 1);
+  --move: 240ms; --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --enter: 600ms; --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --stagger: 40ms; --rise: 8px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--ink);
+  font: 14px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; color: inherit; }
+a { color: var(--accent); }
+kbd { font: 12px/1 var(--mono); padding: 3px 6px; border-radius: 5px; background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08); color: var(--ink); white-space: nowrap; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.muted { color: var(--muted); }
+
+/* The game: the whole window. winit follows the canvas's size, so CSS sets it. */
+canvas#horizon { position: fixed; inset: 0; display: block; width: 100vw !important; height: 100vh !important;
+  background: #000; outline: none; }
+#menu { position: fixed; inset: 0; z-index: 1; pointer-events: none; }
+#menu > * { pointer-events: auto; }
+
+.icon { width: 16px; height: 16px; flex: none; display: inline-block; background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat; }
+
+/* Controls */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 14px;
+  border: 0; border-radius: var(--radius); background: rgba(255, 255, 255, 0.07); cursor: pointer;
+  transition: transform 160ms var(--ease-out), background-color var(--quick) var(--ease-quick); }
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.btn:focus-visible, .field:focus-visible, .card:focus-visible, .check input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.11); }
+  .btn.primary:hover:not(:disabled) { background: var(--face-hover); }
+}
+.btn.primary { background: var(--face); color: #fff; font-weight: 500; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn.big { height: 48px; padding: 0 22px; font-size: 15px; border-radius: 10px; }
+.glass { background: rgba(26, 23, 39, 0.55); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.field { height: 40px; width: 240px; padding: 0 12px; border-radius: var(--radius); border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.35); outline: none; transition: border-color var(--quick) var(--ease-quick); }
+.field[aria-invalid="true"] { border-color: var(--danger); }
+.hint { margin: 6px 0 0 26px; font-size: 12px; color: var(--muted); min-height: 18px; }
+.hint.bad { color: var(--danger); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px rgba(69, 194, 122, 0.16); flex: none; }
+.dot.idle { background: var(--muted); box-shadow: none; }
+
+/* Entrance: once per visit, one rise per group with a short stagger. */
+.rise { opacity: 0; transform: translateY(var(--rise)); animation: rise var(--enter) var(--ease-out) forwards;
+  animation-delay: calc(var(--n, 0) * var(--stagger)); }
+@keyframes rise { to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } }
+
+/* Layout */
+.menu { position: absolute; inset: 0; overflow: hidden; background: var(--page); }
+.backdrop { position: absolute; inset: 0; }
+.art { position: absolute; inset: 0; background-position: center; background-size: cover; background-repeat: no-repeat; opacity: 0; transition: opacity 500ms var(--ease-out); }
+.art.shown { opacity: 1; }
+.backdrop::after { content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, rgba(15, 13, 23, 0.9) 0%, rgba(15, 13, 23, 0.6) 40%, rgba(15, 13, 23, 0.08) 75%),
+    linear-gradient(transparent 55%, rgba(15, 13, 23, 0.8)); }
+.bar { position: absolute; top: 0; right: 0; display: flex; gap: 8px; padding: 20px 24px; z-index: 2; }
+.content { position: absolute; left: clamp(24px, 5vw, 64px); bottom: clamp(24px, 7vh, 64px); width: min(600px, calc(100% - 48px));
+  display: flex; flex-direction: column; gap: 24px; z-index: 1; }
+h1 { margin: 0; font-size: clamp(40px, 6vw, 72px); line-height: 1; letter-spacing: -0.035em; font-weight: 500; }
+.tagline { margin: -12px 0 0; font-size: 17px; line-height: 1.45; color: var(--ink-soft); max-width: 44ch; }
+.play { display: flex; flex-direction: column; gap: 20px; }
+.who { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; }
+.who .label { display: flex; color: var(--muted); }
+.who .hint { flex-basis: 100%; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.card { appearance: none; border: 0; color: inherit; text-align: left; cursor: pointer; padding: 14px; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 6px; min-height: 112px;
+  transition: transform 160ms var(--ease-out), box-shadow var(--quick) var(--ease-quick), background-color var(--quick) var(--ease-quick); }
+.card:active:not(:disabled) { transform: scale(0.97); }
+.card[aria-checked="true"] { background: rgba(91, 63, 214, 0.4); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 0 1px rgba(154, 134, 255, 0.6); }
+.card.off { opacity: 0.55; cursor: not-allowed; }
+.card:disabled:not(.off) { cursor: default; }
+.card .t { font-weight: 500; }
+.card .d { font-size: 12px; color: var(--ink-soft); }
+.card .n { margin-top: auto; display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--ink-soft); }
+.caveat { margin: -8px 0 0; font-size: 12px; color: var(--warn); }
+.error { margin: -8px 0 0; font-size: 13px; color: var(--danger); }
+.go { display: flex; align-items: center; gap: 16px; }
+.go > .btn, .go > .progress { width: 300px; flex: none; }
+.go .note { font-size: 12px; color: var(--muted); }
+
+/* Loading: the Play button becomes the progress bar, one step at a time. */
+.progress { position: relative; height: 48px; border-radius: 10px; background: rgba(255, 255, 255, 0.07); overflow: hidden;
+  display: flex; align-items: center; padding: 0 8px 0 16px; gap: 12px; animation: fade 200ms var(--ease-out); }
+.progress .fill { position: absolute; inset: 0; background: rgba(91, 63, 214, 0.6); transform-origin: left;
+  transform: scaleX(var(--p, 0)); transition: transform 400ms var(--ease-out); }
+.progress .what { position: relative; flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.progress .cancel { position: relative; height: 32px; padding: 0 12px; font-size: 13px; }
+
+/* How to play: in from the right, out to the right. */
+.sheet { position: absolute; top: 12px; right: 12px; bottom: 12px; width: min(400px, calc(100% - 24px)); border-radius: 16px; z-index: 3;
+  padding: 24px; overflow: auto; background: rgba(18, 16, 28, 0.84); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(255, 255, 255, 0.06), 0 24px 48px rgba(0, 0, 0, 0.3);
+  transform: translateX(calc(100% + 24px)); visibility: hidden;
+  transition: transform 400ms var(--ease-drawer), visibility 0s linear 400ms; }
+.sheet.open { transform: none; visibility: visible; transition: transform 400ms var(--ease-drawer), visibility 0s; }
+.sheet h2 { margin: 0 0 4px; font-size: 20px; font-weight: 500; letter-spacing: -0.01em; }
+.sheet > p { margin: 0 0 8px; font-size: 13px; }
+.sheet section { padding: 18px 0; border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 10px; }
+.sheet section:first-of-type { border-top: 0; }
+.sheet h3 { margin: 0; display: flex; gap: 8px; align-items: center; font-size: 14px; font-weight: 500; }
+.sheet section p { margin: 0; color: var(--ink-soft); font-size: 13px; }
+.sheet strong { color: var(--ink); font-weight: 500; }
+.sheet .close { position: absolute; top: 16px; right: 16px; width: 32px; height: 32px; padding: 0; }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; margin: 0; font-size: 13px; color: var(--ink-soft); align-items: center; }
+.keys dt { justify-self: start; }
+.keys dd { margin: 0; }
+.check { display: flex; align-items: center; gap: 10px; font-size: 13px; cursor: pointer; }
+.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--face); }
+.sheet .credit { word-break: break-word; }
+
+/* In game: a hint that fades out on its own. */
+.hint-toast { position: fixed; left: 50%; top: 24px; transform: translateX(-50%); padding: 10px 14px; border-radius: 10px;
+  background: rgba(15, 13, 23, 0.72); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); display: flex; gap: 12px;
+  align-items: center; font-size: 13px; pointer-events: none;
+  animation: toast-in 400ms var(--ease-out) both, toast-out 400ms var(--ease-out) 6s forwards; }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, -8px); } }
+@keyframes toast-out { to { opacity: 0; } }
+
+/* Narrow windows: the cards stack, the column fills the width. */
+@media (max-width: 720px) {
+  .cards { grid-template-columns: 1fr; }
+  .card { min-height: 0; }
+  .go { flex-direction: column; align-items: stretch; }
+  .go > .btn, .go > .progress { width: 100%; }
+  .bar { padding: 12px; }
+}
+@media (max-height: 760px) and (min-width: 721px) {
+  .content { top: 76px; bottom: auto; }
+  h1 { font-size: 48px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise { animation: fade 200ms ease forwards; transform: none; }
+  .sheet, .sheet.open { transform: none; transition: opacity 200ms ease, visibility 0s linear 200ms; opacity: 0; }
+  .sheet.open { opacity: 1; transition: opacity 200ms ease, visibility 0s; }
+  .art, .progress .fill { transition: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass, .sheet, .hint-toast { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  .glass, .sheet { background: var(--page); box-shadow: 0 0 0 1px var(--ink-soft); }
+}

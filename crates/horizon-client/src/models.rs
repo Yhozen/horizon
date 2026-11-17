@@ -80,6 +80,11 @@ pub(crate) fn prepare_with_models(
     let mut placements = Vec::new();
     let mut states = Vec::new();
     for (index, (name, properties)) in GALLERY.iter().enumerate() {
+        // The inspection gallery shows the blocks these resources have
+        // (Horizon Open Creative's bundle has none of the special shapes).
+        if !facts.contains_key(&format!("minecraft:{name}")) {
+            continue;
+        }
         let state = registry.resolve(&descriptor(name, properties))?;
         let actual = registry
             .state(state)

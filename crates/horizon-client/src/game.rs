@@ -106,6 +106,7 @@ mod nautili;
 mod net_harness;
 mod nether_portal;
 mod ominous_item_spawner;
+mod open_profile;
 mod options;
 mod packs;
 mod pad;
@@ -313,6 +314,9 @@ struct Options {
     server_thread: bool,
     /// Set on the integrated server's own options: it draws nothing, so it skips meshing.
     integrated: bool,
+    /// The content the resources hold (`horizon-resources.json`); Horizon Open
+    /// Creative bounds what a run may do (game/open_profile.rs).
+    profile: horizon_core::content_profile::ContentProfile,
 }
 impl Options {
     /// The name to join servers with: the one given, else the offline name kept
@@ -373,6 +377,7 @@ impl Options {
                 && std::env::var("HORIZON_SERVER_THREAD").map_or(true, |v| v != "0")
                 && std::env::var_os("HORIZON_COMMAND_SCRIPT").is_none(),
             integrated: false,
+            profile: Default::default(),
         };
         let mut session_file = std::env::var("HORIZON_SESSION_FILE").ok();
         #[cfg(target_arch = "wasm32")]
@@ -479,6 +484,7 @@ impl Options {
                 Err(e) => eprintln!("Horizon: not signed in: {e}"),
             }
         }
+        open_profile::apply(&mut o)?;
         Ok(Some(o))
     }
 }
@@ -2641,14 +2647,19 @@ impl Game<'_> {
             if !self.with_level(|b, level, ticks| b.scheduled_begin(level, ticks, fluids)) {
                 continue;
             }
-            loop {
-                let more =
-                    self.with_level(|b, level, ticks| b.scheduled_step(level, ticks, fluids));
-                if !self.level_events.is_empty() {
-                    self.process_level_events()?;
-                }
-                if !more {
-                    break;
+            // Horizon Open Creative's water is fixed scenery: due fluid ticks
+            // are taken and dropped, so nothing flows.
+            let fixed = fluids && self.options.profile.is_open();
+            if !fixed {
+                loop {
+                    let more =
+                        self.with_level(|b, level, ticks| b.scheduled_step(level, ticks, fluids));
+                    if !self.level_events.is_empty() {
+                        self.process_level_events()?;
+                    }
+                    if !more {
+                        break;
+                    }
                 }
             }
             self.with_level(|b, _, ticks| b.scheduled_finish(ticks, fluids));
@@ -4685,6 +4696,52 @@ impl Game<'_> {
         window.set_cursor_visible(!self.captured);
     }
     /// LevelLoadingScreen.onClose -> Gui.setScreen(null) -> grabMouse.
+    /// The browser locks the pointer only on a user gesture and tells nobody
+    /// when it refuses (`set_cursor_grab` succeeds either way), and it frees the
+    /// pointer itself on Escape without delivering the key. Follow the page: a
+    /// grab that never became a lock is dropped, so the next click on the canvas
+    /// asks again; a lock the browser ended pauses the game, as losing focus does.
+    #[cfg(target_arch = "wasm32")]
+    fn sync_web_pointer_lock(&mut self) {
+        use std::cell::Cell;
+        thread_local! {
+            /// When the game asked for the lock, and whether it was granted since.
+            static GRAB: Cell<(Option<Instant>, bool)> = const { Cell::new((None, false)) };
+        }
+        let locked = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.pointer_lock_element())
+            .is_some();
+        let (asked, granted) = GRAB.get();
+        if !self.captured {
+            GRAB.set((None, false));
+            return;
+        }
+        let asked = asked.unwrap_or_else(Instant::now);
+        if locked {
+            GRAB.set((Some(asked), true));
+        } else if granted {
+            // The browser released it (Escape, another window): pause.
+            GRAB.set((None, false));
+            self.keys.clear();
+            self.left = false;
+            self.right = false;
+            self.capture(false);
+            if self.screen == Screen::Playing && self.player.is_some() && !self.options.no_pause {
+                self.screen = Screen::Paused;
+            }
+        } else if asked.elapsed() > Duration::from_millis(1500) {
+            // Refused: release the claim, winit's too, so a click asks again.
+            GRAB.set((None, false));
+            self.captured = false;
+            if let Some(window) = &self.window {
+                let _ = window.set_cursor_grab(CursorGrabMode::None);
+                window.set_cursor_visible(true);
+            }
+        } else {
+            GRAB.set((Some(asked), false));
+        }
+    }
     fn capture_loaded_world(&mut self) {
         // Loading may finish after focus was lost or another screen opened.
         if self.title.is_none() && self.screen == Screen::Playing {
@@ -7631,6 +7688,8 @@ impl Game<'_> {
         }
         self.join_world_rest()?;
         let save_root = horizon_core::fs::current_dir()?.join("saves").join(folder);
+        // Before anything reads or writes the folder.
+        open_profile::check_world(self.options.profile, &save_root)?;
         if integrated::wanted(&self.options, &save_root) {
             return self.open_integrated(folder, name, seed, creative, create);
         }
@@ -7714,7 +7773,9 @@ impl Game<'_> {
             }
         }
         if self.creative && level.inventory.is_empty() && level.position.is_none() {
-            for (i, name) in [
+            // Horizon Open Creative's bundle names its own starting hotbar.
+            let starter = open_profile::starter_hotbar(&self.options);
+            let default = [
                 "minecraft:grass_block",
                 "minecraft:stone",
                 "minecraft:oak_planks",
@@ -7724,10 +7785,12 @@ impl Game<'_> {
                 "minecraft:chest",
                 "minecraft:furnace",
                 "minecraft:diamond_pickaxe",
-            ]
-            .iter()
-            .enumerate()
-            {
+            ];
+            let names: Vec<&str> = match &starter {
+                Some(list) => list.iter().map(String::as_str).collect(),
+                None => default.to_vec(),
+            };
+            for (i, name) in names.iter().take(9).enumerate() {
                 inventory[i] = Some(ItemStack {
                     item: Arc::from(*name),
                     count: 1,
@@ -7824,6 +7887,9 @@ impl Game<'_> {
     /// Change dimension through a portal (Entity.changeDimension with
     /// PortalForcer placement once the destination has loaded).
     fn enter_dimension(&mut self, target: Dim) -> Result<()> {
+        if target != Dim::Overworld && !self.open_allows(open_profile::Scope::OtherDimensions) {
+            return Ok(());
+        }
         let Some(player) = self.player.take() else {
             return Ok(());
         };
@@ -11681,6 +11747,8 @@ impl ApplicationHandler for Game<'_> {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_arch = "wasm32")]
+        self.sync_web_pointer_lock();
         if self.pending_save.is_some() {
             match self.poll_closing_save() {
                 Ok(true) => event_loop.exit(),
@@ -12721,8 +12789,17 @@ fn load_world_rest(
         fog,
         music: horizon_client::music::MusicTables::load(root),
         ambient: horizon_client::ambience::AmbientTables::load(root),
-        nether_environment: Environment::load_dimension(root, "the_nether", false)?,
-        end_environment: Environment::load_dimension(root, "the_end", false)?,
+        // Horizon Open Creative has the overworld only.
+        nether_environment: if assets.profile.is_open() {
+            Environment::unavailable()
+        } else {
+            Environment::load_dimension(root, "the_nether", false)?
+        },
+        end_environment: if assets.profile.is_open() {
+            Environment::unavailable()
+        } else {
+            Environment::load_dimension(root, "the_end", false)?
+        },
         behaviours: Behaviours::load_with_gameplay(
             registry_owner.registry,
             root,

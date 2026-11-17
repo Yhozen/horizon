@@ -1,4 +1,7 @@
 use crate::Result;
+use horizon_core::content_profile::{
+    ContentProfile, MANIFEST_KEY, OPEN_CONTENT_REVISION, REVISION_KEY,
+};
 use horizon_core::fs::File;
 use horizon_world::{
     DATA_VERSION,
@@ -78,6 +81,8 @@ pub struct Assets {
     pub material_states: [BlockStateId; 6],
     /// Block names in `#minecraft:blocks_fluid_flow` (fluid flow vectors).
     pub blocks_fluid_flow: BTreeSet<String>,
+    /// The content these resources hold (`horizon-resources.json`).
+    pub profile: ContentProfile,
 }
 /// The block models and their baked sprites, read from the pack at `root` over
 /// an existing block registry: everything the mesher and renderer need.
@@ -97,6 +102,36 @@ pub struct RenderAssets {
     /// Each layer's `MipmapGenerator` settings.
     pub sprite_mips: Vec<crate::mipmap::Settings>,
 }
+/// The profile `horizon-resources.json` names (vanilla when it names none).
+pub fn content_profile(manifest: &Value) -> Result<ContentProfile> {
+    Ok(ContentProfile::from_manifest(
+        manifest[MANIFEST_KEY].as_str(),
+    )?)
+}
+/// The profile of the resources at `root`, read from their manifest alone.
+pub fn profile_at(root: &Path) -> Result<ContentProfile> {
+    let manifest: Value = serde_json::from_reader(BufReader::new(File::open(
+        root.join("horizon-resources.json"),
+    )?))?;
+    content_profile(&manifest)
+}
+/// The `minecraft:brand` a server on the resources at `root` announces, and
+/// what a player on them expects: `vanilla`, or for Horizon Open Creative
+/// `horizon-open/` and the start of its provenance record's SHA-256. Open
+/// servers and players agree on every network id only with the same bundle.
+pub fn server_brand(root: &Path) -> String {
+    use sha2::Digest;
+    if !profile_at(root).is_ok_and(|p| p.is_open()) {
+        return "vanilla".to_owned();
+    }
+    let record =
+        horizon_core::fs::read(root.join("horizon-open-provenance.json")).unwrap_or_default();
+    let digest = sha2::Sha256::digest(&record);
+    let hex: String = digest[..6].iter().map(|b| format!("{b:02x}")).collect();
+    format!("{OPEN_BRAND}/{hex}")
+}
+/// The start of an open server's brand.
+pub const OPEN_BRAND: &str = "horizon-open";
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
@@ -105,7 +140,16 @@ impl Assets {
         let manifest: Value = serde_json::from_reader(BufReader::new(File::open(
             root.join("horizon-resources.json"),
         )?))?;
-        if manifest["data_version"].as_i64() != Some(i64::from(DATA_VERSION)) {
+        let profile = content_profile(&manifest)?;
+        if profile.is_open() {
+            // The open bundle has its own revision, never Minecraft's data version.
+            if manifest[REVISION_KEY].as_i64() != Some(OPEN_CONTENT_REVISION) {
+                return Err(invalid(
+                    "these Horizon Open Creative resources are for another build; prepare them again with: horizon-prepare open --out PATH",
+                )
+                .into());
+            }
+        } else if manifest["data_version"].as_i64() != Some(i64::from(DATA_VERSION)) {
             return Err(invalid("resources do not match Horizon's pinned data version").into());
         }
         let (registry, flags) =
@@ -184,6 +228,7 @@ impl Assets {
             properties,
             material_states,
             blocks_fluid_flow,
+            profile,
         })
     }
     /// The models and sprites of another resource root over these blocks

@@ -18,7 +18,12 @@ use std::collections::BTreeMap;
 fn chat_tree<'a>(
     remote: &'a Option<super::remote::Remote>,
     mods: &'a super::mods::ModsState,
+    open: bool,
 ) -> &'a horizon_client::command::Dispatcher {
+    if open {
+        // Horizon Open Creative: only the commands it runs.
+        return super::open_profile::command_tree();
+    }
     match remote.as_ref().and_then(|r| r.commands.as_ref()) {
         Some(tree) => tree,
         None => mods.dispatcher(),
@@ -415,7 +420,7 @@ impl Game<'_> {
         let b = HudBatch::new(size);
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: chat_tree(&self.remote, &self.mods),
+            dispatcher: chat_tree(&self.remote, &self.mods, self.options.profile.is_open()),
             registries: &self.ui.registries,
         };
         let mut screen = ChatScreen::new(
@@ -473,7 +478,7 @@ impl Game<'_> {
         if let Some(shortcut) = self.edit_shortcut(event) {
             let m = Measure(&self.gui.atlas.font);
             let c = Commands {
-                dispatcher: chat_tree(&self.remote, &self.mods),
+                dispatcher: chat_tree(&self.remote, &self.mods, self.options.profile.is_open()),
                 registries: &self.ui.registries,
             };
             if let Some(screen) = self.ui.chat_screen.as_mut() {
@@ -519,7 +524,7 @@ impl Game<'_> {
         };
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: chat_tree(&self.remote, &self.mods),
+            dispatcher: chat_tree(&self.remote, &self.mods, self.options.profile.is_open()),
             registries: &self.ui.registries,
         };
         match screen.key(&m, &c, &self.ui.chat.recent, key, shift, ctrl) {
@@ -551,7 +556,7 @@ impl Game<'_> {
     ) {
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: chat_tree(&self.remote, &self.mods),
+            dispatcher: chat_tree(&self.remote, &self.mods, self.options.profile.is_open()),
             registries: &self.ui.registries,
         };
         if let Some(screen) = self.ui.chat_screen.as_mut() {
@@ -562,7 +567,7 @@ impl Game<'_> {
     pub(super) fn chat_type(&mut self, text: &str) {
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: chat_tree(&self.remote, &self.mods),
+            dispatcher: chat_tree(&self.remote, &self.mods, self.options.profile.is_open()),
             registries: &self.ui.registries,
         };
         if let Some(screen) = self.ui.chat_screen.as_mut() {
@@ -618,7 +623,7 @@ impl Game<'_> {
         });
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: chat_tree(&self.remote, &self.mods),
+            dispatcher: chat_tree(&self.remote, &self.mods, self.options.profile.is_open()),
             registries: &self.ui.registries,
         };
         if let Some(screen) = self.ui.chat_screen.as_mut() {
@@ -665,7 +670,7 @@ impl Game<'_> {
         };
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: chat_tree(&self.remote, &self.mods),
+            dispatcher: chat_tree(&self.remote, &self.mods, self.options.profile.is_open()),
             registries: &self.ui.registries,
         };
         screen.resize(&m, &c, batch.width as i32, batch.height as i32);
@@ -745,6 +750,9 @@ impl Game<'_> {
     /// Load per-world command state when a world opens.
     pub(super) fn load_world_state(&mut self) {
         self.ui.rules = GameRules::load(&self.world_root);
+        if self.options.profile.is_open() {
+            super::open_profile::hold_rules(&mut self.ui.rules);
+        }
         self.ui.clock = WorldClock::default();
         self.ui.difficulty = read_difficulty(&self.world_root).unwrap_or(2);
         if let Ok(bytes) =

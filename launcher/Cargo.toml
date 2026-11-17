@@ -25,7 +25,7 @@ self-replace = "1"
 clap = { version = "4", features = ["derive"] }
 horizon-theme = { path = "../crates/horizon-theme" }
 horizon-core = { path = "../crates/horizon-core" }
-horizon-prepare = { path = "../crates/horizon-prepare" }
+horizon-prepare = { path = "../crates/horizon-prepare", default-features = false }
 # Join a friend: invite codes (the game does the joining).
 horizon-friends = { path = "../crates/horizon-friends" }
 horizon-bench = { path = "../crates/horizon-bench" }

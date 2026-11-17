@@ -31,20 +31,34 @@ impl TestTerrain {
             sand: id("minecraft:sand")?,
             bedrock: id("minecraft:bedrock")?,
             log: id("minecraft:oak_log")?,
-            leaves: registry
-                .resolve(&horizon_world::chunk::BlockState {
-                    name: "minecraft:oak_leaves".into(),
-                    properties: [
-                        ("distance".to_owned(), "1".to_owned()),
-                        ("persistent".to_owned(), "false".to_owned()),
-                        ("waterlogged".to_owned(), "false".to_owned()),
-                    ]
-                    .into(),
-                })?
-                .0,
+            leaves: Self::leaves(registry)?,
             short_grass: id("minecraft:short_grass")?,
             plains: biomes.id("minecraft:plains"),
         })
+    }
+    /// Vanilla's decaying leaves at distance 1; Horizon Open Creative's
+    /// leaves have no states (they never decay).
+    fn leaves(registry: &BlockRegistry) -> crate::Result<u32> {
+        let default = registry
+            .default_state("minecraft:oak_leaves")
+            .ok_or("missing minecraft:oak_leaves")?;
+        let has_states = registry
+            .state(default)
+            .is_some_and(|s| !s.properties.is_empty());
+        if !has_states {
+            return Ok(default.0);
+        }
+        Ok(registry
+            .resolve(&horizon_world::chunk::BlockState {
+                name: "minecraft:oak_leaves".into(),
+                properties: [
+                    ("distance".to_owned(), "1".to_owned()),
+                    ("persistent".to_owned(), "false".to_owned()),
+                    ("waterlogged".to_owned(), "false".to_owned()),
+                ]
+                .into(),
+            })?
+            .0)
     }
     fn height(x: i32, z: i32) -> i32 {
         let (x, z) = (f64::from(x), f64::from(z));

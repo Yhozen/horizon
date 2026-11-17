@@ -252,6 +252,10 @@ macro_rules! named_blocks {
         /// Blocks referenced by identity in vanilla code (`Blocks.X`).
         #[derive(Clone, Copy, Debug)]
         pub struct Named { $(pub $field: BlockId,)* }
+        /// Every block [`Named`] resolves: a registry without one of them
+        /// cannot load the level behaviours. Horizon Open Creative's bundle
+        /// carries inert support blocks for those it does not otherwise define.
+        pub const NAMED_BLOCKS: &[&str] = &[$(concat!("minecraft:", $name),)*];
         impl Named {
             pub(super) fn resolve(table: &StateTable) -> io::Result<Self> {
                 Ok(Self { $($field: table.block_by_name(concat!("minecraft:", $name)).ok_or_else(|| invalid(concat!("missing block ", $name)))?,)* })
