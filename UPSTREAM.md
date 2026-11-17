@@ -4,8 +4,8 @@ Upstream repository: <https://github.com/horizon-rust/horizon>, branch `main`.
 
 | Pointer | Upstream commit |
 | --- | --- |
-| Most recent backported source | [`fbfa055effff0800b0223652751268551a1f4344`](https://github.com/horizon-rust/horizon/commit/fbfa055effff0800b0223652751268551a1f4344) — Guard item count arithmetic against i32 overflow |
-| Main merge that introduced that source | [`14e27946ca20e9d4fae7ca38bd03524f04fefe3f`](https://github.com/horizon-rust/horizon/commit/14e27946ca20e9d4fae7ca38bd03524f04fefe3f) — Merge pull request #15410 from Web-mc1/fix/item-set-count-overflow |
+| Most recent backported source | [`0a9d9a871562561b1c8a5964326603f942c8c089`](https://github.com/horizon-rust/horizon/commit/0a9d9a871562561b1c8a5964326603f942c8c089) — Reject negative trim pattern holders in received recipes |
+| Main merge that introduced that source | [`85b5bcca7c79bb470b90bdb5914b413aa66fe7ae`](https://github.com/horizon-rust/horizon/commit/85b5bcca7c79bb470b90bdb5914b413aa66fe7ae) — Merge pull request #17145 from kacpherek/mod-api-merge |
 | Upstream tip assessed on 2026-11-17 | [`810f09f5bc35c33d39534a33269654075d575122`](https://github.com/horizon-rust/horizon/commit/810f09f5bc35c33d39534a33269654075d575122) |
 
 These are selective imports. The backport pointer does **not** mean every earlier upstream change
@@ -80,6 +80,10 @@ commit has different content. Each row is present in this branch.
 | [`fbfa055effff0800b0223652751268551a1f4344`](https://github.com/horizon-rust/horizon/commit/fbfa055effff0800b0223652751268551a1f4344) | Prevent loot item-count arithmetic from overflowing | 2026-11-17 |
 | [`70865d77e8fabcb097a48066d81e1b8f01b48e89`](https://github.com/horizon-rust/horizon/commit/70865d77e8fabcb097a48066d81e1b8f01b48e89) | Bound saved boat values and widen chunk coordinate arithmetic (partial import; newer void lifecycle excluded) | 2026-11-17 |
 | [`04449d8b7380875dc594a0c0f60c9354c2d97b4b`](https://github.com/horizon-rust/horizon/commit/04449d8b7380875dc594a0c0f60c9354c2d97b4b) | Prevent server chunk radius and centre arithmetic overflow | 2026-11-17 |
+| [`d0da18c651306cc0f12176c0920bd37cc8b5be2c`](https://github.com/horizon-rust/horizon/commit/d0da18c651306cc0f12176c0920bd37cc8b5be2c) | Bound received login RSA keys to Java size limits | 2026-11-17 |
+| [`5fe1090401e63235ce743d1b3da45e2520964cb7`](https://github.com/horizon-rust/horizon/commit/5fe1090401e63235ce743d1b3da45e2520964cb7) | Reject negative item-component holder IDs and holder-set counts | 2026-11-17 |
+| [`0a9d9a871562561b1c8a5964326603f942c8c089`](https://github.com/horizon-rust/horizon/commit/0a9d9a871562561b1c8a5964326603f942c8c089) | Reject negative trim pattern holders in received recipes | 2026-11-17 |
+| [`1f28bbe8d6f69079abe092183c08c6a11aee57cf`](https://github.com/horizon-rust/horizon/commit/1f28bbe8d6f69079abe092183c08c6a11aee57cf) | Handle signed wire offsets without overflow (numeric subset only) | 2026-11-17 |
 
 ## Latest comparison
 
