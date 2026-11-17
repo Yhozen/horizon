@@ -60,7 +60,7 @@ export const EDITIONS: Readonly<Record<EditionId, Edition>> = {
     id: "open", name: "Horizon Open", title: "Horizon Open Creative",
     tagline: "An open block world built from freely licensed art. No Minecraft files needed.",
     worlds: [
-      survival("meadow", "Seen through Open, some blocks show as their nearest match, and creatures aren't visible yet."),
+      survival("meadow", "Seen through Open, some blocks and creatures show as their nearest match."),
       shared("meadow"),
       { id: "solo", title: "Single player", card: "Just you, in creative",
         about: "Your own creative world with every block. It isn't saved: reloading the page starts a new one.",

@@ -96,8 +96,16 @@ pub fn write(bundle: &mut Bundle) -> Result<()> {
         &skin(),
         art.clone(),
     )?;
-    bundle.json("entity-models.json", &entity_models(), GENERATOR)?;
-    bundle.json("entity-types.json", &serde_json::json!({}), GENERATOR)?;
+    // The player's model, and every mob's (crate::mobs).
+    let (mobs, types) = crate::mobs::write(bundle)?;
+    let mut models = entity_models();
+    models.as_object_mut().expect("an object").extend(mobs);
+    bundle.json("entity-models.json", &models, GENERATOR)?;
+    bundle.json(
+        "entity-types.json",
+        &serde_json::Value::Object(types),
+        GENERATOR,
+    )?;
     gui(bundle)?;
     sky(bundle)?;
     crate::art_survival::write(bundle)?;

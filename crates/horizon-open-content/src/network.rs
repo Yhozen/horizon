@@ -132,7 +132,10 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
     let report = json!({
         "minecraft:block": registry(blocks.iter().map(|b| b.id).enumerate()),
         "minecraft:item": registry(items.iter().copied().enumerate()),
-        "minecraft:entity_type": registry(ENTITY_TYPES.iter().copied().enumerate()),
+        // The basic types, then every mob (crate::mobs) in its order.
+        "minecraft:entity_type": registry(
+            ENTITY_TYPES.iter().copied().chain(crate::mobs::names()).enumerate(),
+        ),
         "minecraft:menu": registry(MENUS.iter().copied().enumerate()),
         "minecraft:command_argument_type": registry(
             horizon_protocol::packets::play::ARGUMENT_TYPES.iter().copied().enumerate()),

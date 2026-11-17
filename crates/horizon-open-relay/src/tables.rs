@@ -152,6 +152,9 @@ pub struct Tables {
     /// Open item → the vanilla item of the same name.
     pub items_back: Vec<Option<i32>>,
     pub entity_types: Vec<Option<i32>>,
+    /// Vanilla entity type → the open mob standing in for it (`rules::stand_in`), for
+    /// types the bundle doesn't have.
+    pub stand_ins: Vec<Option<i32>>,
     pub menus: Vec<Option<i32>>,
     /// Vanilla data component id → open id, for the components the bundle names.
     pub components: Vec<Option<i32>>,
@@ -289,6 +292,7 @@ impl Tables {
             .collect();
 
         let vanilla_entities = get(vanilla, "minecraft:entity_type")?;
+        let open_entities = get(&open.registries, "minecraft:entity_type")?;
         let components_open = get(&open.registries, "minecraft:data_component_type")?;
         let vanilla_components = get(vanilla, "minecraft:data_component_type")?;
         let open_component_names = components_open
@@ -307,10 +311,12 @@ impl Tables {
             open_state_bits: horizon_protocol::registry::ceil_log2(open.states.len()).max(16),
             items,
             items_back,
-            entity_types: by_name(
-                &vanilla_entities,
-                &get(&open.registries, "minecraft:entity_type")?,
-            ),
+            entity_types: by_name(&vanilla_entities, &open_entities),
+            stand_ins: vanilla_entities
+                .names
+                .iter()
+                .map(|n| rules::stand_in(n).and_then(|open| open_entities.id(open)))
+                .collect(),
             menus: by_name(
                 &get(vanilla, "minecraft:menu")?,
                 &get(&open.registries, "minecraft:menu")?,
@@ -371,6 +377,12 @@ impl Tables {
         usize::try_from(vanilla)
             .ok()
             .and_then(|i| self.entity_types.get(i).copied().flatten())
+    }
+    /// The open mob standing in for a vanilla type the bundle lacks.
+    pub fn stand_in(&self, vanilla: i32) -> Option<i32> {
+        usize::try_from(vanilla)
+            .ok()
+            .and_then(|i| self.stand_ins.get(i).copied().flatten())
     }
     pub fn menu(&self, vanilla: i32) -> Option<i32> {
         usize::try_from(vanilla)
@@ -450,6 +462,7 @@ pub(crate) mod fixture {
                 "falling_block",
                 "player",
                 "experience_orb",
+                "wither_skeleton",
             ]),
         );
         vanilla.registries.insert(
@@ -475,7 +488,13 @@ pub(crate) mod fixture {
         );
         open_registries.registries.insert(
             "minecraft:entity_type".into(),
-            registry(&["player", "item", "experience_orb", "falling_block"]),
+            registry(&[
+                "player",
+                "item",
+                "experience_orb",
+                "falling_block",
+                "skeleton",
+            ]),
         );
         open_registries.registries.insert(
             "minecraft:menu".into(),

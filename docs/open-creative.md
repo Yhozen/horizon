@@ -49,6 +49,19 @@ Survival rules, all data the shared survival code reads:
   stone tools from cobblestone; iron and copper with a stone pickaxe and coal; gold and diamond
   with an iron pickaxe.
 
+### Mobs
+
+The bundle has the common creatures of a survival world (`crates/horizon-open-content/src/mobs.rs`):
+zombie, husk, drowned, skeleton, stray, creeper, spider, cave spider, enderman, cow, pig, sheep (its
+wool dyed by the client) and chicken, with each climate variant and the young. Each is a model of
+boxes under the part names the client's animations drive, and a skin painted by the generator,
+Horizon's own: a shelf packer lays every box out on its texture and a painter colours each face. The
+young are the same boxes scaled about the feet, the head less, on the same skin layout. Open
+players see these on any server they reach through the relay; the shared world's own server spawns
+no mobs (the open profile turns spawning off). The private preview keeps these skins when it plays
+on the open bundle (`web.rs`'s overlay skips `textures/entity/`, but the player's skin), as its own
+art wouldn't fit their layouts.
+
 ## The content profile
 
 `horizon-resources.json` names the content a resource folder holds
@@ -237,8 +250,12 @@ translates every packet:
   stand-in keeps the vanilla name as its `item_name` ("Golden Apple" on an apple); tools map by
   tier and kind, food to the apple, everything else to a stick. Components the bundle lacks are
   dropped. Clicks and creative slots go back as the vanilla item of the same name.
-- **Entities**: players, dropped items, experience orbs and falling blocks are shown; creatures and
-  every other entity are never spawned for the open player, and their later packets are dropped.
+- **Entities**: players, dropped items, experience orbs, falling blocks and the bundle's own mobs
+  (below) are shown. A creature the bundle lacks shows as the bundle's mob nearest in shape
+  (`rules::stand_in`: a pillager or witch as a zombie, a wither skeleton as a skeleton, a horse as a
+  cow, a fox as a pig, a bat as a chicken...), with only the data every mob shares (flags, health;
+  entries below 16). Anything else (boats, minecarts, projectiles, golems, ghasts, villagers...)
+  is never spawned for the open player, and its later packets are dropped.
 - **Dropped**: sounds, particles, block entities (sign text, chest lids), mob effects, recipes and
   the recipe book, advancements, tags, statistics, maps, trades, explosions (no knockback),
   waypoints, transfers and dialogs. Chat, commands, the tab list, scoreboards, titles, time, health,
@@ -247,7 +264,8 @@ translates every packet:
   The relay derives it from the bundle it is given: it must be the bundle the players run.
 
 Limits: the world looks approximate (stairs and slabs are full blocks, so the open client predicts
-collisions that differ a little from the server's), mobs are invisible and still hurt, the server
+collisions that differ a little from the server's), creatures without a model or stand-in are
+invisible and can still hurt, the server
 sees every relayed player at the relay's address (IP bans apply to the relay), and the client's
 mining speed comes from its stand-in tool, so the server may undo a break it thinks was too fast.
 
