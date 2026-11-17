@@ -16,11 +16,11 @@ pub enum HolderSet {
 }
 impl HolderSet {
     pub fn read(r: &mut Reader) -> Result<Self> {
-        let n = r.varint()? - 1;
-        if n == -1 {
+        let n = r.varint()?;
+        if n == 0 {
             return Ok(Self::Tag(r.string(32767)?));
         }
-        let n = usize::try_from(n).map_err(|_| crate::Error::new("negative holder set size"))?;
+        let n = usize::try_from(n).map_err(|_| crate::Error::new("negative holder set size"))? - 1;
         if n > r.remaining() {
             return Err(crate::Error::new("holder set larger than the packet"));
         }
@@ -117,7 +117,8 @@ impl SlotDisplay {
                         description: r.nbt()?,
                         decal: r.bool()?,
                     },
-                    id => TrimPattern::Id(id - 1),
+                    id if id > 0 => TrimPattern::Id(id - 1),
+                    _ => return Err(crate::Error::new("negative trim pattern holder")),
                 };
                 Self::SmithingTrim {
                     base,
@@ -545,6 +546,42 @@ impl Codec<PlaceRecipe> for PlaceRecipe {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recipe_holder_set_rejects_negative_counts() {
+        for (count, valid) in [(1, true), (-1, false), (i32::MIN, false)] {
+            let mut w = crate::buf::Writer::new();
+            w.varint(count);
+            assert_eq!(
+                super::HolderSet::read(&mut crate::buf::Reader::new(&w.data)).is_ok(),
+                valid
+            );
+        }
+        let mut w = crate::buf::Writer::new();
+        w.varint(0);
+        w.string("minecraft:logs");
+        assert_eq!(
+            super::HolderSet::read(&mut crate::buf::Reader::new(&w.data)).unwrap(),
+            super::HolderSet::Tag("minecraft:logs".into())
+        );
+    }
+
+    #[test]
+    fn trim_pattern_holder_rejects_negative_wire_ids() {
+        for (id, valid) in [(1, true), (-1, false), (i32::MIN, false)] {
+            let mut w = crate::buf::Writer::new();
+            // Smithing trim, empty base and material displays, then its holder.
+            for value in [8, 0, 0, id] {
+                w.varint(value);
+            }
+            let mut r = crate::buf::Reader::new(&w.data);
+            let result = super::SlotDisplay::read(&mut r);
+            assert_eq!(result.is_ok(), valid, "holder {id}: {result:?}");
+            if valid {
+                assert_eq!(r.remaining(), 0);
+            }
+        }
+    }
+
     use super::*;
 
     #[test]

@@ -182,7 +182,8 @@ impl Codec<i32> for HolderId {
     fn read(r: &mut Reader) -> Result<i32> {
         match r.varint()? {
             0 => Err(Error::new("inline registry values are not supported")),
-            id => Ok(id - 1),
+            id if id > 0 => Ok(id - 1),
+            _ => Err(Error::new("negative holder id")),
         }
     }
     fn write(v: &i32, w: &mut Writer) {
@@ -475,7 +476,7 @@ packet!(PlayerAbilities { flags: i8 => Byte, flying_speed: f32 => Float, walking
 pub struct PackedSignature;
 impl Codec<(i32, Option<Vec<u8>>)> for PackedSignature {
     fn read(r: &mut Reader) -> Result<(i32, Option<Vec<u8>>)> {
-        let id = r.varint()? - 1;
+        let id = r.varint()?.wrapping_sub(1);
         Ok(if id == -1 {
             (-1, Some(r.bytes(256)?.to_vec()))
         } else {
@@ -483,7 +484,7 @@ impl Codec<(i32, Option<Vec<u8>>)> for PackedSignature {
         })
     }
     fn write(v: &(i32, Option<Vec<u8>>), w: &mut Writer) {
-        w.varint(v.0 + 1);
+        w.varint(v.0.wrapping_add(1));
         if let Some(sig) = &v.1 {
             w.bytes(sig);
         }
@@ -730,7 +731,10 @@ pub struct SoundHolder;
 impl Codec<(i32, Option<(String, Option<f32>)>)> for SoundHolder {
     fn read(r: &mut Reader) -> Result<(i32, Option<(String, Option<f32>)>)> {
         let id = r.varint()?;
-        if id != 0 {
+        if id < 0 {
+            return Err(Error::new("negative sound holder id"));
+        }
+        if id > 0 {
             return Ok((id - 1, None));
         }
         let location = r.string(32767)?;
@@ -2098,6 +2102,45 @@ packet_enum!(Serverbound, crate::ids::play::serverbound {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn registry_holders_refuse_negative_ids_before_subtraction() {
+        use crate::buf::{Codec, Reader, Writer};
+        for (id, valid) in [(1, true), (i32::MAX, true), (-1, false), (i32::MIN, false)] {
+            let mut w = Writer::new();
+            w.varint(id);
+            assert_eq!(
+                super::HolderId::read(&mut Reader::new(&w.data)).is_ok(),
+                valid
+            );
+            assert_eq!(
+                super::SoundHolder::read(&mut Reader::new(&w.data)).is_ok(),
+                valid
+            );
+        }
+        let mut w = Writer::new();
+        w.varint(0);
+        w.string("minecraft:ambient.cave");
+        w.bool(false);
+        assert_eq!(
+            super::SoundHolder::read(&mut Reader::new(&w.data)).unwrap(),
+            (-1, Some(("minecraft:ambient.cave".into(), None)))
+        );
+    }
+
+    #[test]
+    fn packed_signature_index_wraps_at_the_signed_boundary() {
+        use crate::buf::{Codec, Reader, Writer};
+        let mut w = Writer::new();
+        w.varint(i32::MIN);
+        assert_eq!(
+            super::PackedSignature::read(&mut Reader::new(&w.data)).unwrap(),
+            (i32::MAX, None)
+        );
+        let mut w = Writer::new();
+        super::PackedSignature::write(&(i32::MAX, None), &mut w);
+        assert_eq!(Reader::new(&w.data).varint().unwrap(), i32::MIN);
+    }
+
     use super::*;
     use crate::{chunk::BlockEntityInfo, packets::round_trip, text::literal};
 
