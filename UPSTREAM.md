@@ -4,9 +4,9 @@ Upstream repository: <https://github.com/horizon-rust/horizon>, branch `main`.
 
 | Pointer | Upstream commit |
 | --- | --- |
-| Most recent backported source | [`45af2b23b2a0d341563325def664e40be127d51c`](https://github.com/ludovic111/horizon/commit/45af2b23b2a0d341563325def664e40be127d51c) — Network NBT: no more tags than vanilla's quota admits |
-| Main merge that introduced that source | [`63ddd76a157bb141f4baaa74d4f2b9ed13248307`](https://github.com/ludovic111/horizon/commit/63ddd76a157bb141f4baaa74d4f2b9ed13248307) — Merge pull request #10100 from yahya-nusseibeh/fix/nbt-heap-quota |
-| Upstream tip assessed on 2026-11-06 | [`41f822b659789780f58d32c63ddfb6887ea1b8bf`](https://github.com/horizon-rust/horizon/commit/41f822b659789780f58d32c63ddfb6887ea1b8bf) |
+| Most recent backported source | [`53b7a6768de77939e2e191cd9ef4f03d4a4a4968`](https://github.com/horizon-rust/horizon/commit/53b7a6768de77939e2e191cd9ef4f03d4a4a4968) — Record the predicted drop as sent so a refilling pickup syncs to a guest |
+| Main merge that introduced that source | [`24b778c3b4e9f0048b9eed1c1943904a86dbf093`](https://github.com/horizon-rust/horizon/commit/24b778c3b4e9f0048b9eed1c1943904a86dbf093) — Merge pull request #14173 from DUzzL/fix/14071-full-inventory-pickup |
+| Upstream tip assessed on 2026-11-17 | [`810f09f5bc35c33d39534a33269654075d575122`](https://github.com/horizon-rust/horizon/commit/810f09f5bc35c33d39534a33269654075d575122) |
 
 These are selective imports. The backport pointer does **not** mean every earlier upstream change
 is present, and the assessed tip does **not** mean its code has been imported. “Most recent” means
@@ -76,34 +76,38 @@ commit has different content. Each row is present in this branch.
 | [`d55c2840a7884404324ed4bf4e5fdefb4bfa2277`](https://github.com/ludovic111/horizon/commit/d55c2840a7884404324ed4bf4e5fdefb4bfa2277) | Map unknown server block states to air before indexed lookups | 2026-11-06 |
 | [`22ca656476539a657758652b67c868e241003e38`](https://github.com/ludovic111/horizon/commit/22ca656476539a657758652b67c868e241003e38) | Bound fetched PNG dimensions before allocating pixels | 2026-11-06 |
 | [`a7f6ecbdfbf11c5626c69d3b5c159deac690657f`](https://github.com/ludovic111/horizon/commit/a7f6ecbdfbf11c5626c69d3b5c159deac690657f) | Synchronize the selected hotbar slot before an immediate Q drop | 2026-11-06 |
+| [`53b7a6768de77939e2e191cd9ef4f03d4a4a4968`](https://github.com/horizon-rust/horizon/commit/53b7a6768de77939e2e191cd9ef4f03d4a4a4968) | Resync the selected slot after a predicted drop and immediate pickup | 2026-11-17 |
 
 ## Latest comparison
 
-The 2026-11-06 comparison starts from merged fork main
-`c49254ee46d763842888db8ac97dcef597d59ea0` and examines the 2,090 non-merge commits
-between the previous assessed tip `fc02103818c212920fd24aa34a2b2f91ba49e56f` and the tip above.
-This pass selects important fixes demonstrably applicable to the browser fork: stack overflow
-from nested SNBT/commands, excessive network-NBT allocations, unknown server block states,
-oversized fetched PNGs, and a hotbar/Q ordering error that drops the wrong item.
+The 2026-11-17 comparison fetched fork main at
+`c49254ee46d763842888db8ac97dcef597d59ea0`, unchanged since the previous pass.
+PRs #29–#33 are still open; this branch includes that stack and appends selective fixes.
+The range after the previous assessed tip `41f822b659789780f58d32c63ddfb6887ea1b8bf`
+contains 16,097 non-merge commits and 2,944 first-parent entries, including a large mod-API
+branch merge. Screening used commit subjects and subsystem histories, then source diffs,
+follow-ups and applicability checks for the important candidates. It is not an exhaustive
+line-by-line review of all 16,097 commits.
 
-The parser guards are defensive Horizon limits. Network NBT keeps its existing byte/depth bounds;
-saved-NBT limits remain separate. Unknown received states become air before per-state tables are
-indexed. Fetched images are bounded before pixel allocation. Q sends the selected slot before the
-drop action, including when both keys arrive before the next simulation tick.
+Each added source row records code present in this branch. Partial imports are marked:
+newer mod, launcher, shader and protocol-version features are not prerequisites of these fixes.
+The reviewed tip remains separate from the latest backported source.
 
-No mod, launcher, shader or cosmetic feature is imported. Several apparent severe fixes do not
-apply here: `14f4b9d33254175637372bf20622f419fa0c0763` fixes a newer remote spawner scan absent
-from this fork; `90ecdc3dd01c64207851ebb0710f45ab5dccfbb6` and
-`e1e3c4f8406b74d53afe07a6a95c26b10f95ba2f` depend on newer loot-roll consumption machinery;
-`fa62beefdf92dc96dfe89049d8bbeebeda14ae0c` targets a server-pack downloader absent here.
-The fork already bounds recursively nested item-component packets independently. Broader native
-rendering/worker architecture changes still need separate browser evaluation.
+Excluded after checking fork paths: the biome-table crash (`85b61b6f6e46b1d3217e2b01c0357350969c1e37`)
+requires replaceable world biome tables; this fork maps server biomes into an immutable table.
+Prepared-instance overflow (`970d95419055a56f192eb0722f9285a999fdad3d`) requires absent native-mod
+rendering. Packet component recursion is already bounded by the fork. Crash-save handling
+(`b0f0be4e209bc039e10e46d527d616c454435174`, `cbe92651a1cebf2820b48beb00ae5bbfc3eba4c1`)
+is deferred: the worker exit path and dedicated recovery/guest-state safeguards differ, so
+blindly saving partially unwound state would risk player data. Newer asynchronous chunk-save
+backlog APIs are absent. Missing/corrupt region regeneration changes are deferred to a separate
+recovery review. Cosmetic changes, optional PvP extras and general refactors are excluded.
 
-Prior model-cache identity, respawn-cache, display-click, owner identity, backup recovery,
-resource-pack overlay, and inventory backports remain in merged main. The source table describes
-what this branch imports; the reviewed tip is not a claim that all its changes were imported.
-Implementation verification is recorded in the backport PRs. Runtime checks use isolated temporary
-worlds and the prepared R2 resources; Java-oracle execution additionally requires the game JARs.
+All selected source versions still carry MIT; their source commits precede upstream's licence
+change `fb1135c6020b09ba8d4645bd70b0a94a405f8ad1`. Prior model-cache identity, respawn-cache,
+display-click, owner identity, backup and inventory fixes are preserved. Verification is recorded
+in the backport PRs. Runtime checks use isolated homes and prepared R2 resources; Java-oracle
+execution additionally requires Minecraft JARs, which those resources do not contain.
 
 ## Maintaining the record
 

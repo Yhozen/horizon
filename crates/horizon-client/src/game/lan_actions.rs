@@ -881,6 +881,7 @@ impl Game<'_> {
                 4 | 5 => {
                     if !spectator {
                         self.as_guest(host, conn, |g| g.drop_held(a.action == 4));
+                        host.hub.guests[gi].told_selected();
                     }
                 }
                 // RELEASE_USE_ITEM: ServerPlayer.releaseUsingItem, with the
