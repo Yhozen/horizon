@@ -72,6 +72,14 @@ fn archive_entries(archive: &[u8]) -> Result<Vec<(&str, &[u8])>, JsValue> {
 /// `art`'s English text merged over the bundle's. Only names the bundle already
 /// uses are taken, so its data, models and network numbering stay its own; the
 /// files replaced are listed in `OVERLAY` for the bundle's integrity check.
+/// The open bundle's mob skins have their own layouts (crates/horizon-open-content's
+/// `mobs`), which another bundle's skin of the same name wouldn't fit: they stay the
+/// bundle's own. The player's skin shares the usual layout and is laid over.
+fn is_own_layout(name: &str) -> bool {
+    name.starts_with("assets/minecraft/textures/entity/")
+        && !name.starts_with("assets/minecraft/textures/entity/player/")
+}
+
 pub fn overlay_art(root: &std::path::Path, art: &[u8]) -> Result<usize, JsValue> {
     use horizon_core::fs::PathExt as _;
     let entries = archive_entries(art)?;
@@ -90,6 +98,9 @@ pub fn overlay_art(root: &std::path::Path, art: &[u8]) -> Result<usize, JsValue>
                 // Water's colour is the biome's in both; keep the bundle's own.
                 continue;
             }
+            if is_own_layout(name) {
+                continue;
+            }
             let bytes = match biome_tint(stem) {
                 // The bundle's models carry no tint: wear the texture as vanilla's
                 // default biome colours would draw it.
@@ -104,7 +115,10 @@ pub fn overlay_art(root: &std::path::Path, art: &[u8]) -> Result<usize, JsValue>
                 replaced.push(meta);
             }
         } else if let Some(png) = name.strip_suffix(".mcmeta") {
-            if png.starts_with("assets/minecraft/textures/") && root.join(png).is_file_vfs() {
+            if png.starts_with("assets/minecraft/textures/")
+                && !is_own_layout(png)
+                && root.join(png).is_file_vfs()
+            {
                 horizon_core::fs::install(&target, data.to_vec());
                 replaced.push(name.to_string());
             }

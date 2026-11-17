@@ -358,3 +358,32 @@ fn clicks_and_creative_slots_go_back_to_vanilla_items() {
 fn sb_chat() -> i32 {
     horizon_protocol::ids::play::serverbound::CHAT
 }
+
+#[test]
+fn creatures_the_bundle_lacks_show_as_a_stand_in_with_only_shared_data() {
+    use horizon_protocol::entity_data::{Value, serializer as s};
+    let t = tables();
+    let mut c = playing(&t);
+    // A wither skeleton (vanilla 5) spawns as the bundle's skeleton (open 4).
+    let play::Clientbound::AddEntity(p) = decode(send(&mut c, add_entity(9, 5, 0))) else {
+        panic!()
+    };
+    assert_eq!(p.kind, 4);
+    // Its health (Living data, 9) passes; its own data (16 and above) doesn't.
+    let data = play::Clientbound::SetEntityData(play::SetEntityData {
+        id: 9,
+        values: vec![
+            (9, s::FLOAT, Value::Float(12.0)),
+            (16, s::BOOLEAN, Value::Bool(true)),
+        ],
+    });
+    let play::Clientbound::SetEntityData(p) = decode(send(&mut c, data)) else {
+        panic!()
+    };
+    assert_eq!(p.values, vec![(9, s::FLOAT, Value::Float(12.0))]);
+    // It moves, as any shown entity does.
+    let mut w = Writer::new();
+    w.varint(9);
+    w.bytes(&[0; 7]);
+    assert!(c.translate(cb::MOVE_ENTITY_POS, &w.data).is_some());
+}

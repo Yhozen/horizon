@@ -202,3 +202,48 @@ fn damaged_open_bundles_fail_with_what_to_do() {
     assert!(error.contains("stone.png"), "{error}");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn every_open_mob_loads_with_its_models_and_skins() {
+    use horizon_client::mobs::{Mob, MobTypes, render};
+    let root = bundle("mobs");
+    let types = MobTypes::load(&root).unwrap();
+    let names = horizon_open_content::mobs::names();
+    assert_eq!(names.len(), 13);
+    for name in names {
+        let id = format!("minecraft:{name}");
+        let kind = std::sync::Arc::new(
+            types
+                .types
+                .get(&id)
+                .unwrap_or_else(|| panic!("{id} does not load"))
+                .clone(),
+        );
+        // Adult and baby, each climate variant, a dyed sheep: whatever the renderer
+        // picks is in the bundle.
+        for (age, variant, color) in [
+            (0, 0, 0),
+            (0, 1, 0),
+            (0, 2, 3),
+            (-24000, 0, 0),
+            (-24000, 2, 0),
+        ] {
+            let mut m = Mob::new(1, kind.clone(), horizon_core::geometry::Vec3::ZERO, 0.0);
+            (m.extra.age, m.extra.variant, m.extra.color) = (age, variant, color);
+            let (model, texture) = render::body(&m);
+            let layers = render::layers(&m);
+            let drawn = std::iter::once((model, texture))
+                .chain(layers.into_iter().map(|l| (l.model, l.texture)))
+                // Layers the open edition doesn't draw (a drowned's outer layer) are
+                // skipped by the renderer when the model is missing.
+                .filter(|(model, _)| kind.layer(model).is_some());
+            let mut any = false;
+            for (model, texture) in drawn {
+                any = true;
+                let png = root.join(format!("assets/minecraft/textures/{texture}.png"));
+                assert!(png.is_file(), "{id} ({model}): missing {}", png.display());
+            }
+            assert!(any, "{id} draws nothing");
+        }
+    }
+}

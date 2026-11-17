@@ -6,8 +6,10 @@
 //!
 //! What changes (see docs/open-creative.md, "Joining a Java server through
 //! the relay"): block states in chunks and block updates, items everywhere a
-//! stack travels, entity types (creatures the bundle lacks are never spawned,
-//! so their later packets are dropped too), menu types, and the server brand.
+//! stack travels, entity types (a creature the bundle lacks shows as its
+//! stand-in, `rules::stand_in`, or is never spawned, its later packets dropped
+//! too), menu types, and the server brand.
+use crate::rules;
 use crate::tables::Tables;
 use horizon_protocol::{
     buf::{Reader, Writer},
@@ -68,8 +70,10 @@ pub struct Clientbound<'t> {
     registries: Dynamic,
     dimension: DimensionType,
     biome_bits: u8,
-    /// Entities the open client never got (types it lacks).
+    /// Entities the open client never got (types it lacks, with no stand-in).
     hidden: HashSet<i32>,
+    /// Entities shown as a stand-in (`rules::stand_in`): only their shared data passes.
+    standing_in: HashSet<i32>,
     pub counts: Counts,
 }
 
@@ -187,6 +191,7 @@ impl<'t> Clientbound<'t> {
             dimension: DimensionType::vanilla("minecraft:overworld"),
             biome_bits: 0,
             hidden: HashSet::new(),
+            standing_in: HashSet::new(),
             counts: Counts::default(),
         }
     }
@@ -265,6 +270,7 @@ impl<'t> Clientbound<'t> {
                 if let C::Login(p) = typed()? {
                     self.dimension = self.registries.dimension(p.spawn.dimension_type);
                     self.hidden.clear();
+                    self.standing_in.clear();
                 }
                 Some(body(id, payload))
             }
@@ -272,6 +278,7 @@ impl<'t> Clientbound<'t> {
                 if let C::Respawn(p) = typed()? {
                     self.dimension = self.registries.dimension(p.spawn.dimension_type);
                     self.hidden.clear();
+                    self.standing_in.clear();
                 }
                 Some(body(id, payload))
             }
@@ -320,9 +327,15 @@ impl<'t> Clientbound<'t> {
             cb::ADD_ENTITY => match typed()? {
                 C::AddEntity(mut p) => {
                     let falling = Some(p.kind) == self.t.falling_block;
-                    match self.t.entity_type(p.kind) {
+                    let stand_in = self.t.stand_in(p.kind);
+                    match self.t.entity_type(p.kind).or(stand_in) {
                         Some(kind) => {
                             self.hidden.remove(&p.id);
+                            if self.t.entity_type(p.kind).is_none() {
+                                self.standing_in.insert(p.id);
+                            } else {
+                                self.standing_in.remove(&p.id);
+                            }
                             p.kind = kind;
                             if falling {
                                 p.data = self.t.state(p.data);
@@ -341,15 +354,18 @@ impl<'t> Clientbound<'t> {
                 if let C::RemoveEntities(p) = typed()? {
                     for id in &p.ids {
                         self.hidden.remove(id);
+                        self.standing_in.remove(id);
                     }
                 }
                 Some(body(id, payload))
             }
             cb::SET_ENTITY_DATA => match typed()? {
                 C::SetEntityData(mut p) if !self.hidden.contains(&p.id) => {
+                    let shared_only = self.standing_in.contains(&p.id);
                     p.values = p
                         .values
                         .into_iter()
+                        .filter(|(index, _, _)| !shared_only || *index < rules::ENTITY_DATA_SHARED)
                         .filter_map(|(index, kind, value)| {
                             self.entity_value(kind, value).map(|v| (index, kind, v))
                         })
