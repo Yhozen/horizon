@@ -127,8 +127,11 @@ copied into this MIT fork, and nothing is added to the imported-source table.
   fixed independently from vanilla's `handleContainerClick`/`stillValid` rule, using this fork's own
   existing range check. No upstream code or test copied.
 - Silk-touched hive bees/honey sync (`fd3142737b678255e6ff6337e3b475256b840876`): not applicable on its
-  own. This fork's creative `SetCreativeModeSlot` path (`to_network` in `game/remote.rs`) sends only
-  item, count and damage, so every component is lost there; tracked as a separate fix.
+  own. Checking it found that this fork's creative `SetCreativeModeSlot` path sent only item, count and
+  damage, and the Horizon server read back only damage and enchantments, so a creative move deleted
+  names, books, colours and (from vanilla servers) every other component. Fixed independently: the
+  client returns a received stack's wire form, and the server reads back what it writes. The Horizon
+  server still sends no `bees` component, so hives keep their bees only on vanilla servers.
 - Shulker knockback (`52c6277ed9e5736e9a78a07db501db11c3f6ecff`): parity only; the fork's shulker tick
   already zeroes its velocity. Not taken.
 
