@@ -1,5 +1,5 @@
-//! Controllers through gilrs (Horizon's own; docs/controllers.md): the
-//! active pad's state each loop iteration, its button edges dispatched as
+//! Controllers through gilrs, or the page's Gamepad API in the browser build
+//! (Horizon's own; docs/controllers.md): the active pad's state each loop iteration, its button edges dispatched as
 //! the vanilla key mappings they are bound to, the left stick as an analog
 //! move vector and the right stick turning the view. `horizon-ctl pad`
 //! injects a virtual pad on top of the real one.
@@ -26,7 +26,7 @@ pub(super) const HELP: &[&str] = &[
 #[derive(Default)]
 pub(super) struct Pads {
     /// The real controllers and the DualSense's output.
-    #[cfg(feature = "controllers")]
+    #[cfg(any(feature = "controllers", target_arch = "wasm32"))]
     devices: hardware::Devices,
     /// The virtual pad of `horizon-ctl pad`.
     injected: PadState,
@@ -53,12 +53,18 @@ pub(super) struct Pads {
     health: HealthWatch,
 }
 
-#[cfg(feature = "controllers")]
+#[cfg(all(feature = "controllers", not(target_arch = "wasm32")))]
 mod hardware;
+
+/// The browser build reads the page's Gamepad API instead of gilrs, with or without the feature.
+#[cfg(target_arch = "wasm32")]
+mod browser;
+#[cfg(target_arch = "wasm32")]
+use browser as hardware;
 
 /// A build without the `controllers` feature (the server build, which must not need libudev): no
 /// hardware pads, only `horizon-ctl pad`'s virtual one.
-#[cfg(not(feature = "controllers"))]
+#[cfg(not(any(feature = "controllers", target_arch = "wasm32")))]
 mod hardware {
     use super::{super::Game, Pads};
     use horizon_client::gamepad::{PadState, Pulse, Rumble};

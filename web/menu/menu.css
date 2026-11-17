@@ -124,6 +124,13 @@ h1 { margin: 0; font-size: clamp(40px, 6vw, 72px); line-height: 1; letter-spacin
 .check { display: flex; align-items: center; gap: 10px; font-size: 13px; cursor: pointer; }
 .check input { width: 16px; height: 16px; margin: 0; accent-color: var(--face); }
 .sheet .credit { word-break: break-word; }
+.sheet .pad-status { display: flex; gap: 10px; align-items: baseline; color: var(--ink); }
+.sheet .pad-status .dot { transform: translateY(-1px); }
+
+/* The connected controller, beside the bar's buttons. */
+.chip { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: var(--radius);
+  font-size: 13px; color: var(--ink-soft); max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  animation: fade 200ms var(--ease-out); }
 
 /* In game: a hint that fades out on its own. */
 .hint-toast { position: fixed; left: 50%; top: 24px; transform: translateX(-50%); padding: 10px 14px; border-radius: 10px;

@@ -68,8 +68,9 @@ wasm-bindgen --target web --no-typescript --out-dir web/dist --out-name horizon-
   target/wasm32-unknown-unknown/fast/horizon-client.wasm
 ```
 
-`--no-default-features` leaves out audio, controllers and the mod runtime (wasmtime cannot run in a
-page). A clean build takes about 2 minutes, an incremental one under a minute.
+`--no-default-features` leaves out audio, gilrs and the mod runtime (wasmtime cannot run in a
+page). Controllers still work: the wasm build reads them through the page's Gamepad API
+(docs/controllers.md, "In the browser"). A clean build takes about 2 minutes, an incremental one under a minute.
 
 ## 4. Serve and open
 
@@ -356,7 +357,8 @@ the game.
 | Time | `web-time` everywhere `Instant`/`SystemTime` were used; browser animation frames replace the blocking native frame limiter |
 | Threads | none: `thread::Builder::spawn` returns an error on wasm, which callers that already handled a failed spawn (`.ok()`) absorb; the places that panicked (`thread::spawn`/`thread::scope`) run inline on wasm: streaming workers, world loading, HUD sprite decode, mod-content tables, region-file writes (`RegionWriter`). The integrated server always ticks in the frame (`--server-thread` is ignored), and world deletion does not sleep between retries |
 | Networking | offline-mode Minecraft 26.3 through a WebSocket/TCP gateway; native TCP, server-list pings, Microsoft login, LAN discovery and friend/relay tunnels remain unavailable in the browser |
-| Off | audio, controllers, mods (wasmtime), native HTTPS services, clipboard, telemetry upload, LOD/distant terrain, persistence |
+| Controllers | the page's Gamepad API in its standard mapping (`game/pad/browser.rs`), with `vibrationActuator` rumble where the browser has it; no DualSense triggers or lights (WebHID) |
+| Off | audio, mods (wasmtime), native HTTPS services, clipboard, telemetry upload, LOD/distant terrain, persistence |
 
 ## Frame rate
 
