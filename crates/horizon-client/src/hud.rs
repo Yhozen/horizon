@@ -95,6 +95,16 @@ pub const TRIM_SLOTS: usize = 32;
 pub fn decode(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
     decode_bytes(&fs::read(path)?)
 }
+/// A fetched PNG, capped by its header before the decoder allocates pixels.
+/// Pack textures use `decode_bytes` directly and keep their existing limits.
+pub fn decode_fetched_png(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
+    if let Some((width, height)) = png_bytes_size(data)
+        && u64::from(width) * u64::from(height) > 4096 * 4096
+    {
+        return Err(format!("a {width}x{height} image is too large to decode").into());
+    }
+    decode_bytes(data)
+}
 /// A PNG in memory as RGBA pixels.
 pub fn decode_bytes(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(data));
@@ -114,14 +124,21 @@ pub fn decode_bytes(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     }
     Ok((info.width, info.height, rgba))
 }
+/// A PNG's size from IHDR, before any pixel buffer is made.
+fn png_bytes_size(data: &[u8]) -> Option<(u32, u32)> {
+    let header = data.get(..24)?;
+    if header[..8] != *b"\x89PNG\r\n\x1a\n" || header[12..16] != *b"IHDR" {
+        return None;
+    }
+    let field = |at: usize| u32::from_be_bytes(header[at..at + 4].try_into().unwrap_or_default());
+    Some((field(16), field(20)))
+}
 /// A PNG's width and height, from its header alone.
 fn png_size(path: &Path) -> Option<(u32, u32)> {
     use std::io::Read;
     let mut header = [0u8; 24];
     fs::File::open(path).ok()?.read_exact(&mut header).ok()?;
-    let field = |at: usize| u32::from_be_bytes(header[at..at + 4].try_into().unwrap_or_default());
-    (header[..8] == *b"\x89PNG\r\n\x1a\n" && header[12..16] == *b"IHDR")
-        .then(|| (field(16), field(20)))
+    png_bytes_size(&header)
 }
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
@@ -1420,6 +1437,45 @@ impl HudRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fetched_png_checks_dimensions_before_allocating_pixels() {
+        let mut encoded = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut encoded, 64, 64);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&vec![7; 64 * 64 * 4])
+                .unwrap();
+        }
+        let decoded = decode_fetched_png(&encoded).unwrap();
+        assert_eq!(
+            (decoded.0, decoded.1, decoded.2.len()),
+            (64, 64, 64 * 64 * 4)
+        );
+        encoded[16..20].copy_from_slice(&4097u32.to_be_bytes());
+        encoded[20..24].copy_from_slice(&4096u32.to_be_bytes());
+        // An invalid CRC proves the header cap runs before PNG decoding.
+        let error = decode_fetched_png(&encoded).unwrap_err();
+        assert!(error.to_string().contains("too large to decode"), "{error}");
+        assert!(decode_fetched_png(&encoded[..23]).is_err());
+    }
+
+    /// Run explicitly with the player's prepared R2 resources; no fixture assets are checked in.
+    #[test]
+    #[ignore = "requires HORIZON_TEST_RESOURCES pointing to prepared R2 resources"]
+    fn fetched_png_preserves_the_prepared_steve_skin() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .expect("set HORIZON_TEST_RESOURCES to the prepared resource root");
+        let path = Path::new(&root).join("assets/minecraft/textures/entity/player/wide/steve.png");
+        let bytes = fs::read(&path).expect("read the prepared vanilla Steve skin");
+        let ordinary = decode_bytes(&bytes).expect("decode the original skin");
+        assert_eq!((ordinary.0, ordinary.1), (64, 64));
+        assert_eq!(decode_fetched_png(&bytes).unwrap(), ordinary);
+    }
 
     /// `count` images of `w x h`; layout reads only their sizes.
     fn sized(count: usize, w: u32, h: u32) -> Vec<PackedImage> {

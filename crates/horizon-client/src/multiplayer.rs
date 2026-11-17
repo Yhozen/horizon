@@ -108,7 +108,7 @@ pub fn servers_file(saves: &Path) -> PathBuf {
 }
 /// `FaviconTexture.upload`: a PNG of exactly 64x64 pixels, else no icon.
 fn icon_pixels(png: &[u8]) -> Option<Arc<Vec<u8>>> {
-    crate::hud::decode_bytes(png)
+    crate::hud::decode_fetched_png(png)
         .ok()
         .filter(|(w, h, _)| *w == 64 && *h == 64)
         .map(|(_, _, p)| Arc::new(p))

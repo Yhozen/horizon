@@ -74,6 +74,7 @@ commit has different content. Each row is present in this branch.
 | [`6bf332f5c5246b2412858c416145e0a6271d8cee`](https://github.com/ludovic111/horizon/commit/6bf332f5c5246b2412858c416145e0a6271d8cee) | Reject excessively nested command redirects before stack overflow | 2026-11-06 |
 | [`45af2b23b2a0d341563325def664e40be127d51c`](https://github.com/ludovic111/horizon/commit/45af2b23b2a0d341563325def664e40be127d51c) | Bound network NBT tag allocations within a conservative quota | 2026-11-06 |
 | [`d55c2840a7884404324ed4bf4e5fdefb4bfa2277`](https://github.com/ludovic111/horizon/commit/d55c2840a7884404324ed4bf4e5fdefb4bfa2277) | Map unknown server block states to air before indexed lookups | 2026-11-06 |
+| [`22ca656476539a657758652b67c868e241003e38`](https://github.com/ludovic111/horizon/commit/22ca656476539a657758652b67c868e241003e38) | Bound fetched PNG dimensions before allocating pixels | 2026-11-06 |
 
 ## Latest comparison
 
