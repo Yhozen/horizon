@@ -1,12 +1,12 @@
 # Upstream backports
 
-Upstream repository: <https://github.com/ludovic111/horizon>, branch `main`.
+Upstream repository: <https://github.com/horizon-rust/horizon>, branch `main`.
 
 | Pointer | Upstream commit |
 | --- | --- |
 | Most recent backported source | [`45af2b23b2a0d341563325def664e40be127d51c`](https://github.com/ludovic111/horizon/commit/45af2b23b2a0d341563325def664e40be127d51c) — Network NBT: no more tags than vanilla's quota admits |
 | Main merge that introduced that source | [`63ddd76a157bb141f4baaa74d4f2b9ed13248307`](https://github.com/ludovic111/horizon/commit/63ddd76a157bb141f4baaa74d4f2b9ed13248307) — Merge pull request #10100 from yahya-nusseibeh/fix/nbt-heap-quota |
-| Upstream tip assessed on 2026-11-03 | [`fc02103818c212920fd24aa34a2b2f91ba49e56f`](https://github.com/ludovic111/horizon/commit/fc02103818c212920fd24aa34a2b2f91ba49e56f) |
+| Upstream tip assessed on 2026-11-06 | [`41f822b659789780f58d32c63ddfb6887ea1b8bf`](https://github.com/horizon-rust/horizon/commit/41f822b659789780f58d32c63ddfb6887ea1b8bf) |
 
 These are selective imports. The backport pointer does **not** mean every earlier upstream change
 is present, and the assessed tip does **not** mean its code has been imported. “Most recent” means
@@ -75,40 +75,42 @@ commit has different content. Each row is present in this branch.
 | [`45af2b23b2a0d341563325def664e40be127d51c`](https://github.com/ludovic111/horizon/commit/45af2b23b2a0d341563325def664e40be127d51c) | Bound network NBT tag allocations within a conservative quota | 2026-11-06 |
 | [`d55c2840a7884404324ed4bf4e5fdefb4bfa2277`](https://github.com/ludovic111/horizon/commit/d55c2840a7884404324ed4bf4e5fdefb4bfa2277) | Map unknown server block states to air before indexed lookups | 2026-11-06 |
 | [`22ca656476539a657758652b67c868e241003e38`](https://github.com/ludovic111/horizon/commit/22ca656476539a657758652b67c868e241003e38) | Bound fetched PNG dimensions before allocating pixels | 2026-11-06 |
+| [`a7f6ecbdfbf11c5626c69d3b5c159deac690657f`](https://github.com/ludovic111/horizon/commit/a7f6ecbdfbf11c5626c69d3b5c159deac690657f) | Synchronize the selected hotbar slot before an immediate Q drop | 2026-11-06 |
 
 ## Latest comparison
 
-The 2026-11-03 comparison used merged fork main `5af117e792bb65b79d6cd48f640d89f006a6a536` and
-examined browser-relevant rendering, inventory/input and save/load changes among the 836 non-merge
-commits since the previous assessed tip, `90d7eb16355904d4b78258bdb071d37ec5a2fbd9`. Older deferred
-fixes were revisited too. The source table records the selective fixes now implemented on this branch. The backport pointer
-advances by upstream integration order, independently of the order of our imports. The merged code retains the PR #10 model-identity and
-respawn-cache corrections, and PR #18's real display-click/carried-stack regression setup.
+The 2026-11-06 comparison starts from merged fork main
+`c49254ee46d763842888db8ac97dcef597d59ea0` and examines the 2,090 non-merge commits
+between the previous assessed tip `fc02103818c212920fd24aa34a2b2f91ba49e56f` and the tip above.
+This pass selects important fixes demonstrably applicable to the browser fork: stack overflow
+from nested SNBT/commands, excessive network-NBT allocations, unknown server block states,
+oversized fetched PNGs, and a hotbar/Q ordering error that drops the wrong item.
 
-The save imports are adapted to preserve readable backups through a subsequent save, validate
-level/player NBT roots, retain legacy generator/version checks, and keep recoverable worlds visible
-in the world picker. They cover the single-player owner in both execution modes and LAN guest
-player-file recovery, including preserving readable backups during the next save.
+The parser guards are defensive Horizon limits. Network NBT keeps its existing byte/depth bounds;
+saved-NBT limits remain separate. Unknown received states become air before per-state tables are
+indexed. Fetched images are bounded before pixel allocation. Q sends the selected slot before the
+drop action, including when both keys arrive before the next simulation tick.
 
-Imported-world owner identity now uses the named owner file or the joining profile's own file,
-with validated backup recovery. Both in-frame and integrated loading avoid selecting another
-player's file by modification time; player saves preserve corrupt originals and readable backups.
+No mod, launcher, shader or cosmetic feature is imported. Several apparent severe fixes do not
+apply here: `14f4b9d33254175637372bf20622f419fa0c0763` fixes a newer remote spawner scan absent
+from this fork; `90ecdc3dd01c64207851ebb0710f45ab5dccfbb6` and
+`e1e3c4f8406b74d53afe07a6a95c26b10f95ba2f` depend on newer loot-roll consumption machinery;
+`fa62beefdf92dc96dfe89049d8bbeebeda14ae0c` targets a server-pack downloader absent here.
+The fork already bounds recursively nested item-component packets independently. Broader native
+rendering/worker architecture changes still need separate browser evaluation.
 
-The new station panic fix `b04bd9a0e33b61509d50509c0ce5064d57442ba8` does not apply: the offending
-upstream result-slot snapshot is absent here. Server block/entity picking, bulk teleport/occlusion
-removal, worker cancellation on exit, native staging buffers and worker-based GUI atlas compression
-remain separate work requiring their dependencies and browser evaluation.
-
-The initial comparison checked source/history, patch applicability and prepared R2 item definitions.
+Prior model-cache identity, respawn-cache, display-click, owner identity, backup recovery,
+resource-pack overlay, and inventory backports remain in merged main. The source table describes
+what this branch imports; the reviewed tip is not a claim that all its changes were imported.
 Implementation verification is recorded in the backport PRs. Runtime checks use isolated temporary
-worlds and the prepared R2 resources; vanilla-oracle execution additionally requires the game JARs.
+worlds and the prepared R2 resources; Java-oracle execution additionally requires the game JARs.
 
 ## Maintaining the record
 
 1. Fetch upstream without replacing this fork's branch:
 
    ```sh
-   git fetch https://github.com/ludovic111/horizon.git main:refs/remotes/upstream/main
+   git fetch https://github.com/horizon-rust/horizon.git main:refs/remotes/upstream/main
    ```
 
 2. Inspect changes after the **assessed tip**, and revisit older deferred fixes as needed. Do not use
