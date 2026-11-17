@@ -4,8 +4,8 @@ Upstream repository: <https://github.com/horizon-rust/horizon>, branch `main`.
 
 | Pointer | Upstream commit |
 | --- | --- |
-| Most recent backported source | [`53b7a6768de77939e2e191cd9ef4f03d4a4a4968`](https://github.com/horizon-rust/horizon/commit/53b7a6768de77939e2e191cd9ef4f03d4a4a4968) — Record the predicted drop as sent so a refilling pickup syncs to a guest |
-| Main merge that introduced that source | [`24b778c3b4e9f0048b9eed1c1943904a86dbf093`](https://github.com/horizon-rust/horizon/commit/24b778c3b4e9f0048b9eed1c1943904a86dbf093) — Merge pull request #14173 from DUzzL/fix/14071-full-inventory-pickup |
+| Most recent backported source | [`fbfa055effff0800b0223652751268551a1f4344`](https://github.com/horizon-rust/horizon/commit/fbfa055effff0800b0223652751268551a1f4344) — Guard item count arithmetic against i32 overflow |
+| Main merge that introduced that source | [`14e27946ca20e9d4fae7ca38bd03524f04fefe3f`](https://github.com/horizon-rust/horizon/commit/14e27946ca20e9d4fae7ca38bd03524f04fefe3f) — Merge pull request #15410 from Web-mc1/fix/item-set-count-overflow |
 | Upstream tip assessed on 2026-11-17 | [`810f09f5bc35c33d39534a33269654075d575122`](https://github.com/horizon-rust/horizon/commit/810f09f5bc35c33d39534a33269654075d575122) |
 
 These are selective imports. The backport pointer does **not** mean every earlier upstream change
@@ -77,6 +77,7 @@ commit has different content. Each row is present in this branch.
 | [`22ca656476539a657758652b67c868e241003e38`](https://github.com/ludovic111/horizon/commit/22ca656476539a657758652b67c868e241003e38) | Bound fetched PNG dimensions before allocating pixels | 2026-11-06 |
 | [`a7f6ecbdfbf11c5626c69d3b5c159deac690657f`](https://github.com/ludovic111/horizon/commit/a7f6ecbdfbf11c5626c69d3b5c159deac690657f) | Synchronize the selected hotbar slot before an immediate Q drop | 2026-11-06 |
 | [`53b7a6768de77939e2e191cd9ef4f03d4a4a4968`](https://github.com/horizon-rust/horizon/commit/53b7a6768de77939e2e191cd9ef4f03d4a4a4968) | Resync the selected slot after a predicted drop and immediate pickup | 2026-11-17 |
+| [`fbfa055effff0800b0223652751268551a1f4344`](https://github.com/horizon-rust/horizon/commit/fbfa055effff0800b0223652751268551a1f4344) | Prevent loot item-count arithmetic from overflowing | 2026-11-17 |
 
 ## Latest comparison
 

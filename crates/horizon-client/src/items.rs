@@ -1386,7 +1386,7 @@ impl LootContext<'_> {
                     } else {
                         0
                     };
-                    stack.count = (base + n).max(0) as u32;
+                    stack.count = base.saturating_add(n).max(0) as u32;
                 }
                 "minecraft:apply_bonus" => {
                     let level =
@@ -1400,7 +1400,13 @@ impl LootContext<'_> {
                         }
                         "minecraft:uniform_bonus_count" => {
                             let multiplier = params["bonusMultiplier"].as_i64().unwrap_or(1) as i32;
-                            count + random.next_int_bound(multiplier * level + 1).unwrap_or(0)
+                            count.saturating_add(
+                                random
+                                    .next_int_bound(
+                                        multiplier.saturating_mul(level).saturating_add(1).max(1),
+                                    )
+                                    .unwrap_or(0),
+                            )
                         }
                         "minecraft:binomial_with_bonus_count" => {
                             let (extra, p) = (
@@ -1424,7 +1430,9 @@ impl LootContext<'_> {
                     let level = self.enchantment_level(f["enchantment"].as_str().unwrap_or(""));
                     if level > 0 && self.killed_by_player && self.block.is_empty() {
                         let add = level as f32 * Self::number(&f["count"], random);
-                        stack.count = (stack.count as i32 + add.round() as i32).max(0) as u32;
+                        stack.count = (stack.count as i32)
+                            .saturating_add(add.round() as i32)
+                            .max(0) as u32;
                         if let Some(limit) = f["limit"].as_i64().filter(|l| *l > 0) {
                             stack.count = stack.count.min(limit as u32);
                         }
@@ -1569,6 +1577,25 @@ mod tests {
             killed_by_player: block.is_empty(),
             explosion_radius: None,
         }
+    }
+
+    #[test]
+    fn loot_count_modifiers_saturate_large_counts() {
+        let items = Items::for_tests(HashMap::new());
+        let props = BTreeMap::new();
+        let mut tool = ItemStack::new("minecraft:diamond_pickaxe", 1);
+        tool.enchant("minecraft:fortune", 3);
+        let context = ctx(&items, Some(&tool), &props, "minecraft:diamond_ore");
+        let mut random = LegacyRandom::new(7);
+        let mut stack = ItemStack::new("minecraft:diamond", i32::MAX as u32);
+        context.modifiers(
+            &json!({"type":"minecraft:set_count", "count":1, "add":true}),
+            &mut stack,
+            &mut random,
+        );
+        assert_eq!(stack.count, i32::MAX as u32);
+        context.modifiers(&json!({"type":"minecraft:apply_bonus", "enchantment":"minecraft:fortune", "formula":"minecraft:uniform_bonus_count", "parameters":{"bonusMultiplier":i32::MAX}}), &mut stack, &mut random);
+        assert_eq!(stack.count, i32::MAX as u32);
     }
 
     #[test]
