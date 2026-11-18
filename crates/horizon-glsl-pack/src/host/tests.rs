@@ -1,6 +1,7 @@
 use super::*;
 use crate::naga_out::glsl_to_wgsl;
 use crate::rewrite::Uniform;
+use crate::{SamplerKind, TextureSource};
 
 fn var(name: &str, ty: &str, flat: bool) -> Var {
     Var {
@@ -145,10 +146,7 @@ fn compile(
     host: &HostParams,
     program: &(Rewritten, Rewritten),
 ) -> (String, String) {
-    let blocks = BlockIds {
-        ids: vec![10008, 10068, 10072],
-        ..Default::default()
-    };
+    let blocks = BlockIds::legacy();
     let draw_buffers = [0, 6, 7];
     let spec = ProgramSpec {
         kind,
@@ -156,6 +154,7 @@ fn compile(
         draw_buffers: &draw_buffers,
         host,
         blocks: &blocks,
+        plan: &PackPlan::default(),
     };
     let (vs, fs) = sources(&program.0, &program.1, &spec).unwrap();
     let vs_wgsl =
@@ -221,6 +220,7 @@ fn locations_are_sorted_and_limited() {
         draw_buffers: &[0],
         host: &HostParams::default(),
         blocks: &blocks,
+        plan: &PackPlan::default(),
     };
     let (vs, fs) = sources(&vertex, &fragment, &spec).unwrap();
     // ambient color hz_gl_Color hz_gl_FogFragCoord id normal texUV weights[2], then hz_sprite.
@@ -242,7 +242,7 @@ fn locations_are_sorted_and_limited() {
     let many: Vec<Var> = (0..16)
         .map(|i| var(&format!("v{i}"), "float", false))
         .collect();
-    let mut wide = (
+    let wide = (
         Rewritten {
             varyings: many.clone(),
             ..vertex
@@ -253,20 +253,25 @@ fn locations_are_sorted_and_limited() {
             ..fragment
         },
     );
-    let err = sources(&wide.0, &wide.1, &spec).unwrap_err();
-    assert!(err.contains("17 varying locations"), "{err}");
-    // A full-screen pass has no hz_sprite: 16 fit.
-    wide.0.varyings.pop();
+    // 17 with hz_sprite: packed into four vec4s.
+    let (vs, _) = sources(&wide.0, &wide.1, &spec).unwrap();
+    assert!(vs.contains("layout(location = 3) out vec4 hz_vp3;"), "{vs}");
+    assert!(
+        vs.contains("layout(location = 4) flat out uvec4 hz_sprite;"),
+        "{vs}"
+    );
+    // A full-screen pass has no hz_sprite: 16 fit unpacked.
     let fits = ProgramSpec {
         geometry: Geometry::Fullscreen,
         ..spec
     };
-    wide.1.varyings.pop();
-    assert!(shared_varyings(&wide.0, &wide.1, fits.geometry).is_ok());
+    let unpacked = Interface::new(&wide.0, &wide.1, fits.geometry, 16).unwrap();
+    assert_eq!(unpacked.slots.len(), 16);
+    assert_eq!(unpacked.slots[15].name, "hz_v_v9");
 }
 
 #[test]
-fn unknown_or_mistyped_names_fail() {
+fn unknown_uniforms_are_zero_and_mistyped_ones_fail() {
     let blocks = BlockIds::default();
     let spec = ProgramSpec {
         kind: ProgramKind::Final,
@@ -274,31 +279,29 @@ fn unknown_or_mistyped_names_fail() {
         draw_buffers: &[0],
         host: &HostParams::default(),
         blocks: &blocks,
+        plan: &PackPlan::default(),
     };
     let (vertex, fragment) = final_program();
     let with = |u: &[(&str, &str)]| Rewritten {
         uniforms: uniforms(u),
         ..fragment.clone()
     };
-    let err = sources(&vertex, &with(&[("sunPathRotation", "float")]), &spec).unwrap_err();
-    assert!(err.contains("sunPathRotation"), "{err}");
+    let unknown = with(&[("hz_test_unknown", "vec3"), ("hz_test_count", "int")]);
+    let mut unknown = unknown;
+    unknown.body = unknown.body.replace(
+        "hz_gl_FragData[0] = color",
+        "hz_gl_FragData[0] = vec4(hz_test_unknown, float(hz_test_count)) + color",
+    );
+    let out = program_sources(&vertex, &unknown, &spec).unwrap();
+    assert_eq!(
+        out.unknown_uniforms,
+        set(&["hz_test_unknown", "hz_test_count"])
+    );
+    assert!(out.fragment.contains("vec3 hz_test_unknown;"));
+    glsl_to_wgsl(&out.fragment, Stage::Fragment)
+        .unwrap_or_else(|e| panic!("{e}\n{}", out.fragment));
     let err = sources(&vertex, &with(&[("worldTime", "float")]), &spec).unwrap_err();
     assert!(err.contains("worldTime"), "{err}");
-    let specular = Rewritten {
-        sample_calls: set(&["hz_sample_specular"]),
-        ..fragment.clone()
-    };
-    assert!(
-        sources(&vertex, &specular, &spec)
-            .unwrap_err()
-            .contains("specular")
-    );
-    // gtexture is the block atlas: a full-screen pass has none.
-    let gtexture = Rewritten {
-        sample_calls: set(&["hz_sample_gtexture"]),
-        ..fragment
-    };
-    assert!(sources(&vertex, &gtexture, &spec).is_err());
 }
 
 #[test]
@@ -413,5 +416,379 @@ fn gl_convention_round_trips() {
                 "{view:?}: {i} {got}"
             );
         }
+    }
+}
+
+/// Host sources and both stages' WGSL of a program under `plan`.
+fn run(
+    kind: ProgramKind,
+    plan: &PackPlan,
+    draw_buffers: &[u8],
+    program: &(Rewritten, Rewritten),
+) -> (HostOutput, String, String) {
+    let blocks = BlockIds::default();
+    let spec = ProgramSpec {
+        kind,
+        geometry: kind.geometry(),
+        draw_buffers,
+        host: &HostParams::default(),
+        blocks: &blocks,
+        plan,
+    };
+    let out =
+        program_sources(&program.0, &program.1, &spec).unwrap_or_else(|e| panic!("{kind:?}: {e}"));
+    let vs = glsl_to_wgsl(&out.vertex, Stage::Vertex)
+        .unwrap_or_else(|e| panic!("{kind:?} vertex:\n{e}\n{}", out.vertex));
+    let fs = glsl_to_wgsl(&out.fragment, Stage::Fragment)
+        .unwrap_or_else(|e| panic!("{kind:?} fragment:\n{e}\n{}", out.fragment));
+    (out, vs, fs)
+}
+
+/// A `gbuffers_entities`-style pair on entity geometry.
+fn entity_program() -> (Rewritten, Rewritten) {
+    let varyings = vec![
+        var("uv", "vec2", false),
+        var("light", "vec2", false),
+        var("tint", "vec4", false),
+        var("normal", "vec3", false),
+    ];
+    let vertex = Rewritten {
+        body: "void hz_pack_main() {
+    uv = (hz_gl_TextureMatrix[0] * hz_gl_MultiTexCoord0).st;
+    light = (hz_gl_TextureMatrix[1] * hz_gl_MultiTexCoord1).st;
+    tint = hz_gl_Color + entityColor * 0.0;
+    normal = normalize(hz_gl_NormalMatrix * hz_gl_Normal) + at_tangent.xyz * 0.0;
+    vec4 view = hz_gl_ModelViewMatrix * hz_gl_Vertex;
+    vec4 back = hz_gl_ModelViewMatrixInverse * view;
+    gl_Position = hz_gl_ProjectionMatrix * view + back * 0.0;
+    hz_gl_FogFragCoord = length(view.xyz);
+}
+"
+        .into(),
+        varyings: varyings.clone(),
+        attributes: vec![
+            var("at_tangent", "vec4", false),
+            var("mc_Entity", "vec4", false),
+        ],
+        uniforms: uniforms(&[("entityColor", "vec4")]),
+        builtins: set(&[
+            "hz_gl_TextureMatrix",
+            "hz_gl_MultiTexCoord0",
+            "hz_gl_MultiTexCoord1",
+            "hz_gl_Color",
+            "hz_gl_NormalMatrix",
+            "hz_gl_Normal",
+            "hz_gl_ModelViewMatrix",
+            "hz_gl_ModelViewMatrixInverse",
+            "hz_gl_ProjectionMatrix",
+            "hz_gl_Vertex",
+            "hz_gl_FogFragCoord",
+        ]),
+        ..Default::default()
+    };
+    let fragment = Rewritten {
+        body: "void hz_pack_main() {
+    vec4 albedo = hz_sample_texture(uv) * tint;
+    albedo.rgb = mix(albedo.rgb, entityColor.rgb, entityColor.a);
+    albedo *= hz_sampleBias_tex(uv, 1.0) + hz_sampleGrad_gtexture(uv, dFdx(uv), dFdy(uv));
+    albedo *= hz_sample_lightmap(light) * hz_sample_normals(uv) + hz_sample_specular(uv);
+    albedo += hz_sample_gaux1(uv) * 0.0;
+    albedo.rgb = mix(albedo.rgb, hz_gl_Fog.color.rgb, clamp(hz_gl_FogFragCoord / hz_gl_Fog.end, 0.0, 1.0));
+    hz_gl_FragData[0] = albedo;
+    hz_gl_FragData[1] = vec4(normal * 0.5 + 0.5, hz_FragCoord.z);
+}
+"
+        .into(),
+        varyings,
+        uniforms: uniforms(&[("entityColor", "vec4")]),
+        samplers: set(&["texture", "tex", "gtexture", "lightmap", "normals", "specular", "gaux1"]),
+        builtins: set(&["hz_gl_FragData", "hz_gl_Fog", "hz_gl_FogFragCoord", "hz_FragCoord"]),
+        sample_calls: set(&[
+            "hz_sample_texture",
+            "hz_sampleBias_tex",
+            "hz_sampleGrad_gtexture",
+            "hz_sample_lightmap",
+            "hz_sample_normals",
+            "hz_sample_specular",
+            "hz_sample_gaux1",
+        ]),
+        ..Default::default()
+    };
+    (vertex, fragment)
+}
+
+#[test]
+fn entity_geometry_reads_horizon_s_entity_vertex() {
+    let mut plan = PackPlan::default();
+    plan.custom_textures.push(crate::plan::CustomTexture {
+        stage: crate::plan::TextureStage::Gbuffers,
+        sampler: "colortex4".into(),
+        path: "shaders/textures/a.png".into(),
+    });
+    plan.buffers[2].format = crate::plan::BufferFormat::Rgba16F;
+    let (out, vs, fs) = run(ProgramKind::Entities, &plan, &[0, 2], &entity_program());
+    // The entity vertex layout, every attribute by location.
+    for input in [
+        "@location(0) hz_in_position: vec3<f32>",
+        "@location(1) hz_in_uv: vec2<f32>",
+        "@location(2) hz_in_layer: u32",
+        "@location(3) hz_in_color: vec4<f32>",
+        "@location(4) hz_in_light: vec4<u32>",
+        "@location(5) hz_in_normal: vec4<f32>",
+    ] {
+        assert!(vs.contains(input), "{input}\n{vs}");
+    }
+    // The atlas and lightmap of Horizon's entity group; nothing of the terrain group.
+    assert!(
+        fs.contains("@group(0) @binding(1) \nvar hz_atlas: texture_2d<f32>"),
+        "{fs}"
+    );
+    assert!(fs.contains("@group(0) @binding(3) \nvar hz_lightmap: texture_2d<f32>"));
+    assert!(!fs.contains("texture_2d_array"));
+    // entityColor per vertex, not the block's.
+    assert!(out.vertex.contains("hz_block_entityColor;"));
+    assert!(
+        vs.contains("@location(5) @interpolate(flat) hz_v_entityColor"),
+        "{vs}"
+    );
+    // The custom texture replaces gaux1; normals and specular are constants.
+    assert_eq!(
+        out.textures,
+        vec![TextureBinding {
+            binding: 6,
+            source: TextureSource::Custom(0),
+            sampler: SamplerKind::PointRepeat,
+            vertex: false,
+            fragment: true,
+        }]
+    );
+    assert!(fs.contains("@group(1) @binding(44)"));
+    // Entities' alpha test, unorm output 0 and float output 1.
+    assert!(out.fragment.contains("a > 0.1)"));
+    assert!(out.fragment.contains("hz_out_0 = hz_unorm("));
+    assert!(out.fragment.contains("hz_out_1 = hz_finite("));
+    assert!(out.fragment.contains("1.0 - gl_FragCoord.z"));
+    // Projection per pass.
+    assert!(
+        out.vertex
+            .contains("hz_gl_ProjectionMatrix = projectionMatrix;")
+    );
+    assert!(out.vertex.contains("hz_inverse(modelViewMatrix)"));
+}
+
+/// A composite pass reading every kind of pack texture.
+fn composite_program(calls: &[&str]) -> (Rewritten, Rewritten) {
+    let (vertex, mut fragment) = final_program();
+    let mut body = String::from("void hz_pack_main() {\n    vec4 c = vec4(0.0);\n");
+    for call in calls {
+        let (op, _) = split_sampling_call(call).unwrap();
+        let args = match op {
+            "hz_sample_" => "(texUV)",
+            "hz_sampleLod_" => "(texUV, 2.0)",
+            "hz_sampleBias_" => "(texUV, 1.0)",
+            "hz_sampleGrad_" => "(texUV, dFdx(texUV), dFdy(texUV))",
+            "hz_fetch_" => "(ivec2(3, 4), 0)",
+            "hz_size_" => {
+                body += &format!("    c.x += float({call}(0).x);\n");
+                continue;
+            }
+            "hz_shadow_" => "(vec3(texUV, 0.5))",
+            _ => "(vec3(texUV, 0.5), 0.0)",
+        };
+        body += &format!("    c += {call}{args};\n");
+    }
+    body += "    hz_gl_FragData[0] = c;\n    hz_gl_FragData[1] = c;\n}\n";
+    fragment.body = body;
+    fragment.uniforms.clear();
+    fragment.samplers = calls
+        .iter()
+        .map(|c| split_sampling_call(c).unwrap().1.to_string())
+        .collect();
+    fragment.sample_calls = calls.iter().map(|s| s.to_string()).collect();
+    (vertex, fragment)
+}
+
+#[test]
+fn sampling_kinds_follow_the_plan() {
+    use crate::plan::BufferFormat;
+    let mut plan = PackPlan::default();
+    plan.shadow.hardware_filtering[0] = true;
+    plan.shadow.tex_mipmap[1] = true;
+    plan.buffers[1].format = BufferFormat::Rgba32F;
+    plan.buffers[2].format = BufferFormat::Rgb16;
+    plan.buffers[5].format = BufferFormat::R11G11B10F;
+    plan.mipmaps.insert(ProgramKind::Composite(1), [6].into());
+    plan.draw_buffers.insert(ProgramKind::Composite(1), vec![4]);
+    plan.custom_textures.push(crate::plan::CustomTexture {
+        stage: crate::plan::TextureStage::Composite,
+        sampler: "colortex4".into(),
+        path: "shaders/textures/a.png".into(),
+    });
+    let calls = [
+        "hz_shadow_shadow",
+        "hz_shadowLod_shadow",
+        "hz_sample_shadowtex0",
+        "hz_sampleLod_shadowtex1",
+        "hz_sample_shadowtex1",
+        "hz_shadow_shadowtex1",
+        "hz_sample_gaux3",
+        "hz_sampleGrad_colortex6",
+        "hz_sampleBias_colortex6",
+        "hz_fetch_colortex6",
+        "hz_sample_gdepth",
+        "hz_sampleLod_gdepth",
+        "hz_sample_gnormal",
+        "hz_sample_shadowcolor",
+        "hz_sample_noisetex",
+        "hz_sample_gdepthtex",
+        "hz_size_depthtex1",
+        "hz_sample_gaux1",
+        "hz_sample_mysteryTexture",
+    ];
+    let program = composite_program(&calls);
+    let (out, _, fs) = run(ProgramKind::Composite(2), &plan, &[0, 5], &program);
+    let got: Vec<(u32, TextureSource, SamplerKind)> = out
+        .textures
+        .iter()
+        .map(|t| (t.binding, t.source.clone(), t.sampler))
+        .collect();
+    use TextureSource::*;
+    assert_eq!(
+        got,
+        vec![
+            (2, Buffer(0), SamplerKind::Linear),
+            (3, Buffer(1), SamplerKind::Point),
+            (4, Buffer(2), SamplerKind::Linear),
+            // An earlier composite wrote colortex4: the custom texture no longer applies.
+            (6, Buffer(4), SamplerKind::Linear),
+            (8, Buffer(6), SamplerKind::Trilinear),
+            (18, Depth(0), SamplerKind::Point),
+            (19, Depth(1), SamplerKind::Point),
+            (21, ShadowTex(0), SamplerKind::Point),
+            (23, ShadowColor(0), SamplerKind::Linear),
+            (25, Noise, SamplerKind::LinearRepeat),
+            (28, ShadowTex(0), SamplerKind::Compare),
+            (31, ShadowTexMips(1), SamplerKind::Point),
+        ]
+    );
+    assert!(out.textures.iter().all(|t| t.fragment && !t.vertex));
+    assert!(fs.contains("texture_depth_2d") && fs.contains("sampler_comparison"));
+    assert!(fs.contains("textureSampleCompareLevel"));
+    // RGB16 reads alpha 1; RGBA32F is filtered in the shader; colortex6 has mips.
+    assert!(
+        out.fragment
+            .contains("vec4 hz_post_4(vec4 c) {\n    return vec4(c.rgb, 1.0);")
+    );
+    assert!(out.fragment.contains("hz_bilinear_3("));
+    assert!(out.fragment.contains("hz_trilinear_31("));
+    assert!(out.fragment.contains("hz_lod_8(dFdx(uv), dFdy(uv)) + bias"));
+    // Output 1 is the R11G11B10F colortex5: a float target.
+    assert!(out.fragment.contains("hz_out_1 = hz_finite("));
+    assert!(!out.fragment.contains("discard"));
+
+    // Before the pass that turns them on, colortex6 has no mip sampling; the custom texture applies.
+    let (early, _, _) = run(ProgramKind::Composite(0), &plan, &[0], &program);
+    let find = |out: &HostOutput, b: u32| {
+        out.textures
+            .iter()
+            .find(|t| t.binding == b)
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(find(&early, 8).sampler, SamplerKind::Linear);
+    assert_eq!(find(&early, 6).source, Custom(0));
+    assert_eq!(find(&early, 6).sampler, SamplerKind::PointRepeat);
+}
+
+#[test]
+fn watershadow_moves_shadow_to_shadowtex1() {
+    let mut program = composite_program(&["hz_sample_shadow", "hz_sample_watershadow"]);
+    program.1.samplers.insert("watershadow".into());
+    let (out, _, _) = run(ProgramKind::Final, &PackPlan::default(), &[0], &program);
+    let sources: Vec<_> = out.textures.iter().map(|t| t.source.clone()).collect();
+    assert_eq!(
+        sources,
+        vec![TextureSource::ShadowTex(0), TextureSource::ShadowTex(1)]
+    );
+}
+
+#[test]
+fn fullscreen_is_a_four_vertex_strip() {
+    let (out, vs, _) = run(
+        ProgramKind::Final,
+        &PackPlan::default(),
+        &[0],
+        &final_program(),
+    );
+    assert!(
+        out.vertex
+            .contains("vec2(float(gl_VertexIndex & 1), float(gl_VertexIndex >> 1))")
+    );
+    assert!(!vs.contains("@location(0) hz_in"));
+    // Unknown samplers and the atlas names read colortex0 in a full-screen pass.
+    let program = composite_program(&[
+        "hz_sample_gtexture",
+        "hz_sample_whatever",
+        "hz_sample_colortex0",
+    ]);
+    let (out, _, _) = run(
+        ProgramKind::Composite(0),
+        &PackPlan::default(),
+        &[0],
+        &program,
+    );
+    assert_eq!(out.textures.len(), 1);
+    assert_eq!(out.textures[0].source, TextureSource::Buffer(0));
+}
+
+#[test]
+fn every_entity_kind_translates_with_its_alpha_test() {
+    for kind in ProgramKind::GEOMETRY {
+        if kind.geometry() != Geometry::Entity {
+            continue;
+        }
+        let (out, _, _) = run(kind, &PackPlan::default(), &[0, 1], &entity_program());
+        let tested = out.fragment.contains("discard");
+        let untested = matches!(
+            kind,
+            ProgramKind::SkyBasic | ProgramKind::SkyTextured | ProgramKind::Basic
+        );
+        assert_eq!(tested, !untested, "{kind:?}");
+        // Cracks and beacon beams wrap their atlas UVs per fragment, as entity.wgsl does.
+        let wraps = matches!(kind, ProgramKind::DamagedBlock | ProgramKind::Textured);
+        assert_eq!(out.fragment.contains("hz_atlas_uv(uv)"), wraps, "{kind:?}");
+        assert_eq!(
+            out.vertex.contains("crumbling_sprite.zw"),
+            wraps,
+            "{kind:?}"
+        );
+    }
+}
+
+#[test]
+fn sprite_grad_and_bias() {
+    for host in [
+        HostParams::default(),
+        HostParams {
+            sprite_grid: 4,
+            ..Default::default()
+        },
+        HostParams {
+            sprite_arrays: 3,
+            sprite_split: 1024,
+            ..Default::default()
+        },
+    ] {
+        let mut program = terrain_program();
+        program.1.body = program.1.body.replace(
+            "vec4 albedo = ",
+            "vec4 albedo = hz_sampleGrad_gtexture(texUV, dFdx(texUV), dFdy(texUV)) * hz_sampleBias_tex(texUV, -1.0) * ",
+        );
+        program
+            .1
+            .sample_calls
+            .insert("hz_sampleGrad_gtexture".into());
+        program.1.sample_calls.insert("hz_sampleBias_tex".into());
+        compile(ProgramKind::Terrain, &host, &program);
     }
 }

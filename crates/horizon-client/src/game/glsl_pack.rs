@@ -83,7 +83,7 @@ pub(super) fn install(renderer: &mut Renderer, pack: &PackResources) {
             // Without a shadow program the pack must not read a shadow map.
             options.overrides.push(("ENABLE_SHADOWS".into(), None));
         }
-        horizon_glsl_pack::compile(files, "minecraft:overworld", &kinds, &options, &host)
+        horizon_glsl_pack::compile_kinds(files, "minecraft:overworld", &kinds, &options, &host)
             .map_err(|e| e.to_string())
             .and_then(|compiled| renderer.set_shader_pack(Some(&compiled)).map(|()| compiled))
     };

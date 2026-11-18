@@ -331,11 +331,13 @@ impl PackTags {
                 .map(|id| {
                     registry
                         .state(BlockStateId(id))
-                        .map_or(horizon_glsl_pack::NO_MATERIAL, |s| blocks.material(&s.name))
+                        .map_or(horizon_glsl_pack::NO_MATERIAL, |s| {
+                            blocks.material(&s.name, false)
+                        })
                 })
                 .collect(),
-            water: blocks.material("water"),
-            lava: blocks.material("lava"),
+            water: blocks.material("water", true),
+            lava: blocks.material("lava", true),
         }
     }
 }

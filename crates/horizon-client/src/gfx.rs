@@ -2555,6 +2555,7 @@ impl Renderer {
                 sprite_arrays,
                 sprite_split: split,
                 sprite_grid: grid,
+                ..Default::default()
             },
             pack_frames: 0,
             hud,

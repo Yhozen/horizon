@@ -657,8 +657,12 @@ mod tests {
             }
         }
         let blocks = crate::properties::block_ids(&files, &pre).unwrap();
-        assert_eq!(blocks.ids.len(), 23);
-        assert!(blocks.material("minecraft:water") < crate::NO_MATERIAL);
+        // The two fluid surfaces, then 23 ids.
+        assert_eq!(blocks.entries.len(), 25);
+        assert_eq!(
+            blocks.entity(blocks.material("minecraft:water", true)),
+            (10008, true)
+        );
         let raw = expand_includes(&files, "shaders/world0/gbuffers_terrain.fsh").unwrap();
         assert_eq!(crate::properties::draw_buffers(&raw), Some(vec![0, 6, 7]));
         assert_eq!(
