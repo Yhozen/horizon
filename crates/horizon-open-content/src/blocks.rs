@@ -1262,7 +1262,7 @@ mod tests {
     }
 
     /// The number of palette blocks (checked again by the client's test).
-    pub const PALETTE_BLOCKS: usize = 722;
+    pub const PALETTE_BLOCKS: usize = 732;
 
     #[test]
     fn states_vary_the_last_property_fastest_and_have_a_default() {

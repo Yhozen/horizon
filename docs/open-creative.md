@@ -229,7 +229,7 @@ to the plants and small decorations: flowers and tall flowers, saplings, grass, 
 mushrooms, fungi and roots, crops by age, sugar cane, sweet berry bushes, seagrass, kelp, coral,
 coral fans and wall fans (live and dead), sea pickles, the Nether and cave vines, vines, glow
 lichen, sculk veins, hanging roots, cobwebs, amethyst buds, torches, wall torches, redstone
-torches, lanterns and lily pads. Numbers and names only: per state its light, dampening, map
+torches, lanterns, lily pads, chains and leaf litter. Numbers and names only: per state its light, dampening, map
 colour, flags, outline boxes, collision and occlusion shapes (the cached tables' cells, written
 through the shape library's table), random offset, behaviour row and the models, turns and
 weights its variant uses (or, for vines and lichen, the multipart cases); per model the layout

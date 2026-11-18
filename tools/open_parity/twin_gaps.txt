@@ -99,7 +99,6 @@ blocks:minecraft:comparator
 blocks:minecraft:composter
 blocks:minecraft:conduit
 blocks:minecraft:copper_bulb
-blocks:minecraft:copper_chain
 blocks:minecraft:copper_chest
 blocks:minecraft:copper_golem_statue
 blocks:minecraft:copper_grate
@@ -160,7 +159,6 @@ blocks:minecraft:ender_chest
 blocks:minecraft:exposed_chiseled_copper
 blocks:minecraft:exposed_copper
 blocks:minecraft:exposed_copper_bulb
-blocks:minecraft:exposed_copper_chain
 blocks:minecraft:exposed_copper_chest
 blocks:minecraft:exposed_copper_golem_statue
 blocks:minecraft:exposed_copper_grate
@@ -207,7 +205,6 @@ blocks:minecraft:infested_deepslate
 blocks:minecraft:infested_mossy_stone_bricks
 blocks:minecraft:infested_stone
 blocks:minecraft:infested_stone_bricks
-blocks:minecraft:iron_chain
 blocks:minecraft:jack_o_lantern
 blocks:minecraft:jigsaw
 blocks:minecraft:jukebox
@@ -219,7 +216,6 @@ blocks:minecraft:jungle_wall_sign
 blocks:minecraft:ladder
 blocks:minecraft:lapis_ore
 blocks:minecraft:lava_cauldron
-blocks:minecraft:leaf_litter
 blocks:minecraft:lectern
 blocks:minecraft:lever
 blocks:minecraft:light
@@ -306,7 +302,6 @@ blocks:minecraft:orange_wall_banner
 blocks:minecraft:oxidized_chiseled_copper
 blocks:minecraft:oxidized_copper
 blocks:minecraft:oxidized_copper_bulb
-blocks:minecraft:oxidized_copper_chain
 blocks:minecraft:oxidized_copper_chest
 blocks:minecraft:oxidized_copper_golem_statue
 blocks:minecraft:oxidized_copper_grate
@@ -475,25 +470,21 @@ blocks:minecraft:warped_wall_hanging_sign
 blocks:minecraft:warped_wall_sign
 blocks:minecraft:water_cauldron
 blocks:minecraft:waxed_copper_bulb
-blocks:minecraft:waxed_copper_chain
 blocks:minecraft:waxed_copper_chest
 blocks:minecraft:waxed_copper_golem_statue
 blocks:minecraft:waxed_copper_grate
 blocks:minecraft:waxed_exposed_copper_bulb
-blocks:minecraft:waxed_exposed_copper_chain
 blocks:minecraft:waxed_exposed_copper_chest
 blocks:minecraft:waxed_exposed_copper_golem_statue
 blocks:minecraft:waxed_exposed_copper_grate
 blocks:minecraft:waxed_exposed_lightning_rod
 blocks:minecraft:waxed_lightning_rod
 blocks:minecraft:waxed_oxidized_copper_bulb
-blocks:minecraft:waxed_oxidized_copper_chain
 blocks:minecraft:waxed_oxidized_copper_chest
 blocks:minecraft:waxed_oxidized_copper_golem_statue
 blocks:minecraft:waxed_oxidized_copper_grate
 blocks:minecraft:waxed_oxidized_lightning_rod
 blocks:minecraft:waxed_weathered_copper_bulb
-blocks:minecraft:waxed_weathered_copper_chain
 blocks:minecraft:waxed_weathered_copper_chest
 blocks:minecraft:waxed_weathered_copper_golem_statue
 blocks:minecraft:waxed_weathered_copper_grate
@@ -501,7 +492,6 @@ blocks:minecraft:waxed_weathered_lightning_rod
 blocks:minecraft:weathered_chiseled_copper
 blocks:minecraft:weathered_copper
 blocks:minecraft:weathered_copper_bulb
-blocks:minecraft:weathered_copper_chain
 blocks:minecraft:weathered_copper_chest
 blocks:minecraft:weathered_copper_golem_statue
 blocks:minecraft:weathered_copper_grate

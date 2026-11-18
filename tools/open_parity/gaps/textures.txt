@@ -150,7 +150,6 @@ block/copper_bulb.png
 block/copper_bulb_lit.png
 block/copper_bulb_lit_powered.png
 block/copper_bulb_powered.png
-block/copper_chain.png
 block/copper_grate.png
 block/crafter_bottom.png
 block/crafter_east.png
@@ -269,7 +268,6 @@ block/exposed_copper_bulb.png
 block/exposed_copper_bulb_lit.png
 block/exposed_copper_bulb_lit_powered.png
 block/exposed_copper_bulb_powered.png
-block/exposed_copper_chain.png
 block/exposed_copper_grate.png
 block/exposed_lightning_rod.png
 block/farmland.png
@@ -325,7 +323,6 @@ block/hopper_inside.png
 block/hopper_outside.png
 block/hopper_top.png
 block/horn_coral_block.png
-block/iron_chain.png
 block/item_frame.png
 block/jack_o_lantern.png
 block/jigsaw_bottom.png
@@ -342,7 +339,6 @@ block/kelp_plant.png
 block/ladder.png
 block/lapis_ore.png
 block/lava_still.png
-block/leaf_litter.png
 block/lectern_base.png
 block/lectern_front.png
 block/lectern_sides.png
@@ -448,7 +444,6 @@ block/oxidized_copper_bulb.png
 block/oxidized_copper_bulb_lit.png
 block/oxidized_copper_bulb_lit_powered.png
 block/oxidized_copper_bulb_powered.png
-block/oxidized_copper_chain.png
 block/oxidized_copper_grate.png
 block/oxidized_lightning_rod.png
 block/pale_moss_block.png
@@ -722,7 +717,6 @@ block/weathered_copper_bulb.png
 block/weathered_copper_bulb_lit.png
 block/weathered_copper_bulb_lit_powered.png
 block/weathered_copper_bulb_powered.png
-block/weathered_copper_chain.png
 block/weathered_copper_grate.png
 block/weathered_lightning_rod.png
 block/wet_sponge.png
@@ -1834,7 +1828,6 @@ item/compass_28.png
 item/compass_29.png
 item/compass_30.png
 item/compass_31.png
-item/copper_chain.png
 item/copper_door.png
 item/copper_spear_in_hand.png
 item/crimson_door.png
@@ -1854,7 +1847,6 @@ item/dark_oak_sign.png
 item/diamond_spear_in_hand.png
 item/elytra_broken.png
 item/experience_bottle.png
-item/exposed_copper_chain.png
 item/exposed_copper_door.png
 item/firework_star_overlay.png
 item/fishing_rod_cast.png
@@ -1867,13 +1859,11 @@ item/green_bundle_open_back.png
 item/green_bundle_open_front.png
 item/green_candle.png
 item/hopper.png
-item/iron_chain.png
 item/iron_door.png
 item/iron_spear_in_hand.png
 item/jungle_door.png
 item/jungle_hanging_sign.png
 item/jungle_sign.png
-item/leaf_litter.png
 item/leather_boots_overlay.png
 item/leather_chestplate_overlay.png
 item/leather_helmet_overlay.png
@@ -1919,7 +1909,6 @@ item/oak_sign.png
 item/orange_bundle_open_back.png
 item/orange_bundle_open_front.png
 item/orange_candle.png
-item/oxidized_copper_chain.png
 item/oxidized_copper_door.png
 item/pale_oak_door.png
 item/pale_oak_hanging_sign.png
@@ -1990,7 +1979,6 @@ item/turtle_egg.png
 item/warped_door.png
 item/warped_hanging_sign.png
 item/warped_sign.png
-item/weathered_copper_chain.png
 item/weathered_copper_door.png
 item/wheat.png
 item/white_bundle_open_back.png
