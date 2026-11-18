@@ -1,6 +1,7 @@
 //! `compile` on synthetic in-memory packs.
 
 use super::*;
+use std::collections::BTreeSet;
 
 const GBUFFERS_VSH: &str = "#version 120
 varying vec2 uv;
