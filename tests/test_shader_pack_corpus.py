@@ -121,6 +121,15 @@ class BucketTest(unittest.TestCase):
         self.assertEqual(stages, ["chrome", "spirv"])
 
 
+class UnknownUniformsTest(unittest.TestCase):
+    def test_counts_packs(self):
+        a = result("a", [program("final")])
+        a["dimensions"][DIM]["programs"][0]["unknown_uniforms"] = ["x", "y"]
+        b = result("b", [program("final")])
+        b["dimensions"][DIM]["programs"][0]["unknown_uniforms"] = ["y"]
+        self.assertEqual(corpus.unknown_uniforms([a, b], [DIM]), [("y", ["a", "b"]), ("x", ["a"])])
+
+
 class ChromeTest(unittest.TestCase):
     def test_parse_errors_only(self):
         out = ("Chrome 158\n/tmp/p/final.fs.wgsl:3:7: error: unresolved value 'x'\n"

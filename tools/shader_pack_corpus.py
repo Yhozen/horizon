@@ -289,6 +289,18 @@ def buckets(results: list[dict], dimensions: list[str]) -> list[dict]:
     return out
 
 
+def unknown_uniforms(results: list[dict], dimensions: list[str]) -> list[tuple[str, list[str]]]:
+    """Uniforms compiled programs read that Horizon does not know (they read 0), with the packs
+    that use them, most packs first."""
+    packs: dict[str, set[str]] = {}
+    for result in results:
+        for dimension in dimensions:
+            for p in result.get("dimensions", {}).get(dimension, {}).get("programs", []):
+                for name in p.get("unknown_uniforms", []):
+                    packs.setdefault(name, set()).add(result["pack"])
+    return sorted(((n, sorted(p)) for n, p in packs.items()), key=lambda e: (-len(e[1]), e[0]))
+
+
 FLAG_SHORT = {
     "compute_shaders": "csh", "geometry_shaders": "gsh", "tessellation_shaders": "tess",
     "raw_textures": "raw-tex", "prepare_programs": "prepare", "shadowcomp_programs": "shadowcomp",
@@ -392,14 +404,16 @@ def check(args: argparse.Namespace) -> int:
         name = pack.stem if pack.suffix.lower() == ".zip" else pack.name
         path = out / name / "result.json"
         result = json.loads(path.read_text())
-        if args.chrome and not args.reuse:
+        if args.chrome:
             print(f"chrome: {name}", flush=True)
             run_chrome(result, out / name, Path(args.web).resolve())
             path.write_text(json.dumps(result, indent=2))
         results.append(result)
     rows = [pack_row(r, d, args.chrome) for r in results for d in dimensions]
     groups = buckets(results, dimensions)
-    summary = {"dimensions": dimensions, "chrome": args.chrome, "rows": rows, "buckets": groups}
+    unknown = unknown_uniforms(results, dimensions)
+    summary = {"dimensions": dimensions, "chrome": args.chrome, "rows": rows, "buckets": groups,
+               "unknown_uniforms": dict(unknown)}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     counts = {s: sum(r["status"] == s for r in rows) for s in ("Works-candidate", "Partial", "Refused", "Fails")}
     md = [
@@ -409,6 +423,8 @@ def check(args: argparse.Namespace) -> int:
         table(rows, args.chrome), "", "## Errors by message", "",
         "Sorted by the packs whose essential programs they block, then packs, then programs.", "",
         bucket_table(groups), "",
+        "## Unknown uniforms (read as 0) in programs that compiled", "",
+        ", ".join(f"`{n}` ({len(p)})" for n, p in unknown) or "None.", "",
     ]
     (out / "summary.md").write_text("\n".join(md))
     print(out / "summary.md")
@@ -430,7 +446,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--chrome", action="store_true", help="also compile the WGSL in headless Chrome")
     c.add_argument("--web", default=str(ROOT / "web"), help="the web folder with node_modules")
     c.add_argument("--reuse", action="store_true",
-                   help="only rewrite the summary from the result.json files already in --out")
+                   help="skip pack_check: reuse the result.json files in --out (with --chrome, rerun Chrome only)")
     c.add_argument("--binary", help="a pack_check binary already built")
     args = parser.parse_args(argv)
     return fetch(args) if args.command == "fetch" else check(args)
