@@ -478,11 +478,59 @@ def build_world(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- decode
+
+
+def read_png_rgb(png: Path) -> tuple[int, int, bytes]:
+    """The picture as raw RGB bytes (through ffmpeg, so no image library is needed)."""
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(png)],
+        capture_output=True, text=True, check=True,
+    )
+    w, h = (int(x) for x in probe.stdout.strip().split(","))
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(png), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                         capture_output=True, check=True).stdout
+    return w, h, raw
+
+
+def decode_rows(png: Path, fsh: Path, cell: int = 8, bits: int = 24) -> list[tuple[str, int, bool, int | None]]:
+    """Reads the rows painted by a probe pack's `final.fsh`: (name, scale, defined, value) per `// row` line."""
+    import re
+
+    rows = [(int(m[1]), m[2], int(m[3])) for m in re.finditer(r"// row (\d+): (.+?) x(\d+)$", fsh.read_text(), re.M)]
+    w, _, raw = read_png_rgb(png)
+
+    def px(x: int, y: int) -> tuple[int, int, int]:
+        i = (y * w + x) * 3
+        return raw[i], raw[i + 1], raw[i + 2]
+
+    out = []
+    for r, name, scale in rows:
+        y = r * cell + cell // 2
+        mr, mg, _ = px(cell // 2, y)
+        defined = mg > 128 and mr < 128
+        value = 0
+        for b in range(bits):
+            value = value * 2 + (1 if px((b + 1) * cell + cell // 2, y)[0] > 128 else 0)
+        out.append((name, scale, defined, value if defined else None))
+    return out
+
+
+def decode(args) -> int:
+    for name, scale, defined, value in decode_rows(Path(args.png), Path(args.fsh)):
+        shown = "undefined" if not defined else (str(value) if scale == 1 else f"{value / scale:g}")
+        print(f"{name:42} {shown}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mcdir", default=str(MCDIR))
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("prepare")
+    de = sub.add_parser("decode", help="read the value rows a probe pack painted")
+    de.add_argument("--png", required=True)
+    de.add_argument("--fsh", default=str(ROOT / "tools" / "shader_probe_packs" / "macros" / "shaders" / "final.fsh"))
     wo = sub.add_parser("world", help="build the scene save with Horizon")
     wo.add_argument("--out", default=str(HOME / "worlds" / "scene"))
     wo.add_argument("--resources", default=str(MAIN / ".context" / "wt" / "prep" / ".local" / "horizon-client" / MC))
@@ -508,6 +556,8 @@ def main() -> int:
     if args.cmd == "prepare":
         prepare(args)
         return 0
+    if args.cmd == "decode":
+        return decode(args)
     if args.cmd == "world":
         return build_world(args)
     return run(args)
