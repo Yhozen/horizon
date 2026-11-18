@@ -77,9 +77,24 @@ fn listed(list: &str, word: &str) -> bool {
     list.split_whitespace().any(|w| w == word)
 }
 
-/// Built-ins with `out` parameters that naga's GLSL front end lacks, as
-/// `hz_` functions: (name, its overloads).
-const POLYFILLS: [(&str, &str); 2] = [
+/// Built-ins naga cannot translate (`out` parameters its GLSL front end
+/// lacks; `isnan`/`isinf`, which its WGSL writer cannot write), as `hz_`
+/// functions: (name, its overloads).
+const POLYFILLS: [(&str, &str); 4] = [
+    (
+        "isnan",
+        "bool hz_isnan(float x) { return (floatBitsToUint(x) & 0x7fffffffu) > 0x7f800000u; }
+bvec2 hz_isnan(vec2 x) { return greaterThan(floatBitsToUint(x) & uvec2(0x7fffffffu), uvec2(0x7f800000u)); }
+bvec3 hz_isnan(vec3 x) { return greaterThan(floatBitsToUint(x) & uvec3(0x7fffffffu), uvec3(0x7f800000u)); }
+bvec4 hz_isnan(vec4 x) { return greaterThan(floatBitsToUint(x) & uvec4(0x7fffffffu), uvec4(0x7f800000u)); }",
+    ),
+    (
+        "isinf",
+        "bool hz_isinf(float x) { return (floatBitsToUint(x) & 0x7fffffffu) == 0x7f800000u; }
+bvec2 hz_isinf(vec2 x) { return equal(floatBitsToUint(x) & uvec2(0x7fffffffu), uvec2(0x7f800000u)); }
+bvec3 hz_isinf(vec3 x) { return equal(floatBitsToUint(x) & uvec3(0x7fffffffu), uvec3(0x7f800000u)); }
+bvec4 hz_isinf(vec4 x) { return equal(floatBitsToUint(x) & uvec4(0x7fffffffu), uvec4(0x7f800000u)); }",
+    ),
     (
         "modf",
         "float hz_modf(float x, out float i) { i = trunc(x); return x - i; }

@@ -585,3 +585,18 @@ fn modf_and_frexp_are_polyfilled() {
             .contains("hz_modf")
     );
 }
+
+#[test]
+fn isnan_and_isinf_are_polyfilled() {
+    let src = "varying vec3 c;\n\
+               void main() { bool a = isnan(c.x) || isinf(c.y); bvec3 b = isnan(c);\n\
+               gl_FragData[0] = vec4(a || any(b) || any(isinf(vec2(c))) ? 1.0 : 0.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(
+        rw.body.contains("hz_isnan(c.x) || hz_isinf(c.y)"),
+        "{}",
+        rw.body
+    );
+    // The WGSL writer, which has no `isnan`, takes it.
+    naga(&rw, Stage::Fragment);
+}

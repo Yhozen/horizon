@@ -6,8 +6,8 @@
 //! `_<k>` per element, `_c<j>` per column). When the pieces, plus Horizon's
 //! own `hz_sprite` on terrain, need more locations than
 //! [`HostParams::max_varyings`], they are packed into `vec4` slots instead
-//! (`hz_vp<n>`): interpolated floats together, flat floats together, integers
-//! together in flat `ivec4`s.
+//! (`hz_vp<n>`): interpolated floats together in `vec4`s, integers and flat
+//! floats (as their bits) together in flat `ivec4`s.
 
 use super::*;
 
@@ -30,6 +30,8 @@ struct Piece {
     slot: usize,
     /// The slot's components it takes (`.xyz`), or `None` when it is the whole slot.
     swizzle: Option<String>,
+    /// A flat float carried as its bits in an integer slot.
+    bits: bool,
 }
 
 /// What the two stages pass each other.
@@ -200,6 +202,7 @@ impl Interface {
                     fragment_ty,
                     slot: interface.slots.len(),
                     swizzle: None,
+                    bits: false,
                 });
                 interface.slots.push(Slot {
                     name: format!("hz_v_{suffix}"),
@@ -220,9 +223,10 @@ impl Interface {
     }
 
     /// Packs pieces into 4-wide slots, widest first (first fit), one group
-    /// of slots per kind: interpolated floats, flat floats, integers.
+    /// of slots per kind: interpolated floats, then everything flat (integers,
+    /// and flat floats as their bits) in `ivec4`s.
     fn pack(&mut self, parts: Vec<(String, String, String, String, bool)>) {
-        for (group, slot_ty, flat) in [(0, "vec4", false), (1, "vec4", true), (2, "ivec4", true)] {
+        for (group, slot_ty, flat) in [(0, "vec4", false), (2, "ivec4", true)] {
             let mut members: Vec<_> = parts
                 .iter()
                 .filter(|p| {
@@ -230,8 +234,7 @@ impl Interface {
                         integer_type(&p.2) == Some(true) || integer_type(&p.3) == Some(true);
                     match group {
                         0 => !p.4 && !integer,
-                        1 => p.4 && !integer,
-                        _ => integer,
+                        _ => p.4 || integer,
                     }
                 })
                 .collect();
@@ -239,7 +242,10 @@ impl Interface {
             members.sort_by_key(|p| std::cmp::Reverse(width(&p.2)));
             let first = self.slots.len();
             let mut used: Vec<u32> = Vec::new();
-            for (_, global, vertex_ty, fragment_ty, _) in members {
+            for (_, global, vertex_ty, fragment_ty, piece_flat) in members {
+                let bits = *piece_flat
+                    && integer_type(vertex_ty) == Some(false)
+                    && integer_type(fragment_ty) == Some(false);
                 let w = width(vertex_ty);
                 let at = match used.iter().position(|u| u + w <= 4) {
                     Some(i) => i,
@@ -262,6 +268,7 @@ impl Interface {
                     carrier: vector(slot_ty, w),
                     slot: first + at,
                     swizzle: Some("xyzw"[offset as usize..(offset + w) as usize].into()),
+                    bits,
                 });
             }
         }
@@ -303,7 +310,11 @@ impl Interface {
                 .swizzle
                 .as_ref()
                 .map_or(String::new(), |s| format!(".{s}"));
-            let value = convert(&p.carrier, &p.vertex_ty, &p.global);
+            let value = if p.bits {
+                format!("floatBitsToInt({})", p.global)
+            } else {
+                convert(&p.carrier, &p.vertex_ty, &p.global)
+            };
             writeln!(out, "    {slot}{swizzle} = {value};").unwrap();
         }
     }
@@ -316,7 +327,11 @@ impl Interface {
                 .swizzle
                 .as_ref()
                 .map_or(String::new(), |s| format!(".{s}"));
-            let value = convert(&p.fragment_ty, &p.carrier, &format!("{slot}{swizzle}"));
+            let value = if p.bits {
+                format!("intBitsToFloat({slot}{swizzle})")
+            } else {
+                convert(&p.fragment_ty, &p.carrier, &format!("{slot}{swizzle}"))
+            };
             writeln!(out, "    {} = {value};", p.global).unwrap();
         }
         for z in &self.zeroed {
@@ -493,10 +508,10 @@ mod tests {
         vars.push(var("c", "vec4", false, None));
         let p = program(vars.clone(), vars);
         let i = Interface::new(&p.0, &p.1, Geometry::Fullscreen, 16).unwrap();
-        // c | n f0 | uv0 uv1 | f1..f4 | f5..f8 | f9, then id, then mask level.
+        // c | n f0 | uv0 uv1 | f1..f4 | f5..f8 | f9, then mask id level (id as its bits).
         let slots: Vec<_> = i.slots.iter().map(|s| (s.ty.as_str(), s.flat)).collect();
         let mut want = vec![("vec4", false); 6];
-        want.extend([("vec4", true), ("ivec4", true)]);
+        want.push(("ivec4", true));
         assert_eq!(slots, want);
         let mut write = String::new();
         i.write(&mut write);
@@ -507,18 +522,19 @@ mod tests {
             "hz_vp1.w = f0;",
             "hz_vp2.zw = uv[1];",
             "hz_vp5.x = f9;",
-            "hz_vp6.x = id;",
-            "hz_vp7.xy = ivec2(mask);",
-            "hz_vp7.z = level;",
+            "hz_vp6.xy = ivec2(mask);",
+            "hz_vp6.z = floatBitsToInt(id);",
+            "hz_vp6.w = level;",
         ] {
             assert!(write.contains(line), "{line}\n{write}");
         }
         let mut read = String::new();
         i.read(&mut read);
-        assert!(read.contains("mask = uvec2(hz_vp7.xy);"), "{read}");
+        assert!(read.contains("mask = uvec2(hz_vp6.xy);"), "{read}");
+        assert!(read.contains("id = intBitsToFloat(hz_vp6.z);"), "{read}");
         let (_, fs) = translate(&p, Geometry::Fullscreen, 16).unwrap();
         assert!(
-            fs.contains("@location(7)") && !fs.contains("@location(8)"),
+            fs.contains("@location(6)") && !fs.contains("@location(7)"),
             "{fs}"
         );
         // Terrain needs one more for hz_sprite: still fits.
@@ -530,8 +546,8 @@ mod tests {
             "{vs}"
         );
         // Too many even packed.
-        let err = translate(&p, Geometry::Terrain, 8).unwrap_err();
-        assert!(err.contains("9 varying locations"), "{err}");
+        let err = translate(&p, Geometry::Terrain, 7).unwrap_err();
+        assert!(err.contains("8 varying locations"), "{err}");
     }
 
     #[test]
