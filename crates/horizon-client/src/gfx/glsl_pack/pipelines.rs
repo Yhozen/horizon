@@ -3,7 +3,9 @@
 //! fixed-function state of its slot (blending, depth, culling).
 
 use horizon_glsl_pack::host::Geometry;
-use horizon_glsl_pack::{CompiledProgram, ProgramKind, SamplerKind, TextureBinding, TextureSource};
+use horizon_glsl_pack::{
+    CompiledProgram, ProgramKind, SampleKind, SamplerKind, TexDim, TextureBinding, TextureSource,
+};
 
 /// A pipeline and what its bind group 1 must hold.
 pub(super) struct Program {
@@ -48,6 +50,21 @@ pub(super) fn is_depth(source: &TextureSource) -> bool {
         source,
         TextureSource::Depth(_) | TextureSource::ShadowTex(_) | TextureSource::ShadowTexMips(_)
     )
+}
+
+/// A binding's texel type: depth for compared reads, integers as they are,
+/// floats filterable only when sampled with a filtering sampler (depth
+/// textures and 32-bit float formats are read with point samplers).
+fn sample_type(t: &TextureBinding) -> wgpu::TextureSampleType {
+    match t.sample {
+        SampleKind::Depth => wgpu::TextureSampleType::Depth,
+        SampleKind::Sint => wgpu::TextureSampleType::Sint,
+        SampleKind::Uint => wgpu::TextureSampleType::Uint,
+        SampleKind::Float => wgpu::TextureSampleType::Float {
+            filterable: !is_depth(&t.source)
+                && !matches!(t.sampler, SamplerKind::Point | SamplerKind::PointRepeat),
+        },
+    }
 }
 
 fn stages(vertex: bool, fragment: bool) -> wgpu::ShaderStages {
@@ -138,11 +155,12 @@ fn blendable(format: wgpu::TextureFormat) -> bool {
     );
     !integer
         && !matches!(
-        format,
-        wgpu::TextureFormat::R32Float
-            | wgpu::TextureFormat::Rg32Float
-            | wgpu::TextureFormat::Rgba32Float
-    ) || cfg!(not(target_arch = "wasm32"))
+            format,
+            wgpu::TextureFormat::R32Float
+                | wgpu::TextureFormat::Rg32Float
+                | wgpu::TextureFormat::Rgba32Float
+        )
+        || cfg!(not(target_arch = "wasm32"))
 }
 
 pub(super) fn build(
@@ -156,19 +174,15 @@ pub(super) fn build(
     let mut entries = vec![uniform_entry()];
     let mut samplers: Vec<SamplerKind> = Vec::new();
     for t in &program.textures {
-        let compare = t.sampler == SamplerKind::Compare;
-        let filterable = !is_depth(&t.source)
-            && !matches!(t.sampler, SamplerKind::Point | SamplerKind::PointRepeat);
         entries.push(wgpu::BindGroupLayoutEntry {
             binding: t.binding,
             visibility: stages(t.vertex, t.fragment),
             ty: wgpu::BindingType::Texture {
-                sample_type: if compare {
-                    wgpu::TextureSampleType::Depth
-                } else {
-                    wgpu::TextureSampleType::Float { filterable }
+                sample_type: sample_type(t),
+                view_dimension: match t.dimension {
+                    TexDim::D2 => wgpu::TextureViewDimension::D2,
+                    TexDim::D3 => wgpu::TextureViewDimension::D3,
                 },
-                view_dimension: wgpu::TextureViewDimension::D2,
                 multisampled: false,
             },
             count: None,

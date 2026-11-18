@@ -26,8 +26,8 @@ use horizon_glsl_pack::{
     CompiledPack, PackFiles, PackPlan, PackUniforms, ProgramKind, SamplerKind, TextureSource,
 };
 
-pub(super) use uniforms::PackUniformInputs;
 pub(crate) use probation::Probation;
+pub(super) use uniforms::PackUniformInputs;
 
 use horizon_glsl_pack::schedule::Side;
 use pipelines::Program;
@@ -184,9 +184,15 @@ impl PackRenderer {
         let mut programs = BTreeMap::new();
         for (&kind, program) in &pack.programs {
             let state = pack.plan.state(kind);
-            programs.insert(kind, pipelines::build(device, kind, program, &state, &layouts)?);
+            programs.insert(
+                kind,
+                pipelines::build(device, kind, program, &state, &layouts)?,
+            );
         }
-        let textures = textures::Textures::new(device, queue, &plan, files)?;
+        let textures = textures::Textures::new(device, queue, &plan, files);
+        for note in &textures.notes {
+            log::warn!("shader pack texture: {note}");
+        }
         Ok(Self {
             programs,
             samplers: pipelines::samplers(device),
@@ -258,6 +264,13 @@ impl PackRenderer {
         self.targets.as_ref().expect("PackRenderer::prepare first")
     }
 
+    /// Custom textures that did not load (each reads a 1×1 stand-in), for
+    /// the pack's report (not shown there yet: logged when the pack loads).
+    #[allow(dead_code)]
+    pub fn texture_notes(&self) -> &[String] {
+        &self.textures.notes
+    }
+
     /// The pack's depth buffer, which Horizon's overlays draw against.
     pub fn depth(&self) -> &wgpu::TextureView {
         &self.targets().depth.view
@@ -278,6 +291,8 @@ impl PackRenderer {
             resource: uniforms.as_entire_binding(),
         }];
         for t in &program.textures {
+            // What a binding reads when its texture is missing: zeros of its own type.
+            let missing = self.textures.fallback(t.dimension, t.sample);
             let view = match t.source {
                 TextureSource::Buffer(b) => match targets.buffer(b) {
                     // A pass cannot read a texture it draws into: the other
@@ -286,11 +301,11 @@ impl PackRenderer {
                         if buf.sides.len() > 1 {
                             &buf.side(sides[usize::from(b)].other()).view
                         } else {
-                            &self.textures.black
+                            missing
                         }
                     }
                     Some(buf) => &buf.side(sides[usize::from(b)]).view,
-                    None => &self.textures.black,
+                    None => missing,
                 },
                 // depthtex0 is the gbuffers' attachment: they read last frame's copy.
                 TextureSource::Depth(0) if gbuffers => &targets.depth_copies[0].view,
@@ -314,15 +329,20 @@ impl PackRenderer {
                         .and_then(|s| s.colors[usize::from(n.min(1))].as_ref())
                     {
                         Some((img, _)) if !program.kind.is_shadow() => &img.view,
+                        _ if t.sample != horizon_glsl_pack::SampleKind::Float => missing,
                         _ => &self.textures.white,
                     }
                 }
                 TextureSource::Noise => &self.textures.noise,
                 TextureSource::Normals => &self.textures.normals,
                 TextureSource::Specular => &self.textures.black,
-                TextureSource::Custom(i) => {
-                    self.textures.custom.get(i).unwrap_or(&self.textures.black)
-                }
+                // At 64 + i, or at the built-in binding it overrides.
+                TextureSource::Custom(i) => self
+                    .textures
+                    .custom
+                    .get(i)
+                    .and_then(Option::as_ref)
+                    .unwrap_or(missing),
             };
             entries.push(wgpu::BindGroupEntry {
                 binding: t.binding,
