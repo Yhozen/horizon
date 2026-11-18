@@ -298,7 +298,8 @@ impl PackRenderer {
             .chain(
                 self.final_samplers
                     .iter()
-                    .filter_map(|(_, b)| (2..18).contains(b).then(|| (b - 2) as u8)),
+                    .filter(|(_, b)| (2..18).contains(b))
+                    .map(|(_, b)| (b - 2) as u8),
             )
             .collect();
         indices.push(0);
