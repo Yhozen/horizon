@@ -39,6 +39,10 @@ pub struct PackOptions {
     /// value replaces the value of a `#define name v` line or of a `const`
     /// option (`shadowMapResolution`, …).
     pub overrides: Vec<(String, Option<String>)>,
+    /// Program files (pack paths without extension, e.g.
+    /// `shaders/world0/composite3`) to treat as missing: ones the GPU's own
+    /// compiler rejected, so their slot falls back to its next candidate.
+    pub excluded: BTreeSet<String>,
 }
 
 impl Default for PackOptions {
@@ -46,6 +50,7 @@ impl Default for PackOptions {
         Self {
             mc_version: 12111,
             overrides: Vec::new(),
+            excluded: BTreeSet::new(),
         }
     }
 }
@@ -61,6 +66,14 @@ pub struct HostParams {
     /// at least 16 in WebGPU), counting Horizon's own (terrain's flat
     /// `hz_sprite`). Programs with more varyings pack them into `vec4`s.
     pub max_varyings: u32,
+    /// Sampled textures one stage may bind (`maxSampledTexturesPerShaderStage`,
+    /// 16 in WebGPU), Horizon's own included.
+    pub max_textures: u32,
+    /// Colour attachments one pass may write (`maxColorAttachments`, 8).
+    pub max_draw_buffers: u32,
+    /// Bytes per pixel of all colour attachments together
+    /// (`maxColorAttachmentBytesPerSample`: 32 by default, 128 on most adapters).
+    pub max_attachment_bytes: u32,
 }
 
 impl Default for HostParams {
@@ -70,6 +83,9 @@ impl Default for HostParams {
             sprite_split: 2048,
             sprite_grid: 1,
             max_varyings: 16,
+            max_textures: 16,
+            max_draw_buffers: 8,
+            max_attachment_bytes: 128,
         }
     }
 }

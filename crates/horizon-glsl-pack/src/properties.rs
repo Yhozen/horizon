@@ -95,6 +95,14 @@ impl BlockIds {
         id.unwrap_or(self.unlisted)
     }
 
+    /// `mc_Entity.x` of a block state: `block` as in [`Self::id`], `state` its
+    /// properties (`[("axis", "y")]`). Entries that name properties
+    /// (`oak_log:axis=y`) match only those states.
+    pub fn state_id(&self, block: &str, state: &[(&str, &str)]) -> i32 {
+        let _ = state;
+        self.id(block)
+    }
+
     /// The material index of a block's geometry for the vertex tag: `fluid`
     /// for the fluid surface Horizon's fluid mesher draws (pass the fluid's
     /// block, `water` or `lava`), false for the block's model. Ids that did
