@@ -46,6 +46,14 @@ export function gameArgs(edition: Edition, world: WorldId, name: string, address
     ...(edition.id === "horizon" ? ["--test-terrain"] : []), ...run];
 }
 
+/** Where the page's ?shaderpack= lands in the game's files (relative: the game folder). */
+export const SHADER_PACK = "shaderpacks/pack.zip";
+
+/** The page's ?shaderpack=, an OptiFine-format zip to fetch and load (`--shader-pack`). */
+export function shaderPackUrl(search: string) {
+  return new URLSearchParams(search).get("shaderpack") || undefined;
+}
+
 const message = (error: unknown) => String((error as Error)?.message ?? error);
 
 /** Loads and starts the game, reporting each step. Stopping early (Cancel) abandons it
@@ -84,8 +92,15 @@ export async function* boot(edition: Edition, world: WorldId, name: string, cust
       throw new Error("This release can't join the Horizon world");
     })())) : undefined;
 
+    const packUrl = shaderPackUrl(location.search);
+    if (packUrl) {
+      const pack = await fetch(packUrl);
+      if (!pack.ok) throw new Error(`Could not load the shader pack (${pack.status})`);
+      game.install_file(SHADER_PACK, new Uint8Array(await pack.arrayBuffer()));
+    }
+
     const address = serverAddress(world, location);
-    const args = gameArgs(edition, world, name, address, custom);
+    const args = [...gameArgs(edition, world, name, address, custom), ...(packUrl ? ["--shader-pack", SHADER_PACK] : [])];
     yield step(3, world === "solo" ? "Creating your world" : "Joining the world");
     if (shared) await game.start_overlaid(new Uint8Array(shared), new Uint8Array(data), args);
     else await game.start(new Uint8Array(data), args);
