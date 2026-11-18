@@ -876,6 +876,12 @@ pub enum Page {
     Horizon,
     /// AI Agent: agent control on or off, whether an agent is connected, the connection details.
     Agent,
+    /// Shader Packs: the library, the selection, Shaders ON/OFF (`shader_packs_ui`).
+    ShaderPacks,
+    /// The selected pack's own options screens.
+    ShaderPackSettings,
+    /// What the selected pack's last load reported.
+    ShaderPackReport,
 }
 #[derive(Clone, Debug, PartialEq)]
 enum Act {
@@ -896,6 +902,24 @@ enum Act {
     /// Credits & Attribution's Credits button (WinScreen without the poem).
     Credits,
     CopyAgentDetails,
+    /// A button of the shader pack pages.
+    Shader(ShaderAct),
+}
+/// What a button of the shader pack pages does.
+#[derive(Clone, Debug, PartialEq)]
+enum ShaderAct {
+    Toggle,
+    Select(String),
+    /// The first press arms it ("Confirm Delete"), the second deletes.
+    Delete(String),
+    OpenFolder,
+    AddPack,
+    CopyReport,
+    /// Cycle an option (right-click: back).
+    Option(String),
+    OpenScreen(String),
+    Profile,
+    Reset,
 }
 enum WKind {
     Button {
@@ -917,6 +941,18 @@ enum WKind {
         label: Text,
         selected: bool,
         code: String,
+    },
+    /// A shader pack of the list, outlined when selected (as a selected language).
+    PackRow {
+        label: Text,
+        selected: bool,
+        file: String,
+    },
+    /// A pack option listed in `sliders=`.
+    PackSlider {
+        label: Text,
+        value: f32,
+        name: String,
     },
 }
 struct Widget {
@@ -947,6 +983,8 @@ pub enum Event {
     Credits,
     /// Copy how an agent connects (the AI Agent page).
     CopyAgentDetails,
+    /// For `Game::shader_pack_event`.
+    ShaderPacks(crate::shader_packs_ui::ShaderPackEvent),
 }
 /// `SliderableValueSet.applyValueImmediately`: these apply 600 ms after
 /// the last change (`OptionInstanceSliderButton.delayedApplyAt`).
@@ -1000,6 +1038,14 @@ pub struct OptionsUi {
     pub graphics: crate::graphics_ui::GraphicsUi,
     /// The AI Agent page's status lines (set by the game while it shows).
     pub agent_status: Vec<String>,
+    /// The shader pack pages' data (set by the game every frame while one shows).
+    pub shader_packs: crate::shader_packs_ui::ShaderPacksView,
+    /// The pack whose Delete was pressed once.
+    delete_armed: Option<String>,
+    /// The pack option slider held.
+    pack_slider: Option<String>,
+    /// The report wrapped to the list: (source, width, lines).
+    report_wrapped: Option<(Vec<String>, f32, Vec<String>)>,
     /// Horizon Open Creative: the main page offers only the pages it supports
     /// (no online, skins, sound, language, packs, Horizon settings or mods).
     pub open_edition: bool,
@@ -1032,6 +1078,10 @@ impl Default for OptionsUi {
             center_language: false,
             graphics: Default::default(),
             agent_status: Vec::new(),
+            shader_packs: Default::default(),
+            delete_armed: None,
+            pack_slider: None,
+            report_wrapped: None,
             open_edition: false,
         }
     }
@@ -1092,6 +1142,11 @@ fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
         Page::Mods => {
             "Mods made for Horizon, from the horizon-mods folder. Each runs in a sandbox and stays off until you turn it on."
         }
+        Page::ShaderPacks => {
+            "OptiFine and Iris format shader packs, from the shaderpacks folder. Off by default."
+        }
+        Page::ShaderPackSettings => "The selected shader pack's own options.",
+        Page::ShaderPackReport => "What happened when the selected shader pack last loaded.",
         _ => return None,
     })
 }
@@ -1102,6 +1157,10 @@ enum Row {
     Header(&'static str),
     /// A line of grey text (a path).
     Note(String),
+    /// A left-aligned line of text in a colour, 10 high (the report).
+    Line(Text, u32),
+    /// Buttons side by side, centred (`None`: an empty cell).
+    Grid(Vec<Option<Widget>>),
     Buttons(Widget, Option<Widget>),
 }
 fn pairs(opts: &[Opt]) -> Vec<Row> {
@@ -1187,6 +1246,9 @@ impl OptionsUi {
             Page::Credits => "credits_and_attribution.screen.title",
             Page::Horizon => "Horizon Settings",
             Page::Agent => "AI Agent",
+            Page::ShaderPacks => "Shader Packs",
+            Page::ShaderPackSettings => "Shader Pack Settings",
+            Page::ShaderPackReport => "Shader Pack Report",
         }
     }
     fn scrollbar_x(&self, width: f32) -> f32 {
@@ -1237,6 +1299,243 @@ impl OptionsUi {
         filtered
     }
 
+    fn is_shader_page(page: Page) -> bool {
+        matches!(
+            page,
+            Page::ShaderPacks | Page::ShaderPackSettings | Page::ShaderPackReport
+        )
+    }
+    /// The rows of the three shader pack pages at a GUI `width`.
+    fn shader_rows(&self, width: f32) -> Vec<Row> {
+        use crate::shader_packs_ui as ui_;
+        let view = &self.shader_packs;
+        let shader =
+            |label: Text, w: f32, act: ShaderAct| button(0.0, 0.0, w, label, Act::Shader(act));
+        match self.page() {
+            Page::ShaderPacks => {
+                let toggle = shader(
+                    Text::literal("Shaders: ").append(on_off(view.enabled)),
+                    150.0,
+                    ShaderAct::Toggle,
+                );
+                let delete = match &view.selected {
+                    Some(file) if self.delete_armed.as_ref() == Some(file) => shader(
+                        Text::colored("Confirm Delete", text::RED),
+                        150.0,
+                        ShaderAct::Delete(file.clone()),
+                    ),
+                    Some(file) => shader(
+                        Text::literal("Delete Pack..."),
+                        150.0,
+                        ShaderAct::Delete(file.clone()),
+                    ),
+                    None => inactive(shader(
+                        Text::literal("Delete Pack..."),
+                        150.0,
+                        ShaderAct::Delete(String::new()),
+                    )),
+                };
+                let mut rows = vec![Row::Buttons(toggle, Some(delete))];
+                if let Some(progress) = view.progress {
+                    rows.push(Row::Note(ui_::progress_line(progress)));
+                }
+                if view.packs.is_empty() {
+                    rows.push(Row::Header(if view.web {
+                        "No shader packs: add a .zip with Add Shader Pack..."
+                    } else {
+                        "No shader packs: put .zip files in the shaderpacks folder"
+                    }));
+                }
+                for row in &view.packs {
+                    rows.push(Row::Buttons(
+                        Widget {
+                            x: 0.0,
+                            y: 0.0,
+                            w: 310.0,
+                            h: 20.0,
+                            kind: WKind::PackRow {
+                                label: ui_::pack_label(row),
+                                selected: view.selected.as_ref() == Some(&row.file),
+                                file: row.file.clone(),
+                            },
+                            list: false,
+                        },
+                        None,
+                    ));
+                }
+                rows
+            }
+            Page::ShaderPackSettings => {
+                let Some(settings) = &view.settings else {
+                    return vec![Row::Header("Select a shader pack first")];
+                };
+                let page = ui_::settings_page(settings);
+                let (columns, w) = ui_::columns_fit(page.columns, width);
+                let has_profiles = ui_::next_profile(settings, false).is_some();
+                let cells: Vec<Option<Widget>> = page
+                    .items
+                    .into_iter()
+                    .map(|item| match item {
+                        ui_::Item::Option {
+                            name,
+                            label,
+                            slider: Some(value),
+                            ..
+                        } => Some(Widget {
+                            x: 0.0,
+                            y: 0.0,
+                            w,
+                            h: 20.0,
+                            kind: WKind::PackSlider { label, value, name },
+                            list: false,
+                        }),
+                        ui_::Item::Option { name, label, .. } => {
+                            Some(shader(label, w, ShaderAct::Option(name)))
+                        }
+                        ui_::Item::Screen { name, label } => {
+                            Some(shader(label, w, ShaderAct::OpenScreen(name)))
+                        }
+                        ui_::Item::Profile { label } => {
+                            let b = shader(label, w, ShaderAct::Profile);
+                            Some(if has_profiles { b } else { inactive(b) })
+                        }
+                        ui_::Item::Empty => None,
+                    })
+                    .collect();
+                let mut rows = Vec::new();
+                let mut cells = cells.into_iter().peekable();
+                while cells.peek().is_some() {
+                    let mut row: Vec<Option<Widget>> = cells.by_ref().take(columns).collect();
+                    row.resize_with(columns, || None);
+                    rows.push(Row::Grid(row));
+                }
+                rows
+            }
+            Page::ShaderPackReport => {
+                if view.report.is_empty() {
+                    return vec![Row::Note(
+                        "Not loaded yet: apply the pack to see its report".into(),
+                    )];
+                }
+                let lines = match &self.report_wrapped {
+                    Some((source, _, wrapped)) if *source == view.report => wrapped.clone(),
+                    _ => view.report.clone(),
+                };
+                lines
+                    .into_iter()
+                    .map(|l| Row::Line(Text::literal(l), 0xFFA0A0A0))
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+    /// Wraps the report to the list's width with the font (layout has no font).
+    fn wrap_report(&mut self, atlas: &HudAtlas) {
+        if self.page() != Page::ShaderPackReport {
+            return;
+        }
+        let width = 310.0;
+        if matches!(&self.report_wrapped, Some((source, w, _)) if *source == self.shader_packs.report && *w == width)
+        {
+            return;
+        }
+        let wrapped = crate::shader_packs_ui::wrap(&self.shader_packs.report, width, |t| {
+            atlas.font.width_text(&Text::literal(t))
+        });
+        self.report_wrapped = Some((self.shader_packs.report.clone(), width, wrapped));
+    }
+    /// A shader page button pressed (`back`: right-click, cycling backwards).
+    fn shader_act(&mut self, act: ShaderAct, back: bool) -> Vec<Event> {
+        use crate::shader_packs_ui::{self as ui_, ShaderPackEvent as E};
+        let view = &mut self.shader_packs;
+        if !matches!(act, ShaderAct::Delete(_)) {
+            self.delete_armed = None;
+        }
+        let event = match act {
+            ShaderAct::Toggle => {
+                view.enabled = !view.enabled;
+                E::SetEnabled(view.enabled)
+            }
+            ShaderAct::Select(file) => {
+                view.selected = Some(file.clone());
+                E::Select(file)
+            }
+            ShaderAct::Delete(file) => {
+                if self.delete_armed.take().as_ref() != Some(&file) {
+                    self.delete_armed = Some(file);
+                    return Vec::new();
+                }
+                E::Delete(file)
+            }
+            ShaderAct::OpenFolder => E::OpenFolder,
+            ShaderAct::AddPack => E::AddPack,
+            ShaderAct::CopyReport => E::CopyReport,
+            ShaderAct::Option(name) => {
+                let Some(settings) = &mut view.settings else {
+                    return Vec::new();
+                };
+                let Some(value) = ui_::next_value(settings, &name, back) else {
+                    return Vec::new();
+                };
+                ui_::set_value(settings, &name, &value);
+                E::SetOption { name, value }
+            }
+            ShaderAct::OpenScreen(name) => {
+                if let Some(settings) = &mut view.settings {
+                    settings.screen = Some(name.clone());
+                }
+                self.scroll = 0.0;
+                E::OpenScreen(Some(name))
+            }
+            ShaderAct::Profile => {
+                let Some(settings) = &mut view.settings else {
+                    return Vec::new();
+                };
+                let Some(profile) = ui_::next_profile(settings, back) else {
+                    return Vec::new();
+                };
+                ui_::apply_profile(settings, &profile);
+                E::ApplyProfile(profile)
+            }
+            ShaderAct::Reset => {
+                if let Some(settings) = &mut view.settings {
+                    settings.values.clear();
+                }
+                E::ResetOptions
+            }
+        };
+        vec![Event::ShaderPacks(event)]
+    }
+    /// Shows a pack's sub-screen (`None`: its root).
+    fn shader_screen(&mut self, screen: Option<String>) -> Vec<Event> {
+        if let Some(settings) = &mut self.shader_packs.settings {
+            settings.screen = screen.clone();
+        }
+        self.scroll = 0.0;
+        vec![Event::ShaderPacks(
+            crate::shader_packs_ui::ShaderPackEvent::OpenScreen(screen),
+        )]
+    }
+    /// A pack option slider set to `fraction`: an event when the value changes.
+    fn pack_slider_to(&mut self, name: &str, fraction: f32) -> Vec<Event> {
+        use crate::shader_packs_ui as ui_;
+        let Some(settings) = &mut self.shader_packs.settings else {
+            return Vec::new();
+        };
+        let Some(value) = ui_::slider_pick(&ui_::option_choices(settings, name), fraction) else {
+            return Vec::new();
+        };
+        if ui_::value_of(settings, name) == Some(value.as_str()) {
+            return Vec::new();
+        }
+        ui_::set_value(settings, name, &value);
+        vec![Event::ShaderPacks(
+            crate::shader_packs_ui::ShaderPackEvent::SetOption {
+                name: name.to_string(),
+                value,
+            },
+        )]
+    }
     fn list_rows(&self, s: &Settings) -> Vec<Row> {
         match self.page() {
             Page::Extras => {
@@ -1295,7 +1594,10 @@ impl OptionsUi {
                         open("Graphics...", Page::Graphics),
                         Some(open("Advanced Graphics...", Page::GraphicsAdvanced)),
                     ),
-                    Row::Buttons(open("Controller Settings...", Page::Controller), None),
+                    Row::Buttons(
+                        open("Controller Settings...", Page::Controller),
+                        Some(open("Shader Packs...", Page::ShaderPacks)),
+                    ),
                     Row::Buttons(
                         open("Extras...", Page::Extras),
                         Some(open("Mods...", Page::Mods)),
@@ -1928,6 +2230,15 @@ impl OptionsUi {
                 if matches!(page, Page::Video | Page::Controls) {
                     top = 38.0;
                 }
+                if page == Page::ShaderPacks {
+                    bottom = h - 66.0;
+                }
+                let title = match (&self.shader_packs.settings, page) {
+                    (Some(settings), Page::ShaderPackSettings) => {
+                        Text::literal(crate::shader_packs_ui::settings_title(settings))
+                    }
+                    _ => tr(Self::title(page)),
+                };
                 out.push(Widget {
                     x: 0.0,
                     y: if matches!(page, Page::Video | Page::Controls) {
@@ -1938,7 +2249,7 @@ impl OptionsUi {
                     w,
                     h: 9.0,
                     kind: WKind::Text {
-                        text: tr(Self::title(page)),
+                        text: title,
                         color: u32::MAX,
                         centered: true,
                     },
@@ -1946,7 +2257,12 @@ impl OptionsUi {
                 });
                 let list_start = out.len();
                 let mut y = top + 2.0 - self.scroll;
-                for row in self.list_rows(s) {
+                let rows = if Self::is_shader_page(page) {
+                    self.shader_rows(w)
+                } else {
+                    self.list_rows(s)
+                };
+                for row in rows {
                     match row {
                         Row::Header(key) => {
                             let padding = if y + self.scroll <= top + 2.0 {
@@ -1988,6 +2304,34 @@ impl OptionsUi {
                             });
                             y += 16.0;
                         }
+                        Row::Line(text, color) => {
+                            out.push(Widget {
+                                x: cx - 155.0,
+                                y: y + 1.0,
+                                w: 310.0,
+                                h: 9.0,
+                                kind: WKind::Text {
+                                    text,
+                                    color,
+                                    centered: false,
+                                },
+                                list: false,
+                            });
+                            y += 10.0;
+                        }
+                        Row::Grid(cells) => {
+                            let cell = cells.iter().flatten().map(|c| c.w).fold(0.0, f32::max);
+                            let n = cells.len() as f32;
+                            let x0 = cx - ((n * cell + (n - 1.0) * 10.0) / 2.0).floor();
+                            for (i, c) in cells.into_iter().enumerate() {
+                                if let Some(mut c) = c {
+                                    c.x = x0 + i as f32 * (cell + 10.0);
+                                    c.y = y + 2.0;
+                                    out.push(c);
+                                }
+                            }
+                            y += 25.0;
+                        }
                         Row::Big(opt) => {
                             out.push(option_widget(s, opt, cx - 155.0, y + 2.0, 310.0));
                             y += 25.0;
@@ -2014,7 +2358,72 @@ impl OptionsUi {
                 }
                 content = y + self.scroll - top + 2.0;
                 out[list_start..].iter_mut().for_each(|w| w.list = true);
-                if page == Page::Mods {
+                if page == Page::ShaderPacks {
+                    let view = &self.shader_packs;
+                    out.push(Widget {
+                        x: 0.0,
+                        y: h - 62.0,
+                        w,
+                        h: 9.0,
+                        kind: WKind::Text {
+                            text: Text::literal("Drop .zip files on the window to add them"),
+                            color: 0xFFA0A0A0,
+                            centered: true,
+                        },
+                        list: false,
+                    });
+                    let (label, act) = if view.web {
+                        ("Add Shader Pack...", ShaderAct::AddPack)
+                    } else {
+                        ("Open Shader Pack Folder...", ShaderAct::OpenFolder)
+                    };
+                    out.push(button(
+                        cx - 154.0,
+                        h - 51.0,
+                        150.0,
+                        Text::literal(label),
+                        Act::Shader(act),
+                    ));
+                    let settings = button(
+                        cx + 4.0,
+                        h - 51.0,
+                        150.0,
+                        Text::literal("Settings..."),
+                        Act::Push(Page::ShaderPackSettings),
+                    );
+                    out.push(if view.settings.is_some() {
+                        settings
+                    } else {
+                        inactive(settings)
+                    });
+                    let report = button(
+                        cx - 154.0,
+                        h - 27.0,
+                        150.0,
+                        Text::literal("Report..."),
+                        Act::Push(Page::ShaderPackReport),
+                    );
+                    out.push(if view.selected.is_some() {
+                        report
+                    } else {
+                        inactive(report)
+                    });
+                    out.push(button(cx + 4.0, h - 27.0, 150.0, tr("gui.done"), Act::Done));
+                } else if matches!(page, Page::ShaderPackSettings | Page::ShaderPackReport) {
+                    let (label, act) = if page == Page::ShaderPackSettings {
+                        ("Reset", ShaderAct::Reset)
+                    } else {
+                        ("Copy Report", ShaderAct::CopyReport)
+                    };
+                    out.push(button(
+                        cx - 154.0,
+                        h - 27.0,
+                        150.0,
+                        Text::literal(label),
+                        Act::Shader(act),
+                    ));
+                    out.push(button(cx + 4.0, h - 27.0, 150.0, tr("gui.done"), Act::Done));
+                } else if page == Page::Mods {
                     out.push(button(
                         cx - 154.0,
                         h - 27.0,
@@ -2101,6 +2510,7 @@ impl OptionsUi {
             crate::screen_draw::paint(batch, atlas, &draws);
             return;
         }
+        self.wrap_report(atlas);
         let (widgets, top, bottom, content) = self.layout(s, w, h);
         let in_world = self.in_world;
         ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
@@ -2162,6 +2572,20 @@ impl OptionsUi {
                         &Text::literal("This feature is not yet available in Horizon."),
                         170.0,
                     ));
+                }
+                let pack_option = match &wd.kind {
+                    WKind::Button {
+                        act: Act::Shader(ShaderAct::Option(name)),
+                        ..
+                    }
+                    | WKind::PackSlider { name, .. } => Some(name),
+                    _ => None,
+                };
+                if let Some(name) = pack_option
+                    && let Some(settings) = &self.shader_packs.settings
+                    && let Some(text) = crate::shader_packs_ui::option_tooltip(settings, name)
+                {
+                    tooltip = Some(atlas.font.split(&Text::literal(text), 170.0));
                 }
                 if let WKind::Button {
                     act: Act::ToggleMod(i),
@@ -2239,7 +2663,24 @@ impl OptionsUi {
                         batch.text_styled(atlas, text, wd.x, wd.y, *color, true);
                     }
                 }
+                WKind::PackSlider { label, value, name } => {
+                    let held = self.pack_slider.as_ref() == Some(name);
+                    ui::slider(
+                        batch,
+                        atlas,
+                        wd.x,
+                        wd.y,
+                        wd.w,
+                        label,
+                        *value,
+                        hover || held,
+                        true,
+                    );
+                }
                 WKind::LanguageRow {
+                    label, selected, ..
+                }
+                | WKind::PackRow {
                     label, selected, ..
                 } => {
                     let rect = [wd.x, wd.y, wd.w, wd.h];
@@ -2391,6 +2832,7 @@ impl OptionsUi {
             }
             return events;
         }
+        self.wrap_report(atlas);
         let (widgets, top, bottom, content) = self.layout(s, size.0, size.1);
         let mut events = Vec::new();
         if !drag && matches!(self.page(), Page::Video | Page::Controls | Page::KeyBinds) {
@@ -2421,6 +2863,15 @@ impl OptionsUi {
                 }
                 return events;
             }
+            if let Some(name) = self.pack_slider.clone()
+                && let Some(wd) = widgets
+                    .iter()
+                    .find(|wd| matches!(&wd.kind, WKind::PackSlider { name: n, .. } if *n == name))
+            {
+                let v = ui::slider_value(wd.x, wd.w, x);
+                events.extend(self.pack_slider_to(&name, v));
+                return events;
+            }
             if let Some(opt) = self.dragging
                 && let Some(wd) = widgets
                     .iter()
@@ -2449,6 +2900,24 @@ impl OptionsUi {
         // AbstractWidget accepts only the primary button. Rebinding above
         // accepts other mouse buttons, but is not a widget activation.
         if right {
+            // A pack option or profile cycles back on a right-click.
+            let hit = widgets.into_iter().find(|wd| {
+                ui::hovered((x, y), wd.x, wd.y, wd.w, wd.h)
+                    && (!wd.list || (y >= top && y < bottom))
+            });
+            if let Some(Widget {
+                kind:
+                    WKind::Button {
+                        active: true,
+                        act: Act::Shader(act @ (ShaderAct::Option(_) | ShaderAct::Profile)),
+                        ..
+                    },
+                ..
+            }) = hit
+            {
+                events.push(Event::ButtonClick);
+                events.extend(self.shader_act(act, true));
+            }
             return events;
         }
         if ui::scrollbar_thumb(top, bottom, content, self.scroll).is_some()
@@ -2470,8 +2939,19 @@ impl OptionsUi {
                 } => {
                     events.push(Event::ButtonClick);
                     match act {
-                        Act::Push(p) => self.push(p),
+                        Act::Push(p) => {
+                            self.push(p);
+                            if p == Page::ShaderPackSettings {
+                                events.extend(self.shader_screen(None));
+                            }
+                        }
+                        Act::Done if self.page() == Page::ShaderPackSettings => {
+                            // Done leaves the settings whatever sub-screen shows, and applies.
+                            events.extend(self.shader_screen(None));
+                            events.extend(self.back(s));
+                        }
                         Act::Done => events.extend(self.back(s)),
+                        Act::Shader(act) => events.extend(self.shader_act(act, false)),
                         Act::Cycle(opt) => {
                             opt.cycle(s, right, framebuffer);
                             if opt == Opt::Preset {
@@ -2523,6 +3003,14 @@ impl OptionsUi {
                     set_slider(opt, s, v);
                     events.push(Event::Changed);
                 }
+                WKind::PackRow { file, .. } => {
+                    events.extend(self.shader_act(ShaderAct::Select(file), false));
+                }
+                WKind::PackSlider { name, .. } => {
+                    self.pack_slider = Some(name.clone());
+                    let v = ui::slider_value(wd.x, wd.w, x);
+                    events.extend(self.pack_slider_to(&name, v));
+                }
                 WKind::LanguageRow { code, .. } => {
                     if self.language_choice.as_deref() == Some(code.as_str()) {
                         events.extend(self.back(s));
@@ -2551,7 +3039,7 @@ impl OptionsUi {
         }
         // AbstractSliderButton suppresses the press sound and plays once on
         // release, even if the pointer has left the widget or its value stayed.
-        let slider = self.dragging.take().is_some();
+        let slider = self.dragging.take().is_some() | self.pack_slider.take().is_some();
         let graphics_slider = self.graphics.release();
         if slider || graphics_slider {
             vec![Event::ButtonClick]
@@ -2606,6 +3094,15 @@ impl OptionsUi {
     }
     /// Escape or Done: leave the current page, applying page results.
     pub fn back(&mut self, s: &mut Settings) -> Vec<Event> {
+        use crate::shader_packs_ui::ShaderPackEvent as E;
+        // A pack's sub-screen goes up one screen.
+        if self.page() == Page::ShaderPackSettings
+            && let Some(settings) = &self.shader_packs.settings
+            && let Some(current) = &settings.screen
+        {
+            let parent = crate::shader_packs_ui::parent_screen(&settings.model, current);
+            return self.shader_screen(parent);
+        }
         let mut events = Vec::new();
         let page = self.stack.pop().unwrap_or(Page::Main);
         self.scroll = 0.0;
@@ -2633,6 +3130,13 @@ impl OptionsUi {
                     events.push(Event::Packs(ids));
                 }
             }
+            Page::ShaderPacks => {
+                self.delete_armed = None;
+                if self.shader_packs.unapplied() {
+                    events.push(Event::ShaderPacks(E::Apply));
+                }
+            }
+            Page::ShaderPackSettings => events.push(Event::ShaderPacks(E::Apply)),
             _ => {}
         }
         events.push(Event::Changed);
@@ -2896,6 +3400,250 @@ mod tests {
     }
     fn atlas() -> HudAtlas {
         HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+    }
+
+    /// Presses the first widget `pick` matches (`right`: the secondary button).
+    fn press(
+        ui: &mut OptionsUi,
+        s: &mut Settings,
+        right: bool,
+        pick: impl Fn(&WKind) -> bool,
+    ) -> Vec<Event> {
+        let atlas = atlas();
+        let size = (427.0, 240.0);
+        ui.wrap_report(&atlas);
+        let (widgets, _, _, _) = ui.layout(s, size.0, size.1);
+        let w = widgets
+            .iter()
+            .find(|w| pick(&w.kind))
+            .expect("the widget is on the page");
+        let (x, y) = (w.x + 2.0, w.y + 2.0);
+        ui.click(s, &atlas, x, y, size, [427, 240], false, right)
+    }
+    fn shader_button(want: ShaderAct) -> impl Fn(&WKind) -> bool {
+        move |k| matches!(k, WKind::Button { act: Act::Shader(a), .. } if *a == want)
+    }
+    fn texts(ui: &mut OptionsUi, s: &Settings) -> Vec<String> {
+        let (widgets, _, _, _) = ui.layout(s, 427.0, 240.0);
+        widgets
+            .iter()
+            .filter_map(|w| match &w.kind {
+                WKind::Button { label, .. }
+                | WKind::PackRow { label, .. }
+                | WKind::PackSlider { label, .. }
+                | WKind::Text { text: label, .. } => Some(label.plain()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn shader_packs_ui_library_page_selects_toggles_and_deletes_after_a_confirm() {
+        use crate::shader_packs_ui::{PackRow, ShaderPackEvent as E, ShaderPacksView};
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        ui.show(Page::Horizon);
+        ui.show(Page::ShaderPacks);
+        let empty = texts(&mut ui, &s);
+        assert!(
+            empty
+                .iter()
+                .any(|t| t.contains("put .zip files in the shaderpacks folder"))
+        );
+        assert!(empty.contains(&"Open Shader Pack Folder...".to_string()));
+        let row = |file: &str| PackRow {
+            file: file.into(),
+            title: file.trim_end_matches(".zip").into(),
+            status: None,
+        };
+        ui.shader_packs = ShaderPacksView {
+            enabled: true,
+            packs: vec![row("A.zip"), row("B.zip")],
+            selected: Some("A.zip".into()),
+            applied: Some("A.zip".into()),
+            progress: Some((3, 9)),
+            web: true,
+            ..Default::default()
+        };
+        let shown = texts(&mut ui, &s);
+        for want in [
+            "Shaders: ON",
+            "Compiling 3/9",
+            "A",
+            "B",
+            "Add Shader Pack...",
+        ] {
+            assert!(shown.contains(&want.to_string()), "{want} in {shown:?}");
+        }
+        let events = press(
+            &mut ui,
+            &mut s,
+            false,
+            |k| matches!(k, WKind::PackRow { file, .. } if file == "B.zip"),
+        );
+        assert_eq!(events, [Event::ShaderPacks(E::Select("B.zip".into()))]);
+        assert_eq!(
+            press(&mut ui, &mut s, false, shader_button(ShaderAct::AddPack)),
+            [Event::ButtonClick, Event::ShaderPacks(E::AddPack)]
+        );
+        assert_eq!(
+            press(&mut ui, &mut s, false, shader_button(ShaderAct::Toggle)),
+            [Event::ButtonClick, Event::ShaderPacks(E::SetEnabled(false))]
+        );
+        let delete = || shader_button(ShaderAct::Delete("B.zip".into()));
+        assert_eq!(
+            press(&mut ui, &mut s, false, delete()),
+            [Event::ButtonClick]
+        );
+        assert!(texts(&mut ui, &s).contains(&"Confirm Delete".to_string()));
+        assert_eq!(
+            press(&mut ui, &mut s, false, delete()),
+            [
+                Event::ButtonClick,
+                Event::ShaderPacks(E::Delete("B.zip".into()))
+            ]
+        );
+        // Leaving with a change applies it.
+        ui.shader_packs.enabled = true;
+        let events = ui.back(&mut s);
+        assert!(events.contains(&Event::ShaderPacks(E::Apply)));
+        assert_eq!(ui.page(), Page::Horizon);
+    }
+
+    #[test]
+    fn shader_packs_ui_settings_cycle_both_ways_open_screens_and_apply_on_done() {
+        use crate::shader_packs_ui::{
+            Entry, OptionDef, OptionModel, Screen, SettingsView, ShaderPackEvent as E,
+            ShaderPacksView,
+        };
+        let mut s = Settings::default();
+        let model = OptionModel {
+            options: vec![
+                OptionDef {
+                    name: "QUALITY".into(),
+                    default: "1".into(),
+                    values: vec!["0".into(), "1".into(), "2".into()],
+                    ..Default::default()
+                },
+                OptionDef {
+                    name: "SUN".into(),
+                    default: "1".into(),
+                    values: vec!["0".into(), "1".into(), "2".into()],
+                    slider: true,
+                    ..Default::default()
+                },
+            ],
+            root: Some(Screen {
+                entries: vec![Entry::Option("QUALITY".into()), Entry::Screen("SKY".into())],
+                columns: 0,
+            }),
+            screens: [(
+                "SKY".to_string(),
+                Screen {
+                    entries: vec![Entry::Option("SUN".into())],
+                    columns: 1,
+                },
+            )]
+            .into(),
+            ..Default::default()
+        };
+        let mut ui = OptionsUi::default();
+        ui.shader_packs = ShaderPacksView {
+            selected: Some("A.zip".into()),
+            settings: Some(SettingsView {
+                model: std::sync::Arc::new(model),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        ui.show(Page::ShaderPacks);
+        let events = press(&mut ui, &mut s, false, |k| {
+            matches!(
+                k,
+                WKind::Button {
+                    act: Act::Push(Page::ShaderPackSettings),
+                    ..
+                }
+            )
+        });
+        assert!(events.contains(&Event::ShaderPacks(E::OpenScreen(None))));
+        let quality = |name: &str| shader_button(ShaderAct::Option(name.into()));
+        assert_eq!(
+            press(&mut ui, &mut s, false, quality("QUALITY")),
+            [
+                Event::ButtonClick,
+                Event::ShaderPacks(E::SetOption {
+                    name: "QUALITY".into(),
+                    value: "2".into()
+                })
+            ]
+        );
+        assert!(texts(&mut ui, &s).contains(&"QUALITY: 2".to_string()));
+        assert_eq!(
+            press(&mut ui, &mut s, true, quality("QUALITY")),
+            [
+                Event::ButtonClick,
+                Event::ShaderPacks(E::SetOption {
+                    name: "QUALITY".into(),
+                    value: "1".into()
+                })
+            ]
+        );
+        assert_eq!(
+            press(
+                &mut ui,
+                &mut s,
+                false,
+                shader_button(ShaderAct::OpenScreen("SKY".into()))
+            ),
+            [
+                Event::ButtonClick,
+                Event::ShaderPacks(E::OpenScreen(Some("SKY".into())))
+            ]
+        );
+        // The slider: a press at its left end picks the first value.
+        let events = press(&mut ui, &mut s, false, |k| {
+            matches!(k, WKind::PackSlider { .. })
+        });
+        assert_eq!(
+            events,
+            [Event::ShaderPacks(E::SetOption {
+                name: "SUN".into(),
+                value: "0".into()
+            })]
+        );
+        assert_eq!(ui.release(), [Event::ButtonClick]);
+        // Escape goes up one screen, then leaves and applies.
+        assert_eq!(ui.back(&mut s), [Event::ShaderPacks(E::OpenScreen(None))]);
+        assert_eq!(ui.page(), Page::ShaderPackSettings);
+        let events = ui.back(&mut s);
+        assert!(events.contains(&Event::ShaderPacks(E::Apply)));
+        assert_eq!(ui.page(), Page::ShaderPacks);
+    }
+
+    #[test]
+    fn shader_packs_ui_report_wraps_lines_and_copies() {
+        use crate::shader_packs_ui::{ShaderPackEvent as E, ShaderPacksView};
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        ui.shader_packs = ShaderPacksView {
+            selected: Some("A.zip".into()),
+            report: vec![
+                "Status: Partial".into(),
+                "composite2: skipped, shaders/composite2.fsh:41: no matching overload for textureGather with these arguments".into(),
+            ],
+            ..Default::default()
+        };
+        ui.show(Page::ShaderPackReport);
+        ui.wrap_report(&atlas());
+        let shown = texts(&mut ui, &s);
+        assert!(shown.contains(&"Status: Partial".to_string()));
+        let wrapped = ui.report_wrapped.as_ref().unwrap().2.len();
+        assert!(wrapped > 2, "the long line wraps: {wrapped} lines");
+        assert_eq!(
+            press(&mut ui, &mut s, false, shader_button(ShaderAct::CopyReport)),
+            [Event::ButtonClick, Event::ShaderPacks(E::CopyReport)]
+        );
     }
 
     #[test]
@@ -4058,6 +4806,7 @@ mod tests {
                 Page::Graphics,
                 Page::GraphicsAdvanced,
                 Page::Controller,
+                Page::ShaderPacks,
                 Page::Extras,
                 Page::Mods,
                 Page::Agent,

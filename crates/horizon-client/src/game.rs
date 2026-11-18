@@ -142,6 +142,7 @@ mod screens;
 mod sculk;
 mod sculk_fixture;
 mod server_travel;
+mod shader_packs;
 mod shield;
 mod sign_edit;
 mod sniffers;

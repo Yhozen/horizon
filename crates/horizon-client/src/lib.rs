@@ -158,6 +158,7 @@ pub mod screen_layout;
 pub mod sculk;
 pub use horizon_server_files as server;
 pub mod settings;
+pub mod shader_packs_ui;
 pub mod shadows;
 pub mod signs;
 pub mod skins;
