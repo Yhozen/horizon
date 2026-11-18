@@ -38,6 +38,9 @@ pub enum Form {
     Shaped,
     /// Present only so loaders resolve its name.
     Inert,
+    /// A wall, fence, gate, pane or bars: its shapes and models follow its
+    /// connections ([`crate::connected`]).
+    Connected(crate::connected::Family),
 }
 
 /// The render layer (`ChunkSectionLayer`).
@@ -101,6 +104,12 @@ pub enum Faces {
     Fluid {
         still: &'static str,
         flow: &'static str,
+    },
+    /// Walls, fences and gates: one texture; panes and bars: the pane and
+    /// its edge.
+    Connected {
+        texture: &'static str,
+        edge: &'static str,
     },
 }
 
@@ -548,6 +557,7 @@ pub fn defined() -> Vec<Block> {
     let mut blocks = authored();
     crate::cubes::add(&mut blocks);
     crate::slabs::add(&mut blocks);
+    crate::connected::add(&mut blocks);
     blocks
         .into_iter()
         .map(|mut block| {
@@ -1168,6 +1178,7 @@ impl Block {
             }
             Faces::Stairs { bottom, top, side } => unique(&[bottom, top, side]),
             Faces::Fluid { still, flow } => vec![still, flow],
+            Faces::Connected { texture, edge } => unique(&[texture, edge]),
         }
     }
 }
@@ -1247,7 +1258,7 @@ mod tests {
     }
 
     /// The number of palette blocks (checked again by the client's test).
-    pub const PALETTE_BLOCKS: usize = 479;
+    pub const PALETTE_BLOCKS: usize = 562;
 
     #[test]
     fn states_vary_the_last_property_fastest_and_have_a_default() {

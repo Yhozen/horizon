@@ -77,8 +77,6 @@ block/black_candle_lit.png
 block/black_concrete_powder.png
 block/black_glazed_terracotta.png
 block/black_shulker_box.png
-block/black_stained_glass.png
-block/black_stained_glass_pane_top.png
 block/blue_bed_foot_east.png
 block/blue_bed_foot_south.png
 block/blue_bed_foot_up.png
@@ -93,8 +91,6 @@ block/blue_glazed_terracotta.png
 block/blue_ice.png
 block/blue_orchid.png
 block/blue_shulker_box.png
-block/blue_stained_glass.png
-block/blue_stained_glass_pane_top.png
 block/brain_coral.png
 block/brain_coral_block.png
 block/brain_coral_fan.png
@@ -113,8 +109,6 @@ block/brown_concrete_powder.png
 block/brown_glazed_terracotta.png
 block/brown_mushroom_block.png
 block/brown_shulker_box.png
-block/brown_stained_glass.png
-block/brown_stained_glass_pane_top.png
 block/bubble_coral.png
 block/bubble_coral_block.png
 block/bubble_coral_fan.png
@@ -188,7 +182,6 @@ block/composter_ready.png
 block/composter_side.png
 block/composter_top.png
 block/conduit.png
-block/copper_bars.png
 block/copper_bulb.png
 block/copper_bulb_lit.png
 block/copper_bulb_lit_powered.png
@@ -245,8 +238,6 @@ block/cyan_candle_lit.png
 block/cyan_concrete_powder.png
 block/cyan_glazed_terracotta.png
 block/cyan_shulker_box.png
-block/cyan_stained_glass.png
-block/cyan_stained_glass_pane_top.png
 block/damaged_anvil_top.png
 block/dark_oak_door_bottom.png
 block/dark_oak_door_top.png
@@ -334,7 +325,6 @@ block/end_portal_frame_eye.png
 block/end_portal_frame_side.png
 block/end_portal_frame_top.png
 block/end_rod.png
-block/exposed_copper_bars.png
 block/exposed_copper_bulb.png
 block/exposed_copper_bulb_lit.png
 block/exposed_copper_bulb_lit_powered.png
@@ -364,7 +354,6 @@ block/frosted_ice_0.png
 block/frosted_ice_1.png
 block/frosted_ice_2.png
 block/frosted_ice_3.png
-block/glass_pane_top.png
 block/glow_item_frame.png
 block/glow_lichen.png
 block/golden_dandelion.png
@@ -381,8 +370,6 @@ block/gray_candle_lit.png
 block/gray_concrete_powder.png
 block/gray_glazed_terracotta.png
 block/gray_shulker_box.png
-block/gray_stained_glass.png
-block/gray_stained_glass_pane_top.png
 block/green_bed_foot_east.png
 block/green_bed_foot_south.png
 block/green_bed_foot_up.png
@@ -395,8 +382,6 @@ block/green_candle_lit.png
 block/green_concrete_powder.png
 block/green_glazed_terracotta.png
 block/green_shulker_box.png
-block/green_stained_glass.png
-block/green_stained_glass_pane_top.png
 block/grindstone_pivot.png
 block/grindstone_round.png
 block/grindstone_side.png
@@ -413,7 +398,6 @@ block/hopper_top.png
 block/horn_coral.png
 block/horn_coral_block.png
 block/horn_coral_fan.png
-block/iron_bars.png
 block/iron_chain.png
 block/iron_door_bottom.png
 block/iron_door_top.png
@@ -459,8 +443,6 @@ block/light_blue_candle_lit.png
 block/light_blue_concrete_powder.png
 block/light_blue_glazed_terracotta.png
 block/light_blue_shulker_box.png
-block/light_blue_stained_glass.png
-block/light_blue_stained_glass_pane_top.png
 block/light_gray_bed_foot_east.png
 block/light_gray_bed_foot_south.png
 block/light_gray_bed_foot_up.png
@@ -473,8 +455,6 @@ block/light_gray_candle_lit.png
 block/light_gray_concrete_powder.png
 block/light_gray_glazed_terracotta.png
 block/light_gray_shulker_box.png
-block/light_gray_stained_glass.png
-block/light_gray_stained_glass_pane_top.png
 block/lightning_rod.png
 block/lightning_rod_on.png
 block/lilac_bottom.png
@@ -493,8 +473,6 @@ block/lime_candle_lit.png
 block/lime_concrete_powder.png
 block/lime_glazed_terracotta.png
 block/lime_shulker_box.png
-block/lime_stained_glass.png
-block/lime_stained_glass_pane_top.png
 block/loom_bottom.png
 block/loom_front.png
 block/loom_side.png
@@ -511,8 +489,6 @@ block/magenta_candle_lit.png
 block/magenta_concrete_powder.png
 block/magenta_glazed_terracotta.png
 block/magenta_shulker_box.png
-block/magenta_stained_glass.png
-block/magenta_stained_glass_pane_top.png
 block/magma.png
 block/mangrove_door_bottom.png
 block/mangrove_door_top.png
@@ -568,9 +544,6 @@ block/orange_concrete_powder.png
 block/orange_glazed_terracotta.png
 block/orange_poplar_leaves.png
 block/orange_shulker_box.png
-block/orange_stained_glass.png
-block/orange_stained_glass_pane_top.png
-block/oxidized_copper_bars.png
 block/oxidized_copper_bulb.png
 block/oxidized_copper_bulb_lit.png
 block/oxidized_copper_bulb_lit_powered.png
@@ -612,8 +585,6 @@ block/pink_glazed_terracotta.png
 block/pink_petals.png
 block/pink_petals_stem.png
 block/pink_shulker_box.png
-block/pink_stained_glass.png
-block/pink_stained_glass_pane_top.png
 block/pink_tulip.png
 block/piston_bottom.png
 block/piston_inner.png
@@ -677,8 +648,6 @@ block/purple_candle_lit.png
 block/purple_concrete_powder.png
 block/purple_glazed_terracotta.png
 block/purple_shulker_box.png
-block/purple_stained_glass.png
-block/purple_stained_glass_pane_top.png
 block/rail.png
 block/rail_corner.png
 block/red_bed_foot_east.png
@@ -696,8 +665,6 @@ block/red_mushroom_block.png
 block/red_poplar_leaves.png
 block/red_shrub.png
 block/red_shulker_box.png
-block/red_stained_glass.png
-block/red_stained_glass_pane_top.png
 block/red_tulip.png
 block/redstone_block.png
 block/redstone_dust_dot.png
@@ -910,7 +877,6 @@ block/warped_stem.png
 block/warped_trapdoor.png
 block/water_flow.png
 block/water_still.png
-block/weathered_copper_bars.png
 block/weathered_copper_bulb.png
 block/weathered_copper_bulb_lit.png
 block/weathered_copper_bulb_lit_powered.png
@@ -945,8 +911,6 @@ block/white_candle_lit.png
 block/white_concrete_powder.png
 block/white_glazed_terracotta.png
 block/white_shulker_box.png
-block/white_stained_glass.png
-block/white_stained_glass_pane_top.png
 block/white_tulip.png
 block/wildflowers.png
 block/wildflowers_stem.png
@@ -964,8 +928,6 @@ block/yellow_concrete_powder.png
 block/yellow_glazed_terracotta.png
 block/yellow_poplar_leaves.png
 block/yellow_shulker_box.png
-block/yellow_stained_glass.png
-block/yellow_stained_glass_pane_top.png
 effect/dither.png
 entity/allay/allay.png
 entity/armadillo/armadillo.png

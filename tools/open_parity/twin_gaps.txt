@@ -4,8 +4,6 @@ attributes:minecraft:waypoint_receive_range
 attributes:minecraft:waypoint_transmit_range
 blocks:minecraft:acacia_button
 blocks:minecraft:acacia_door
-blocks:minecraft:acacia_fence
-blocks:minecraft:acacia_fence_gate
 blocks:minecraft:acacia_hanging_sign
 blocks:minecraft:acacia_pressure_plate
 blocks:minecraft:acacia_shelf
@@ -16,7 +14,6 @@ blocks:minecraft:acacia_wall_sign
 blocks:minecraft:activator_rail
 blocks:minecraft:amethyst_block
 blocks:minecraft:amethyst_cluster
-blocks:minecraft:andesite_wall
 blocks:minecraft:anvil
 blocks:minecraft:attached_melon_stem
 blocks:minecraft:attached_pumpkin_stem
@@ -47,8 +44,6 @@ blocks:minecraft:big_dripleaf
 blocks:minecraft:big_dripleaf_stem
 blocks:minecraft:birch_button
 blocks:minecraft:birch_door
-blocks:minecraft:birch_fence
-blocks:minecraft:birch_fence_gate
 blocks:minecraft:birch_hanging_sign
 blocks:minecraft:birch_pressure_plate
 blocks:minecraft:birch_shelf
@@ -65,9 +60,7 @@ blocks:minecraft:black_concrete_powder
 blocks:minecraft:black_glazed_terracotta
 blocks:minecraft:black_shulker_box
 blocks:minecraft:black_stained_glass
-blocks:minecraft:black_stained_glass_pane
 blocks:minecraft:black_wall_banner
-blocks:minecraft:blackstone_wall
 blocks:minecraft:blue_banner
 blocks:minecraft:blue_bed
 blocks:minecraft:blue_candle
@@ -79,14 +72,12 @@ blocks:minecraft:blue_ice
 blocks:minecraft:blue_orchid
 blocks:minecraft:blue_shulker_box
 blocks:minecraft:blue_stained_glass
-blocks:minecraft:blue_stained_glass_pane
 blocks:minecraft:blue_wall_banner
 blocks:minecraft:brain_coral
 blocks:minecraft:brain_coral_block
 blocks:minecraft:brain_coral_fan
 blocks:minecraft:brain_coral_wall_fan
 blocks:minecraft:brewing_stand
-blocks:minecraft:brick_wall
 blocks:minecraft:brown_banner
 blocks:minecraft:brown_bed
 blocks:minecraft:brown_candle
@@ -97,7 +88,6 @@ blocks:minecraft:brown_glazed_terracotta
 blocks:minecraft:brown_mushroom_block
 blocks:minecraft:brown_shulker_box
 blocks:minecraft:brown_stained_glass
-blocks:minecraft:brown_stained_glass_pane
 blocks:minecraft:brown_wall_banner
 blocks:minecraft:bubble_coral
 blocks:minecraft:bubble_coral_block
@@ -120,8 +110,6 @@ blocks:minecraft:cave_vines_plant
 blocks:minecraft:chain_command_block
 blocks:minecraft:cherry_button
 blocks:minecraft:cherry_door
-blocks:minecraft:cherry_fence
-blocks:minecraft:cherry_fence_gate
 blocks:minecraft:cherry_hanging_sign
 blocks:minecraft:cherry_leaves
 blocks:minecraft:cherry_pressure_plate
@@ -137,18 +125,13 @@ blocks:minecraft:chiseled_bookshelf
 blocks:minecraft:chiseled_copper
 blocks:minecraft:chorus_flower
 blocks:minecraft:chorus_plant
-blocks:minecraft:cinnabar_brick_wall
-blocks:minecraft:cinnabar_wall
 blocks:minecraft:closed_eyeblossom
-blocks:minecraft:cobbled_deepslate_wall
-blocks:minecraft:cobblestone_wall
 blocks:minecraft:cobweb
 blocks:minecraft:cocoa
 blocks:minecraft:command_block
 blocks:minecraft:comparator
 blocks:minecraft:composter
 blocks:minecraft:conduit
-blocks:minecraft:copper_bars
 blocks:minecraft:copper_bulb
 blocks:minecraft:copper_chain
 blocks:minecraft:copper_chest
@@ -165,8 +148,6 @@ blocks:minecraft:creeper_head
 blocks:minecraft:creeper_wall_head
 blocks:minecraft:crimson_button
 blocks:minecraft:crimson_door
-blocks:minecraft:crimson_fence
-blocks:minecraft:crimson_fence_gate
 blocks:minecraft:crimson_fungus
 blocks:minecraft:crimson_hanging_sign
 blocks:minecraft:crimson_nylium
@@ -188,13 +169,10 @@ blocks:minecraft:cyan_concrete_powder
 blocks:minecraft:cyan_glazed_terracotta
 blocks:minecraft:cyan_shulker_box
 blocks:minecraft:cyan_stained_glass
-blocks:minecraft:cyan_stained_glass_pane
 blocks:minecraft:cyan_wall_banner
 blocks:minecraft:damaged_anvil
 blocks:minecraft:dark_oak_button
 blocks:minecraft:dark_oak_door
-blocks:minecraft:dark_oak_fence
-blocks:minecraft:dark_oak_fence_gate
 blocks:minecraft:dark_oak_hanging_sign
 blocks:minecraft:dark_oak_leaves
 blocks:minecraft:dark_oak_pressure_plate
@@ -221,7 +199,6 @@ blocks:minecraft:dead_tube_coral
 blocks:minecraft:dead_tube_coral_fan
 blocks:minecraft:dead_tube_coral_wall_fan
 blocks:minecraft:decorated_pot
-blocks:minecraft:deepslate_brick_wall
 blocks:minecraft:deepslate_coal_ore
 blocks:minecraft:deepslate_copper_ore
 blocks:minecraft:deepslate_diamond_ore
@@ -230,9 +207,7 @@ blocks:minecraft:deepslate_gold_ore
 blocks:minecraft:deepslate_iron_ore
 blocks:minecraft:deepslate_lapis_ore
 blocks:minecraft:deepslate_redstone_ore
-blocks:minecraft:deepslate_tile_wall
 blocks:minecraft:detector_rail
-blocks:minecraft:diorite_wall
 blocks:minecraft:dirt_path
 blocks:minecraft:dispenser
 blocks:minecraft:dragon_egg
@@ -246,11 +221,9 @@ blocks:minecraft:end_gateway
 blocks:minecraft:end_portal
 blocks:minecraft:end_portal_frame
 blocks:minecraft:end_rod
-blocks:minecraft:end_stone_brick_wall
 blocks:minecraft:ender_chest
 blocks:minecraft:exposed_chiseled_copper
 blocks:minecraft:exposed_copper
-blocks:minecraft:exposed_copper_bars
 blocks:minecraft:exposed_copper_bulb
 blocks:minecraft:exposed_copper_chain
 blocks:minecraft:exposed_copper_chest
@@ -273,10 +246,8 @@ blocks:minecraft:flowering_azalea
 blocks:minecraft:flowering_azalea_leaves
 blocks:minecraft:frogspawn
 blocks:minecraft:frosted_ice
-blocks:minecraft:glass_pane
 blocks:minecraft:glow_lichen
 blocks:minecraft:golden_dandelion
-blocks:minecraft:granite_wall
 blocks:minecraft:gray_banner
 blocks:minecraft:gray_bed
 blocks:minecraft:gray_candle
@@ -286,7 +257,6 @@ blocks:minecraft:gray_concrete_powder
 blocks:minecraft:gray_glazed_terracotta
 blocks:minecraft:gray_shulker_box
 blocks:minecraft:gray_stained_glass
-blocks:minecraft:gray_stained_glass_pane
 blocks:minecraft:gray_wall_banner
 blocks:minecraft:green_banner
 blocks:minecraft:green_bed
@@ -297,7 +267,6 @@ blocks:minecraft:green_concrete_powder
 blocks:minecraft:green_glazed_terracotta
 blocks:minecraft:green_shulker_box
 blocks:minecraft:green_stained_glass
-blocks:minecraft:green_stained_glass_pane
 blocks:minecraft:green_wall_banner
 blocks:minecraft:grindstone
 blocks:minecraft:hanging_roots
@@ -317,7 +286,6 @@ blocks:minecraft:infested_deepslate
 blocks:minecraft:infested_mossy_stone_bricks
 blocks:minecraft:infested_stone
 blocks:minecraft:infested_stone_bricks
-blocks:minecraft:iron_bars
 blocks:minecraft:iron_chain
 blocks:minecraft:iron_door
 blocks:minecraft:iron_trapdoor
@@ -326,8 +294,6 @@ blocks:minecraft:jigsaw
 blocks:minecraft:jukebox
 blocks:minecraft:jungle_button
 blocks:minecraft:jungle_door
-blocks:minecraft:jungle_fence
-blocks:minecraft:jungle_fence_gate
 blocks:minecraft:jungle_hanging_sign
 blocks:minecraft:jungle_pressure_plate
 blocks:minecraft:jungle_shelf
@@ -356,7 +322,6 @@ blocks:minecraft:light_blue_concrete_powder
 blocks:minecraft:light_blue_glazed_terracotta
 blocks:minecraft:light_blue_shulker_box
 blocks:minecraft:light_blue_stained_glass
-blocks:minecraft:light_blue_stained_glass_pane
 blocks:minecraft:light_blue_wall_banner
 blocks:minecraft:light_gray_banner
 blocks:minecraft:light_gray_bed
@@ -367,7 +332,6 @@ blocks:minecraft:light_gray_concrete_powder
 blocks:minecraft:light_gray_glazed_terracotta
 blocks:minecraft:light_gray_shulker_box
 blocks:minecraft:light_gray_stained_glass
-blocks:minecraft:light_gray_stained_glass_pane
 blocks:minecraft:light_gray_wall_banner
 blocks:minecraft:light_weighted_pressure_plate
 blocks:minecraft:lightning_rod
@@ -383,7 +347,6 @@ blocks:minecraft:lime_concrete_powder
 blocks:minecraft:lime_glazed_terracotta
 blocks:minecraft:lime_shulker_box
 blocks:minecraft:lime_stained_glass
-blocks:minecraft:lime_stained_glass_pane
 blocks:minecraft:lime_wall_banner
 blocks:minecraft:loom
 blocks:minecraft:magenta_banner
@@ -395,13 +358,10 @@ blocks:minecraft:magenta_concrete_powder
 blocks:minecraft:magenta_glazed_terracotta
 blocks:minecraft:magenta_shulker_box
 blocks:minecraft:magenta_stained_glass
-blocks:minecraft:magenta_stained_glass_pane
 blocks:minecraft:magenta_wall_banner
 blocks:minecraft:magma_block
 blocks:minecraft:mangrove_button
 blocks:minecraft:mangrove_door
-blocks:minecraft:mangrove_fence
-blocks:minecraft:mangrove_fence_gate
 blocks:minecraft:mangrove_hanging_sign
 blocks:minecraft:mangrove_leaves
 blocks:minecraft:mangrove_pressure_plate
@@ -416,15 +376,10 @@ blocks:minecraft:medium_amethyst_bud
 blocks:minecraft:melon_stem
 blocks:minecraft:moss_block
 blocks:minecraft:moss_carpet
-blocks:minecraft:mossy_cobblestone_wall
-blocks:minecraft:mossy_stone_brick_wall
 blocks:minecraft:moving_piston
 blocks:minecraft:mud
-blocks:minecraft:mud_brick_wall
 blocks:minecraft:mushroom_stem
 blocks:minecraft:mycelium
-blocks:minecraft:nether_brick_fence
-blocks:minecraft:nether_brick_wall
 blocks:minecraft:nether_gold_ore
 blocks:minecraft:nether_portal
 blocks:minecraft:nether_quartz_ore
@@ -434,8 +389,6 @@ blocks:minecraft:netherrack
 blocks:minecraft:note_block
 blocks:minecraft:oak_button
 blocks:minecraft:oak_door
-blocks:minecraft:oak_fence
-blocks:minecraft:oak_fence_gate
 blocks:minecraft:oak_hanging_sign
 blocks:minecraft:oak_pressure_plate
 blocks:minecraft:oak_shelf
@@ -455,11 +408,9 @@ blocks:minecraft:orange_glazed_terracotta
 blocks:minecraft:orange_poplar_leaves
 blocks:minecraft:orange_shulker_box
 blocks:minecraft:orange_stained_glass
-blocks:minecraft:orange_stained_glass_pane
 blocks:minecraft:orange_wall_banner
 blocks:minecraft:oxidized_chiseled_copper
 blocks:minecraft:oxidized_copper
-blocks:minecraft:oxidized_copper_bars
 blocks:minecraft:oxidized_copper_bulb
 blocks:minecraft:oxidized_copper_chain
 blocks:minecraft:oxidized_copper_chest
@@ -475,8 +426,6 @@ blocks:minecraft:pale_moss_block
 blocks:minecraft:pale_moss_carpet
 blocks:minecraft:pale_oak_button
 blocks:minecraft:pale_oak_door
-blocks:minecraft:pale_oak_fence
-blocks:minecraft:pale_oak_fence_gate
 blocks:minecraft:pale_oak_hanging_sign
 blocks:minecraft:pale_oak_leaves
 blocks:minecraft:pale_oak_pressure_plate
@@ -499,7 +448,6 @@ blocks:minecraft:pink_glazed_terracotta
 blocks:minecraft:pink_petals
 blocks:minecraft:pink_shulker_box
 blocks:minecraft:pink_stained_glass
-blocks:minecraft:pink_stained_glass_pane
 blocks:minecraft:pink_tulip
 blocks:minecraft:pink_wall_banner
 blocks:minecraft:piston
@@ -510,18 +458,10 @@ blocks:minecraft:player_head
 blocks:minecraft:player_wall_head
 blocks:minecraft:podzol
 blocks:minecraft:pointed_dripstone
-blocks:minecraft:polished_blackstone_brick_wall
 blocks:minecraft:polished_blackstone_button
 blocks:minecraft:polished_blackstone_pressure_plate
-blocks:minecraft:polished_blackstone_wall
-blocks:minecraft:polished_cinnabar_wall
-blocks:minecraft:polished_deepslate_wall
-blocks:minecraft:polished_sulfur_wall
-blocks:minecraft:polished_tuff_wall
 blocks:minecraft:poplar_button
 blocks:minecraft:poplar_door
-blocks:minecraft:poplar_fence
-blocks:minecraft:poplar_fence_gate
 blocks:minecraft:poplar_hanging_sign
 blocks:minecraft:poplar_pressure_plate
 blocks:minecraft:poplar_sapling
@@ -574,7 +514,6 @@ blocks:minecraft:potted_wither_rose
 blocks:minecraft:powder_snow
 blocks:minecraft:powder_snow_cauldron
 blocks:minecraft:powered_rail
-blocks:minecraft:prismarine_wall
 blocks:minecraft:pumpkin
 blocks:minecraft:pumpkin_stem
 blocks:minecraft:purple_banner
@@ -586,7 +525,6 @@ blocks:minecraft:purple_concrete_powder
 blocks:minecraft:purple_glazed_terracotta
 blocks:minecraft:purple_shulker_box
 blocks:minecraft:purple_stained_glass
-blocks:minecraft:purple_stained_glass_pane
 blocks:minecraft:purple_wall_banner
 blocks:minecraft:rail
 blocks:minecraft:red_banner
@@ -597,13 +535,10 @@ blocks:minecraft:red_carpet
 blocks:minecraft:red_concrete_powder
 blocks:minecraft:red_glazed_terracotta
 blocks:minecraft:red_mushroom_block
-blocks:minecraft:red_nether_brick_wall
 blocks:minecraft:red_poplar_leaves
-blocks:minecraft:red_sandstone_wall
 blocks:minecraft:red_shrub
 blocks:minecraft:red_shulker_box
 blocks:minecraft:red_stained_glass
-blocks:minecraft:red_stained_glass_pane
 blocks:minecraft:red_tulip
 blocks:minecraft:red_wall_banner
 blocks:minecraft:redstone_block
@@ -614,12 +549,10 @@ blocks:minecraft:redstone_wall_torch
 blocks:minecraft:redstone_wire
 blocks:minecraft:repeater
 blocks:minecraft:repeating_command_block
-blocks:minecraft:resin_brick_wall
 blocks:minecraft:resin_clump
 blocks:minecraft:respawn_anchor
 blocks:minecraft:rooted_dirt
 blocks:minecraft:rose_bush
-blocks:minecraft:sandstone_wall
 blocks:minecraft:scaffolding
 blocks:minecraft:sculk
 blocks:minecraft:sculk_catalyst
@@ -650,8 +583,6 @@ blocks:minecraft:sponge
 blocks:minecraft:spore_blossom
 blocks:minecraft:spruce_button
 blocks:minecraft:spruce_door
-blocks:minecraft:spruce_fence
-blocks:minecraft:spruce_fence_gate
 blocks:minecraft:spruce_hanging_sign
 blocks:minecraft:spruce_pressure_plate
 blocks:minecraft:spruce_shelf
@@ -660,16 +591,13 @@ blocks:minecraft:spruce_trapdoor
 blocks:minecraft:spruce_wall_hanging_sign
 blocks:minecraft:spruce_wall_sign
 blocks:minecraft:sticky_piston
-blocks:minecraft:stone_brick_wall
 blocks:minecraft:stone_button
 blocks:minecraft:stone_pressure_plate
 blocks:minecraft:stonecutter
 blocks:minecraft:straw_bed
 blocks:minecraft:structure_block
 blocks:minecraft:structure_void
-blocks:minecraft:sulfur_brick_wall
 blocks:minecraft:sulfur_spike
-blocks:minecraft:sulfur_wall
 blocks:minecraft:sunflower
 blocks:minecraft:suspicious_gravel
 blocks:minecraft:suspicious_sand
@@ -692,8 +620,6 @@ blocks:minecraft:tube_coral
 blocks:minecraft:tube_coral_block
 blocks:minecraft:tube_coral_fan
 blocks:minecraft:tube_coral_wall_fan
-blocks:minecraft:tuff_brick_wall
-blocks:minecraft:tuff_wall
 blocks:minecraft:turtle_egg
 blocks:minecraft:twisting_vines
 blocks:minecraft:twisting_vines_plant
@@ -702,8 +628,6 @@ blocks:minecraft:vine
 blocks:minecraft:wall_torch
 blocks:minecraft:warped_button
 blocks:minecraft:warped_door
-blocks:minecraft:warped_fence
-blocks:minecraft:warped_fence_gate
 blocks:minecraft:warped_fungus
 blocks:minecraft:warped_hanging_sign
 blocks:minecraft:warped_nylium
@@ -715,7 +639,6 @@ blocks:minecraft:warped_trapdoor
 blocks:minecraft:warped_wall_hanging_sign
 blocks:minecraft:warped_wall_sign
 blocks:minecraft:water_cauldron
-blocks:minecraft:waxed_copper_bars
 blocks:minecraft:waxed_copper_bulb
 blocks:minecraft:waxed_copper_chain
 blocks:minecraft:waxed_copper_chest
@@ -724,7 +647,6 @@ blocks:minecraft:waxed_copper_golem_statue
 blocks:minecraft:waxed_copper_grate
 blocks:minecraft:waxed_copper_lantern
 blocks:minecraft:waxed_copper_trapdoor
-blocks:minecraft:waxed_exposed_copper_bars
 blocks:minecraft:waxed_exposed_copper_bulb
 blocks:minecraft:waxed_exposed_copper_chain
 blocks:minecraft:waxed_exposed_copper_chest
@@ -735,7 +657,6 @@ blocks:minecraft:waxed_exposed_copper_lantern
 blocks:minecraft:waxed_exposed_copper_trapdoor
 blocks:minecraft:waxed_exposed_lightning_rod
 blocks:minecraft:waxed_lightning_rod
-blocks:minecraft:waxed_oxidized_copper_bars
 blocks:minecraft:waxed_oxidized_copper_bulb
 blocks:minecraft:waxed_oxidized_copper_chain
 blocks:minecraft:waxed_oxidized_copper_chest
@@ -745,7 +666,6 @@ blocks:minecraft:waxed_oxidized_copper_grate
 blocks:minecraft:waxed_oxidized_copper_lantern
 blocks:minecraft:waxed_oxidized_copper_trapdoor
 blocks:minecraft:waxed_oxidized_lightning_rod
-blocks:minecraft:waxed_weathered_copper_bars
 blocks:minecraft:waxed_weathered_copper_bulb
 blocks:minecraft:waxed_weathered_copper_chain
 blocks:minecraft:waxed_weathered_copper_chest
@@ -757,7 +677,6 @@ blocks:minecraft:waxed_weathered_copper_trapdoor
 blocks:minecraft:waxed_weathered_lightning_rod
 blocks:minecraft:weathered_chiseled_copper
 blocks:minecraft:weathered_copper
-blocks:minecraft:weathered_copper_bars
 blocks:minecraft:weathered_copper_bulb
 blocks:minecraft:weathered_copper_chain
 blocks:minecraft:weathered_copper_chest
@@ -781,7 +700,6 @@ blocks:minecraft:white_concrete_powder
 blocks:minecraft:white_glazed_terracotta
 blocks:minecraft:white_shulker_box
 blocks:minecraft:white_stained_glass
-blocks:minecraft:white_stained_glass_pane
 blocks:minecraft:white_tulip
 blocks:minecraft:white_wall_banner
 blocks:minecraft:wildflowers
@@ -798,7 +716,6 @@ blocks:minecraft:yellow_glazed_terracotta
 blocks:minecraft:yellow_poplar_leaves
 blocks:minecraft:yellow_shulker_box
 blocks:minecraft:yellow_stained_glass
-blocks:minecraft:yellow_stained_glass_pane
 blocks:minecraft:yellow_wall_banner
 blocks:minecraft:zombie_head
 blocks:minecraft:zombie_wall_head

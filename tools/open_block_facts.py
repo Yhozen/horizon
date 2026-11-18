@@ -15,8 +15,16 @@ emission (and when lit), light dampening, friction, map colour, sound type, the 
 mines it fast, the needed tool level (0 none, 1 stone, 2 iron, 3 diamond), whether it needs the
 tool to drop, the model layout (`cube`, `axis`, `pillar`: an axis whose lying models turn the top
 half a turn, or `facing`), and the texture names of its six
-faces (down, up, north, south, west, east; the lit front last for `facing`). Only numbers and
-identifiers are written: no texture, model or other Mojang file.
+faces (down, up, north, south, west, east; the lit front last for `facing`).
+
+It also writes `data/blocks/connected.txt`: the walls, fences, fence gates, glass panes and bars
+(classes `WallBlock`, `FenceBlock`, `FenceGateBlock`, `IronBarsBlock`) whose models use
+Minecraft's common templates (the bamboo fence and gate, drawn with their own templates, are
+left out). Each line: the name, its class chain, destroy time, resistance, map colour, sound
+type, mining tool, needed level, whether it needs the tool, the family (`wall`, `fence`,
+`gate`, `pane`, `bars`) and its texture names (the main one, then the edge for panes and bars).
+
+Only numbers and identifiers are written: no texture, model or other Mojang file.
 
     python3 tools/open_block_facts.py [--resources DIR] [--check]
 """
@@ -29,11 +37,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "crates" / "horizon-open-content" / "data" / "blocks" / "cubes.txt"
+CONNECTED = OUT.with_name("connected.txt")
 RESOURCES = ROOT / ".local" / "horizon-client" / "26.3"
 FURNACES = ("furnace", "blast_furnace", "smoker")
 FACES = ("down", "up", "north", "south", "west", "east")
 TOOLS = ("pickaxe", "axe", "shovel", "hoe")
 LEVELS = (("stone", 1), ("iron", 2), ("diamond", 3))
+CONNECTED_HEADER = ("name", "classes", "hardness", "resistance", "map_color", "sound", "tool", "needs",
+                    "requires_tool", "family", "textures")
+# The family of each class, and the template its first model part uses.
+FAMILIES = (("WallBlock", "wall", "template_wall_post", ("wall",)),
+            ("FenceGateBlock", "gate", "template_fence_gate", ("texture",)),
+            ("FenceBlock", "fence", "fence_post", ("texture",)),
+            ("IronBarsBlock", None, None, None))
 HEADER = ("name", "classes", "hardness", "resistance", "emission", "lit_emission", "opacity",
           "friction", "map_color", "sound", "tool", "needs", "requires_tool", "layout") + FACES + ("lit_north",)
 
@@ -108,6 +124,76 @@ class Models:
         return (variant[0] if isinstance(variant, list) else variant)["model"]
 
 
+def sound_kind(name, sound):
+    kind = strip(sound["break"]["id"]).removeprefix("block.").removesuffix(".break")
+    for event in ("break", "step", "place", "hit", "fall"):
+        # Some types leave an event silent (resin's hit).
+        if strip(sound[event]["id"]) not in (f"block.{kind}.{event}", "intentionally_empty"):
+            sys.exit(f"{name}: sound {sound} does not follow block.<type>.<event>")
+    return kind
+
+
+def first_model(models, block):
+    state = json.loads((models.root / "blockstates" / f"{block}.json").read_text())
+    part = state["multipart"][0] if "multipart" in state else next(iter(state["variants"].values()))
+    part = part.get("apply", part)
+    return (part[0] if isinstance(part, list) else part)["model"]
+
+
+def sprite(value):
+    """A texture variable's value: a name, or a sprite object (glass panes)."""
+    value = value["sprite"] if isinstance(value, dict) else value
+    return strip(value).removeprefix("block/")
+
+
+def connected_rows(resources):
+    behaviours = json.loads((resources / "block-behaviours.json").read_text())
+    names = [row[0] for row in json.loads((resources / "facts.json").read_text())["states"]]
+    gameplay = json.loads((resources / "gameplay-facts.json").read_text())["states"]
+    tags = json.loads((resources / "block-tags.json").read_text())
+    first = {}
+    for i, name in enumerate(names):
+        first.setdefault(name, i)
+    tagged = {}
+    for tool in TOOLS:
+        for name in resolve_tag(tags, f"minecraft:mineable/{tool}"):
+            tagged.setdefault(name, tool)
+    needs = {}
+    for level, n in LEVELS:
+        for name in resolve_tag(tags, f"minecraft:needs_{level}_tool"):
+            needs[name] = max(needs.get(name, 0), n)
+    models = Models(resources)
+    out = []
+    for block in behaviours["blocks"]:
+        name, classes = block["name"], block["class"]
+        short = strip(name)
+        family = next((f for f in FAMILIES if f[0] in classes), None)
+        if family is None:
+            continue
+        model = first_model(models, short)
+        chain = models.parents(model)
+        if family[1] is None:
+            kind = "bars" if "template_bars_post_ends" in chain else "pane"
+            if kind == "pane" and "template_glass_pane_post" not in chain:
+                continue
+            variables = ("bars", "edge") if kind == "bars" else ("pane", "edge")
+        else:
+            kind, template, variables = family[1:]
+            if template not in chain:
+                continue  # its own templates (bamboo)
+        textures = {}
+        for parent in reversed(chain):
+            textures.update(models.load(f"block/{parent}").get("textures", {}))
+        facts = gameplay[first[name]]
+        out.append((
+            short, ",".join(classes), number(facts["hardness"]), number(facts["explosion_resistance"]),
+            f"{facts['map_color']:06x}", sound_kind(name, facts["sound"]), tagged.get(name, "-"),
+            str(needs.get(name, 0)), "1" if facts["requires_tool"] else "0", kind,
+            ",".join(sprite(textures[v]) for v in variables),
+        ))
+    return out
+
+
 def rows(resources):
     behaviours = json.loads((resources / "block-behaviours.json").read_text())
     names = [row[0] for row in json.loads((resources / "facts.json").read_text())["states"]]
@@ -150,12 +236,7 @@ def rows(resources):
         for s in states:
             if not (s["solid_render"] and s["full_collision"]):
                 sys.exit(f"{name}: not a full opaque cube")
-        sound = facts["sound"]
-        kind = strip(sound["break"]["id"]).removeprefix("block.").removesuffix(".break")
-        for event in ("break", "step", "place", "hit", "fall"):
-            # Some types leave an event silent (resin's hit).
-            if strip(sound[event]["id"]) not in (f"block.{kind}.{event}", "intentionally_empty"):
-                sys.exit(f"{name}: sound {sound} does not follow block.<type>.<event>")
+        kind = sound_kind(name, facts["sound"])
         faces = models.textures(models.variant_model(short, key))
         if layout == "axis" and "cube_column_horizontal" in models.parents(models.variant_model(short, "axis=x")):
             # Lying down, its top turns half a turn (Minecraft's horizontal column).
@@ -179,14 +260,19 @@ def main():
     parser.add_argument("--resources", type=Path, default=RESOURCES)
     parser.add_argument("--check", action="store_true", help="fail if the committed file differs")
     args = parser.parse_args()
-    text = "".join("\t".join(row) + "\n" for row in [HEADER, *rows(args.resources)])
-    if args.check:
-        if OUT.read_text() != text:
-            sys.exit(f"{OUT.relative_to(ROOT)} is stale: run tools/open_block_facts.py")
-        print(f"{OUT.relative_to(ROOT)} is up to date")
-        return
-    OUT.write_text(text)
-    print(f"wrote {OUT.relative_to(ROOT)}: {text.count(chr(10)) - 1} blocks")
+    files = (
+        (OUT, [HEADER, *rows(args.resources)]),
+        (CONNECTED, [CONNECTED_HEADER, *connected_rows(args.resources)]),
+    )
+    for out, lines in files:
+        text = "".join("\t".join(row) + "\n" for row in lines)
+        if args.check:
+            if out.read_text() != text:
+                sys.exit(f"{out.relative_to(ROOT)} is stale: run tools/open_block_facts.py")
+            print(f"{out.relative_to(ROOT)} is up to date")
+            continue
+        out.write_text(text)
+        print(f"wrote {out.relative_to(ROOT)}: {text.count(chr(10)) - 1} blocks")
 
 
 if __name__ == "__main__":

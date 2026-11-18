@@ -6,6 +6,7 @@
 use crate::{
     Bundle, Origin, Result,
     blocks::{Block, Form, Layer, Sound, Tier, Tool},
+    connected::{self, Family, Shape},
     shapes::{self, StateShape},
 };
 use horizon_world::{
@@ -223,8 +224,12 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
                 "map_color": map_color(b),
                 "outline": b.outline(),
             });
-            let edges = edges(&b.outline());
-            row["outline_edges"] = json!(edges);
+            if let Form::Connected(family) = b.form {
+                connected_facts(&mut row, family, &s.properties);
+            }
+            let outline: Vec<[f64; 6]> =
+                serde_json::from_value(row["outline"].clone()).unwrap_or_default();
+            row["outline_edges"] = json!(edges(&outline));
             if let Some(sh) = &shaped[id] {
                 shaped_facts(&mut row, b, sh);
             }
@@ -274,7 +279,14 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             if b.opaque() {
                 flags |= 4 | 64; // conductor, suffocating
             }
-            if !b.collides() {
+            let no_collision = match b.form {
+                Form::Connected(family) => {
+                    flags |= 1; // isSolid, as Minecraft's legacy rule finds them
+                    connected::boxes(family, &s.properties, Shape::Collision).is_empty()
+                }
+                _ => !b.collides(),
+            };
+            if no_collision {
                 flags |= 32;
             }
             let (kind, amount, falling) = fluid(s);
@@ -311,7 +323,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             .map(Block::key)
             .collect()
     };
-    let solid = |b: &Block| b.collides();
+    let solid = |b: &Block| b.collides() || matches!(b.form, Form::Connected(_));
     let mut tags: BTreeMap<String, Vec<String>> = BTreeMap::new();
     tags.insert("blocks_motion_in_heightmap".into(), names(&solid));
     tags.insert(
@@ -319,13 +331,16 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
         names(&|b: &Block| solid(b) && !b.id.ends_with("_leaves")),
     );
     tags.insert("blocks_fluid_flow".into(), Vec::new());
-    for empty in [
-        "fences",
-        "walls",
-        "suppresses_bounce",
-        "climbable",
-        "fall_damage_resetting",
-    ] {
+    let family = |f: Family| move |b: &Block| b.form == Form::Connected(f);
+    tags.insert(
+        "wooden_fences".into(),
+        names(&|b: &Block| family(Family::Fence)(b) && b.mining.tool == Tool::Axe),
+    );
+    tags.insert("fences".into(), names(&family(Family::Fence)));
+    tags.insert("walls".into(), names(&family(Family::Wall)));
+    tags.insert("fence_gates".into(), names(&family(Family::Gate)));
+    tags.insert("bars".into(), names(&family(Family::Bars)));
+    for empty in ["suppresses_bounce", "climbable", "fall_damage_resetting"] {
         tags.insert(empty.into(), Vec::new());
     }
     tags.insert(
@@ -426,13 +441,20 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
         .map(|b| {
             let rule = match (b.form, b.id) {
                 (Form::Fluid, id) if id != "bubble_column" => "liquid",
+                (Form::Connected(Family::Pane | Family::Bars), _) => "bars",
                 (_, id) if id.ends_with("_leaves") => "leaves",
                 (_, "glass" | "tinted_glass") => "same_block",
                 _ => "never",
             };
             (
                 b.key(),
-                json!({"rule": rule, "can_occlude": b.opaque() || b.form == Form::Shaped, "bars_tag": false}),
+                json!({
+                    "rule": rule,
+                    "can_occlude": b.opaque()
+                        || b.form == Form::Shaped
+                        || matches!(b.form, Form::Connected(Family::Wall | Family::Fence | Family::Gate)),
+                    "bars_tag": b.form == Form::Connected(Family::Bars),
+                }),
             )
         })
         .collect();
@@ -477,6 +499,20 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
     let (full, none) = (shapes::full(), shapes::empty());
     for (s, sh) in states.iter().zip(&shaped) {
         let pick = |yes: bool| if yes { &full } else { &none };
+        if let Form::Connected(family) = s.block.form {
+            // Walls, fences, gates, panes and bars (crate::connected).
+            for (table, kind) in [
+                (&mut collision, Shape::Collision),
+                (&mut occlusion, Shape::Occlusion),
+            ] {
+                table.push(&connected::voxel(&connected::boxes(
+                    family,
+                    &s.properties,
+                    kind,
+                )));
+            }
+            continue;
+        }
         match sh {
             Some(sh) => {
                 collision.push(&sh.collision);
@@ -510,7 +546,10 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
                         ("jumpFactor", Tag::Float(1.0f32.to_bits())),
                         ("bounceRestitution", Tag::Float(0.0f32.to_bits())),
                         ("fallDistanceReduction", Tag::Float(0.0f32.to_bits())),
-                        ("fenceGate", Tag::Byte(0)),
+                        (
+                            "fenceGate",
+                            Tag::Byte(i8::from(b.form == Form::Connected(Family::Gate))),
+                        ),
                     ]),
                 )
             })),
@@ -519,6 +558,21 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
     nbt_file(bundle, "movement-properties.nbt", movement)?;
     let _ = Layer::Solid;
     Ok(())
+}
+
+/// The per-state facts of a wall, fence, gate, pane or bars: its outline,
+/// and the light and occlusion its shape and water give it.
+fn connected_facts(row: &mut Value, family: Family, state: &[(&str, &str)]) {
+    let water = connected::waterlogged(state);
+    row["dampening"] = json!(u8::from(water));
+    row["skylight_down"] = json!(!water);
+    row["can_occlude"] = json!(matches!(
+        family,
+        Family::Wall | Family::Fence | Family::Gate
+    ));
+    row["solid_render"] = json!(false);
+    row["full_collision"] = json!(false);
+    row["outline"] = json!(connected::merged(family, state, Shape::Outline));
 }
 
 /// The `gameplay-facts.json` fields that follow from a state's shapes.
