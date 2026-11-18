@@ -178,7 +178,7 @@ impl Game<'_> {
 }
 
 /// The game rules that keep unsupported simulation off in an open world: no
-/// weather, mobs, random block changes, fire or source-water creation.
+/// weather, mobs, random block changes or fire.
 pub(super) fn hold_rules(rules: &mut horizon_client::gamerules::GameRules) {
     use horizon_client::gamerules::Value;
     for (rule, value) in [
@@ -192,7 +192,6 @@ pub(super) fn hold_rules(rules: &mut horizon_client::gamerules::GameRules) {
         ("raids", Value::Bool(false)),
         ("random_tick_speed", Value::Int(0)),
         ("fire_spread_radius_around_player", Value::Int(0)),
-        ("water_source_conversion", Value::Bool(false)),
         ("command_blocks_work", Value::Bool(false)),
     ] {
         rules.set(rule, value);

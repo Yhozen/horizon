@@ -341,7 +341,19 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
         "blocks_motion_in_heightmap_no_leaves".into(),
         names(&|b: &Block| solid(b) && !b.id.ends_with("_leaves")),
     );
-    tags.insert("blocks_fluid_flow".into(), Vec::new());
+    // Where fluid flows: into the blocks it washes away (`FlowingFluid.
+    // canHoldAnyFluid`, besides liquid containers), and its flow stops at
+    // the ones that block motion and signs. The rules read each block's own
+    // class chain and shape; over the bundle's blocks they give the members
+    // Minecraft's two tags have.
+    tags.insert(
+        "washed_away_by_fluids".into(),
+        names(&washed_away_by_fluids),
+    );
+    tags.insert(
+        "blocks_fluid_flow".into(),
+        names(&|b: &Block| (solid(b) || stands_in_fluid(b)) && !b.classes.contains(&"ButtonBlock")),
+    );
     let family = |f: Family| move |b: &Block| b.form == Form::Connected(f);
     tags.insert(
         "wooden_fences".into(),
@@ -702,6 +714,39 @@ fn edges(boxes: &[[f64; 6]]) -> Vec<[f64; 6]> {
     out
 }
 
+/// Blocks drawn without collision that fluid still flows around, as around a
+/// solid block: beds, chests, chains, shulker boxes, lanterns, amethyst
+/// buds, sculk veins and dead coral.
+fn stands_in_fluid(b: &Block) -> bool {
+    const STANDS: &[&str] = &[
+        "BedBlock",
+        "AbstractChestBlock",
+        "ChainBlock",
+        "ShulkerBoxBlock",
+        "LanternBlock",
+        "AmethystClusterBlock",
+        "SculkVeinBlock",
+    ];
+    const DEAD_CORAL: &[&str] = &[
+        "BaseCoralPlantBlock",
+        "BaseCoralFanBlock",
+        "BaseCoralWallFanBlock",
+    ];
+    b.classes.iter().any(|c| STANDS.contains(c))
+        || b.classes.first().is_some_and(|c| DEAD_CORAL.contains(c))
+}
+
+/// Blocks a fluid flowing into replaces: air, the fluids, plants and other
+/// crossed planes, and buttons; not sugar cane or the bubble column.
+fn washed_away_by_fluids(b: &Block) -> bool {
+    (matches!(b.form, Form::Air | Form::Cross | Form::Fluid) || b.classes.contains(&"ButtonBlock"))
+        && !stands_in_fluid(b)
+        && !b
+            .classes
+            .iter()
+            .any(|c| matches!(*c, "SugarCaneBlock" | "BubbleColumnBlock"))
+}
+
 /// The single biome, the one dimension and the day cycle, authored here.
 pub fn environment(bundle: &mut Bundle) -> Result<()> {
     const ENV: &str = "environment";
@@ -988,4 +1033,49 @@ pub fn health(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod fluid_tag_tests {
+    use super::{stands_in_fluid, washed_away_by_fluids};
+    use crate::blocks::{self, Block};
+
+    #[test]
+    fn fluids_wash_away_plants_and_stop_at_solid_blocks() {
+        let all = blocks::all();
+        let block = |id: &str| -> &Block {
+            all.iter()
+                .find(|b| b.id == id)
+                .unwrap_or_else(|| panic!("{id}"))
+        };
+        for id in [
+            "air",
+            "water",
+            "lava",
+            "short_grass",
+            "oak_sapling",
+            "dandelion",
+            "oak_button",
+            "tube_coral",
+        ] {
+            assert!(washed_away_by_fluids(block(id)), "{id} is washed away");
+        }
+        for id in [
+            "stone",
+            "sugar_cane",
+            "bubble_column",
+            "red_bed",
+            "chest",
+            "lantern",
+            "dead_tube_coral",
+            "oak_fence",
+        ] {
+            assert!(!washed_away_by_fluids(block(id)), "{id} holds");
+        }
+        // Drawn without collision, but flow goes around them.
+        for id in ["red_bed", "chest", "lantern", "dead_tube_coral"] {
+            assert!(stands_in_fluid(block(id)), "{id}");
+        }
+        assert!(!stands_in_fluid(block("tube_coral")));
+    }
 }

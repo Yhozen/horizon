@@ -181,7 +181,7 @@ pub fn build(inputs: &Inputs) -> Result<Bundle> {
                 ],
                 "unavailable": [
                     "nether", "end", "mobs", "sound", "saving_in_browser", "structures",
-                    "weather", "smelting", "fluid_flow", "random_ticks"
+                    "weather", "smelting", "random_ticks"
                 ],
             },
             "starter_hotbar": [

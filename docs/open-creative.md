@@ -118,8 +118,8 @@ The checks live at the boundaries, not through the game:
   commands are those that only use what the bundle has (`OPEN_COMMANDS`: `/gamemode`, `/give`,
   `/clear`, `/tp`, `/time`, `/setblock`, `/fill`, `/clone`, `/kill`, `/xp`, `/spawnpoint`,
   `/difficulty`, chat commands and a few more). Game rules keep weather, mob spawning, random
-  ticks, fire spread and water source creation off, and scheduled fluid ticks are dropped, so
-  water is fixed scenery.
+  ticks and fire spread off. Water and lava flow as in Minecraft: the bundle's
+  `washed_away_by_fluids` and `blocks_fluid_flow` tags say where they go and where they stop.
 - **Menus**: the title has Singleplayer, Multiplayer, Options and Quit; the pause menu offers Back
   to the World, Options, Credits, Statistics and Save and Quit to Title (Disconnect on a server);
   the options page offers video, controls, chat, accessibility and credits only.
@@ -244,8 +244,8 @@ plants and boats look for), so the shared code swims, sinks, slows and fogs the 
 Minecraft. Lava gives light 15 and is drawn from the pack's animated `lava_still` and `lava_flow`.
 The bubble column is water to look at and swim in (its fluid is a water source). A waterlogged
 state holds a water source, as Minecraft's do. On a Java server, through the relay, they all
-show as Minecraft's; in the edition's own worlds water and lava do not flow (see
-[The content profile](#the-content-profile)).
+show as Minecraft's; in the edition's own worlds too they flow, make sources (water), and
+meet as cobblestone, stone and obsidian as Minecraft's do.
 
 ### Slabs and stairs
 
