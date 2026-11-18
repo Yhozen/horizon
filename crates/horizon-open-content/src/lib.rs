@@ -15,6 +15,7 @@ pub mod art_survival;
 pub mod assets;
 pub mod blocks;
 pub mod coverage;
+pub mod cubes;
 pub mod image;
 pub mod items;
 pub mod lang;

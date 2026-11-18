@@ -279,6 +279,62 @@ fn models(block: &Block, tinting: Tinting) -> (Vec<(String, Value)>, Option<Valu
                 Some(json!({"variants": {"": {"model": format!("minecraft:block/{id}")}}})),
             )
         }
+        Faces::Cube(faces) | Faces::Pillar(faces) => {
+            let model = six_model(faces);
+            let model_id = format!("minecraft:block/{id}");
+            let mut models = vec![(format!("block/{id}"), model.clone())];
+            let lying = if let Faces::Pillar(_) = block.faces {
+                let mut lying = model;
+                lying["elements"][0]["faces"]["up"]["rotation"] = json!(180);
+                models.push((format!("block/{id}_horizontal"), lying));
+                format!("{model_id}_horizontal")
+            } else {
+                model_id.clone()
+            };
+            let definition = if block.has_property("axis") {
+                json!({"variants": {
+                    "axis=x": {"model": lying, "x": 90, "y": 90},
+                    "axis=y": {"model": model_id},
+                    "axis=z": {"model": lying, "x": 90},
+                }})
+            } else {
+                json!({"variants": {"": {"model": model_id}}})
+            };
+            (models, Some(definition))
+        }
+        Faces::Facing { faces, lit_north } => {
+            let mut lit = faces;
+            lit[2] = lit_north;
+            let mut variants = serde_json::Map::new();
+            for (facing, y) in [("north", 0), ("east", 90), ("south", 180), ("west", 270)] {
+                for state in ["false", "true"] {
+                    let model = if state == "true" {
+                        format!("minecraft:block/{id}_on")
+                    } else {
+                        format!("minecraft:block/{id}")
+                    };
+                    let mut variant = json!({"model": model});
+                    if y != 0 {
+                        variant["y"] = json!(y);
+                    }
+                    let key = if block.has_property("lit") {
+                        format!("facing={facing},lit={state}")
+                    } else if state == "false" {
+                        format!("facing={facing}")
+                    } else {
+                        continue;
+                    };
+                    variants.insert(key, variant);
+                }
+            }
+            (
+                vec![
+                    (format!("block/{id}"), six_model(faces)),
+                    (format!("block/{id}_on"), six_model(lit)),
+                ],
+                Some(json!({"variants": variants})),
+            )
+        }
         Faces::Fluid { still, .. } => {
             // Fluids draw through the fluid renderer; the model gives particles.
             let model = json!({"textures": {"particle": tex(still)}});
@@ -286,6 +342,16 @@ fn models(block: &Block, tinting: Tinting) -> (Vec<(String, Value)>, Option<Valu
         }
         Faces::None => (Vec::new(), None),
     }
+}
+
+/// A unit cube with a texture per face: down, up, north, south, west, east.
+fn six_model(faces: [&str; 6]) -> Value {
+    let dirs = ["down", "up", "north", "south", "west", "east"];
+    let mut textures: BTreeMap<&str, String> =
+        dirs.iter().zip(faces).map(|(d, t)| (*d, tex(t))).collect();
+    // Minecraft's particle is the side (north for the oriented blocks).
+    textures.insert("particle", tex(faces[2]));
+    cube_model(textures, dirs.map(|d| (d, d)))
 }
 
 /// The second plane of a cross faces east and west.
@@ -344,9 +410,11 @@ pub fn write(
         }
     };
     let mut textures = BTreeMap::new();
+    let mut colors = BTreeMap::new();
     for block in blocks.iter().filter(|b| b.tier != Tier::Support) {
         for texture in block.textures() {
             textures.insert(texture, block.layer);
+            colors.entry(texture).or_insert(block.map_color);
         }
         let tinting = tinting(block);
         if tinting.overlay {
@@ -400,10 +468,13 @@ pub fn write(
                     GENERATOR,
                 )?;
             }
-        } else {
-            let image = crate::art::block_texture(texture)
-                .ok_or_else(|| format!("no open input or original art for {destination}"))?;
+        } else if let Some(image) = crate::art::block_texture(texture) {
             bundle.png(destination, &image, Origin::Generator("art"))?;
+        } else {
+            // A placeholder in the block's map colour until there is art.
+            let rgb = colors.get(texture).copied().unwrap_or(0x808080);
+            let color = [(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, 255];
+            bundle.png(destination, &speckle(color), Origin::Generator("art"))?;
         }
     }
     // Breaking overlays: original art.

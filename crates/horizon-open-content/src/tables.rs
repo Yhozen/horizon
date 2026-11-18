@@ -184,7 +184,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             let full = b.collides();
             let mut row = json!({
                 "id": id,
-                "emission": b.light,
+                "emission": b.emission(&s.properties),
                 "dampening": if b.opaque() { 15 } else { b.opacity },
                 "skylight_down": !b.opaque() && b.opacity == 0,
                 "shape_occlusion": false,
@@ -194,7 +194,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
                 "requires_tool": b.mining.requires_tool,
                 "replaceable": matches!(b.form, Form::Air | Form::Fluid | Form::Inert) || b.id == "short_grass",
                 "random_ticks": false,
-                "block_entity": false,
+                "block_entity": b.classes.contains(&"BaseEntityBlock"),
                 "liquid": is_water(s),
                 "ignited_by_lava": false,
                 "push": if b.id == "obsidian" || b.id == "bedrock" { "IMMOVEABLE" } else if matches!(b.form, Form::Cross | Form::Fluid | Form::Air | Form::Inert) { "POPPED" } else { "PUSH_PULL" },
