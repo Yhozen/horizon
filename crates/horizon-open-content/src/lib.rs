@@ -11,6 +11,7 @@
 //! generator in this crate; [`write`] refuses anything else, and
 //! [`verify`] checks a written bundle against its provenance record.
 pub mod art;
+pub mod art_advancements;
 pub mod art_survival;
 pub mod assets;
 pub mod blocks;

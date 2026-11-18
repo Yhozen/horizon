@@ -167,6 +167,10 @@ fn play_clientbound(id: i32) -> Rule {
         | cb::TAB_LIST
         | cb::TICKING_STATE
         | cb::TICKING_STEP => PASS,
+        // The tab to show: an advancement id, no registry number.
+        cb::SELECT_ADVANCEMENTS_TAB => PASS,
+        // Advancements: their display icons are item stacks.
+        cb::UPDATE_ADVANCEMENTS => rule(Policy::Translate, ITEMS),
         cb::ANIMATE
         | cb::ENTITY_POSITION_SYNC
         | cb::HURT_ANIMATION

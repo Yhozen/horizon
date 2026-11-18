@@ -149,6 +149,7 @@ pub fn write(bundle: &mut Bundle) -> Result<()> {
     sky(bundle)?;
     crate::art_survival::write(bundle)?;
     crate::screens::write(bundle)?;
+    crate::art_advancements::write(bundle)?;
     Ok(())
 }
 
