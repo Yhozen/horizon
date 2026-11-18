@@ -424,7 +424,7 @@ fn flatten_block(
                     value,
                 };
                 block.push(set(no), span);
-                let mut not_done = |f: &mut naga::Function| {
+                let not_done = |f: &mut naga::Function| {
                     let load = f
                         .expressions
                         .append(Expression::Load { pointer: done }, Span::UNDEFINED);
@@ -502,7 +502,7 @@ fn modulo_splats(module: &naga::Module) -> Vec<(std::ops::Range<usize>, String)>
         .chain(module.entry_points.iter().map(|e| &e.function));
     let mut out = Vec::new();
     for f in functions {
-        let Some(last) = f.expressions.iter().map(|(h, _)| h).last() else {
+        let Some(last) = f.expressions.iter().map(|(h, _)| h).next_back() else {
             continue;
         };
         let ctx = naga::proc::ResolveContext::with_locals(module, &f.local_variables, &f.arguments);

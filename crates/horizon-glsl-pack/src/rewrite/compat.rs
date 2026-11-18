@@ -4,8 +4,9 @@
 //!   …) become the compatibility built-ins they mirror, their declarations
 //!   dropped: `vaPosition` reads `gl_Vertex.xyz` (Horizon's `chunkOffset`
 //!   is zero), `vaUV2` the lightmap coordinates, `normalMatrix`
-//!   `gl_NormalMatrix`. Only names the stage declares with that storage are
-//!   touched, so a pack's own `normalMatrix` local stays.
+//!   `gl_NormalMatrix`. Only names the stage declares with that storage, or
+//!   (vertex inputs) uses without declaring, are touched, so a pack's own
+//!   `normalMatrix` local stays.
 //! - `gl_TexCoord[i]` (literal `i`) becomes a varying `hz_TexCoord<i>` per
 //!   index the stage uses.
 
@@ -67,6 +68,22 @@ pub(super) fn apply(source: &str, stage: Stage) -> Option<String> {
         }
         drop.push((sig[j], sig[j + 3]));
         renamed.insert(name);
+    }
+    // Core-profile inputs used without any declaration (Iris declares them for
+    // the pack): the same renames.
+    for &(name, _, _, vertex) in &CORE {
+        if renamed.contains(name) || (vertex && stage != Stage::Vertex) {
+            continue;
+        }
+        let used = (0..sig.len()).any(|j| t(j) == name && t(j.wrapping_sub(1)) != ".");
+        let declared = (1..sig.len()).any(|j| t(j) == name && toks[sig[j - 1]].kind == Kind::Ident);
+        let uniform_like = matches!(
+            name,
+            "normalMatrix" | "textureMatrix" | "modelViewMatrixInverse"
+        );
+        if used && !declared && !uniform_like {
+            renamed.insert(name);
+        }
     }
     // gl_TexCoord[<literal>].
     let mut tex_coords: BTreeSet<String> = BTreeSet::new();
@@ -146,6 +163,16 @@ mod tests {
         let rw = crate::rewrite::rewrite(src, Stage::Vertex).unwrap();
         assert!(rw.attributes.is_empty(), "{:?}", rw.attributes);
         assert_eq!(rw.varyings[0].name, "hz_TexCoord1");
+        // Used without a declaration (Iris declares them).
+        let out = apply(
+            "void main() { gl_Position = vec4(vaPosition + vaNormal, 1.0); }",
+            Stage::Vertex,
+        )
+        .unwrap();
+        assert!(
+            out.contains("vec4((gl_Vertex.xyz) + gl_Normal, 1.0)"),
+            "{out}"
+        );
         // A local called normalMatrix is the pack's own.
         assert_eq!(
             apply(
