@@ -348,6 +348,10 @@ translates every packet:
   hunger and experience pass unchanged.
 - **Brand**: the server's `minecraft:brand` becomes the bundle's open brand, so open clients stay.
   The relay derives it from the bundle it is given: it must be the bundle the players run.
+- **Coverage**: the relay reads the bundle's `horizon-open-coverage.json` ([Coverage](#coverage)).
+  A name the bundle registers without content counts as absent for every mapping above: rotten
+  flesh is still the apple named "Rotten Flesh", a furnace still cobblestone, a horse still the
+  cow. A bundle without the file has content for every name it registers.
 
 `policy.rs` holds what happens to each packet, in both directions: passed, passed unless its entity
 is hidden, translated, or dropped. Its test walks every packet id of the protocol: the dropped
