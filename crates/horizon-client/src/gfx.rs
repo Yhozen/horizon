@@ -68,6 +68,8 @@ mod arena;
 mod cull;
 mod end_sky;
 mod flat;
+mod glsl_pack;
+use glsl_pack::PackUniformInputs;
 pub mod lightning;
 mod lod;
 mod occlusion;
@@ -176,6 +178,10 @@ const SECTION_UPLOAD_CHUNK: u64 = 4 << 20;
 /// bounds the staging memory frames that are not drawn can hold.
 const SECTION_COPY_LIMIT: u64 = 64 << 20;
 pub struct Frame<'a> {
+    /// What a shader pack's uniforms need beyond the rest of the frame, when
+    /// the pack draws this frame (`--shader-pack`, the overworld): `None`
+    /// draws with Horizon's own shaders.
+    pub shader_pack: Option<PackFrame>,
     pub camera: DVec3,
     pub yaw: f32,
     pub pitch: f32,
@@ -274,6 +280,23 @@ pub struct Frame<'a> {
     /// `Screen.extractBlurredBackground`: blur the frame by this radius
     /// (`menuBackgroundBlurriness`) before the screen is drawn over it.
     pub menu_blur: Option<f32>,
+}
+/// A shader pack frame's world state (`Frame::shader_pack`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PackFrame {
+    /// The day time in ticks, 0..24000 (`worldTime`).
+    pub world_time: i32,
+    /// Whole days (`worldDay`).
+    pub world_day: i32,
+    pub moon_phase: i32,
+    pub rain_strength: f32,
+    /// Block and sky light at the eye, 0..240 (`eyeBrightness`).
+    pub eye_brightness: [i32; 2],
+    /// The held items' light levels (`heldBlockLightValue`, `…2`).
+    pub held_light: [i32; 2],
+    pub night_vision: f32,
+    pub blindness: f32,
+    pub hide_gui: bool,
 }
 /// One frame of the world border wall (`WorldBorderRenderer.render`).
 #[derive(Clone, Debug)]
@@ -466,6 +489,12 @@ pub struct Renderer {
     occlusion: occlusion::Occlusion,
     /// Resolution scale and FXAA (Horizon settings).
     world_post: world_post::Post,
+    /// The shader pack's pipelines and targets (`set_shader_pack`).
+    glsl_pack: Option<glsl_pack::PackRenderer>,
+    /// The terrain bind group's sprite layout, for the pack's generated shaders.
+    sprite_host: horizon_glsl_pack::HostParams,
+    /// Frames drawn with the shader pack (its `frameCounter`).
+    pack_frames: u32,
     pub hud: HudRenderer,
     /// Interface atlas patches (glyphs rasterized, maps drawn) of frames that
     /// were not drawn: uploaded with the next drawn frame, since nothing makes
@@ -2521,6 +2550,13 @@ impl Renderer {
             block_entity_revision: next_block_entity_revision(),
             occlusion: occlusion::Occlusion::new(crate::chunk::MIN_Y, crate::chunk::HEIGHT / 16),
             world_post,
+            glsl_pack: None,
+            sprite_host: horizon_glsl_pack::HostParams {
+                sprite_arrays,
+                sprite_split: split,
+                sprite_grid: grid,
+            },
+            pack_frames: 0,
             hud,
             held_patches: Vec::new(),
             menu_blur: None,
@@ -2993,6 +3029,37 @@ impl Renderer {
             &self.lightmap_sampler,
         );
     }
+    /// How the terrain bind group holds block sprites, for compiling a pack.
+    pub fn shader_pack_host(&self) -> horizon_glsl_pack::HostParams {
+        self.sprite_host
+    }
+    /// Draws the overworld with a compiled shader pack's programs from now on
+    /// (`None`: Horizon's own). Errors leave the renderer without a pack.
+    pub fn set_shader_pack(
+        &mut self,
+        pack: Option<&horizon_glsl_pack::CompiledPack>,
+    ) -> std::result::Result<(), String> {
+        self.glsl_pack = None;
+        let Some(pack) = pack else {
+            return Ok(());
+        };
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let renderer = glsl_pack::PackRenderer::new(
+            &self.device,
+            &self.terrain_layout,
+            self.config.format.remove_srgb_suffix(),
+            pack,
+        )?;
+        // The browser cannot wait for the scope: its errors reach the console.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(error) = pollster::block_on(scope.pop()) {
+            return Err(error.to_string());
+        }
+        #[cfg(target_arch = "wasm32")]
+        drop(scope);
+        self.glsl_pack = Some(renderer);
+        Ok(())
+    }
     pub fn view_projection(&self, frame: &Frame) -> Mat4 {
         self.projection(
             frame.fov_degrees,
@@ -3367,11 +3434,18 @@ impl Renderer {
         // Occlusion culling leaves the sections its last result did not see
         // to phase 2, after the others, with instance counts of 0. Whether
         // the frame has draws enough goes by the last one's.
+        // A shader pack draws sections with its own pipelines, which have
+        // neither flat draws nor occlusion culling's phases.
+        let pack_on = self.glsl_pack.is_some() && frame.shader_pack.is_some() && !frame.title;
         let mut cull = self
             .cull
             .as_mut()
             .filter(|c| {
-                self.cull_on && !frame.title && self.multi_draw && self.section_draws >= c.min_draws
+                self.cull_on
+                    && !pack_on
+                    && !frame.title
+                    && self.multi_draw
+                    && self.section_draws >= c.min_draws
             })
             .and_then(|cull| cull.begin(&self.device).then_some(cull));
         self.phase2_draws.clear();
@@ -3798,7 +3872,10 @@ impl Renderer {
         }
         let flat_frame = match &mut self.flat {
             Some(flat)
-                if self.flat_on && !self.draws.is_empty() && self.draws.len() >= flat.min_draws =>
+                if !pack_on
+                    && self.flat_on
+                    && !self.draws.is_empty()
+                    && self.draws.len() >= flat.min_draws =>
             {
                 let sections = &self.sections;
                 let lods = &self.lods;
@@ -3860,59 +3937,94 @@ impl Renderer {
         let scaled = self
             .world_post
             .prepare(&self.device, [self.config.width, self.config.height]);
-        let (world_view, world_depth) = match &scaled {
+        let (mut world_view, mut world_depth) = match &scaled {
             Some((color, depth)) => (color, depth),
             None => (&view_target, &self.depth),
         };
+        let final_view = world_view;
+        let world_clear = if frame.title || (frame.end_sky && !frame.underwater) {
+            wgpu::Color::BLACK
+        } else {
+            wgpu::Color {
+                r: f64::from(fog_color[0]),
+                g: f64::from(fog_color[1]),
+                b: f64::from(fog_color[2]),
+                a: 1.0,
+            }
+        };
+        // The pack's terrain first, into its targets; the rest of the world
+        // then draws into colortex0 over the pack's depth.
+        let pack_on = pack_on && scaled.is_none();
+        if pack_on && let (Some(pack), Some(state)) = (self.glsl_pack.as_mut(), frame.shader_pack) {
+            let size = [self.config.width, self.config.height];
+            pack.prepare(&self.device, size);
+            let uniforms = PackUniformInputs {
+                state: &state,
+                view_proj,
+                size,
+                gamma: self.gamma,
+                fog_color,
+                fog,
+                frame_counter: self.pack_frames,
+            }
+            .uniforms(frame);
+            pack.upload(&self.queue, &uniforms);
+            self.pack_frames = self.pack_frames.wrapping_add(1);
+        }
+        let pack = self.glsl_pack.as_ref().filter(|_| pack_on);
+        if let Some(pack) = pack {
+            let mut pass = pack.terrain_pass(&mut encoder, world_clear, &self.group);
+            pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.set_vertex_buffer(1, self.instances.slice(..));
+            self.draw_sections(&mut pass, &self.indirect, 0, 0, solid_draws);
+            drop(pass);
+            (world_view, world_depth) = pack.world_targets();
+        }
         if culling && let Some(cull) = &mut self.cull {
             cull.bind_depth(&self.device, world_depth);
         }
         let cull = self.cull.as_ref().filter(|_| culling && solid_draws > 0);
         {
-            let attachments = [Some(wgpu::RenderPassColorAttachment {
-                view: world_view,
-                resolve_target: None,
-                depth_slice: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(
-                        if frame.title || (frame.end_sky && !frame.underwater) {
-                            wgpu::Color::BLACK
-                        } else {
-                            wgpu::Color {
-                                r: f64::from(fog_color[0]),
-                                g: f64::from(fog_color[1]),
-                                b: f64::from(fog_color[2]),
-                                a: 1.0,
-                            }
+            let mut pass = match pack {
+                Some(pack) => pack.world_pass(&mut encoder),
+                None => encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Horizon world"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: world_view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(world_clear),
+                            store: wgpu::StoreOp::Store,
                         },
-                    ),
-                    store: wgpu::StoreOp::Store,
-                },
-            })];
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Horizon world"),
-                color_attachments: &attachments,
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: world_depth,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.0),
-                        // Phase 2 of occlusion culling draws over it.
-                        store: if cull.is_some() {
-                            wgpu::StoreOp::Store
-                        } else {
-                            wgpu::StoreOp::Discard
-                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: world_depth,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(0.0),
+                            // Phase 2 of occlusion culling draws over it.
+                            store: if cull.is_some() {
+                                wgpu::StoreOp::Store
+                            } else {
+                                wgpu::StoreOp::Discard
+                            },
+                        }),
+                        stencil_ops: None,
                     }),
-                    stencil_ops: None,
+                    ..Default::default()
                 }),
-                ..Default::default()
-            });
+            };
             pass.set_bind_group(0, &self.group, &[]);
             if frame.title {
                 self.panorama.draw(&mut pass);
                 pass.set_bind_group(0, &self.group, &[]);
             }
             match self.flat.as_ref().filter(|_| flat_frame) {
+                // The pack drew solid terrain already.
+                _ if pack.is_some() => {
+                    pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.set_vertex_buffer(1, self.instances.slice(..));
+                }
                 Some(flat) => {
                     pass.set_pipeline(&flat.solid);
                     let vertices = |p| self.arena.buffer(p);
@@ -4077,6 +4189,25 @@ impl Renderer {
                 pass.draw(0..4, debug_depth..debug_depth + debug_top);
             }
             match self.flat.as_ref().filter(|_| flat_frame) {
+                // Translucent terrain in a pass of its own over the pack's
+                // targets, then the world pass again.
+                _ if let Some(pack) = pack => {
+                    drop(pass);
+                    let mut water = pack.water_pass(&mut encoder, &self.group);
+                    water.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    water.set_vertex_buffer(1, self.instances.slice(..));
+                    self.draw_sections(
+                        &mut water,
+                        &self.indirect,
+                        0,
+                        solid_draws,
+                        translucent_draws,
+                    );
+                    drop(water);
+                    pass = pack.world_pass(&mut encoder);
+                    pass.set_bind_group(0, &self.group, &[]);
+                    pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                }
                 Some(flat) => {
                     pass.set_pipeline(&flat.translucent);
                     flat.draw(&mut pass, &flat.calls[flat.solid_calls..], |p| {
@@ -4148,6 +4279,9 @@ impl Renderer {
                     0..1,
                 );
             }
+        }
+        if let Some(pack) = pack {
+            pack.finish(&mut encoder, final_view, &self.group);
         }
         if scaled.is_some() {
             self.world_post.finish(&mut encoder, &view_target);

@@ -308,6 +308,53 @@ pub struct MeshTables {
     water_overlay: u16,
     lava_still: u16,
     lava_flow: u16,
+    /// Shader pack (`--shader-pack`): `block.properties` materials for the
+    /// vertex tag. Unset keeps the colour's alpha byte at 0xFF, which the
+    /// stock terrain shaders multiply into the sprite's alpha. Set once, after
+    /// the pack compiled, before the world meshes.
+    pack: std::sync::OnceLock<PackTags>,
+}
+/// A shader pack's material index per block state, and the fluids', for
+/// `horizon_glsl_pack::vertex_tag`.
+pub struct PackTags {
+    pub states: Vec<u8>,
+    pub water: u8,
+    pub lava: u8,
+}
+impl PackTags {
+    pub fn new(
+        registry: &horizon_world::registry::BlockRegistry,
+        blocks: &horizon_glsl_pack::BlockIds,
+    ) -> Self {
+        Self {
+            states: (0..registry.len() as u32)
+                .map(|id| {
+                    registry
+                        .state(BlockStateId(id))
+                        .map_or(horizon_glsl_pack::NO_MATERIAL, |s| blocks.material(&s.name))
+                })
+                .collect(),
+            water: blocks.material("water"),
+            lava: blocks.material("lava"),
+        }
+    }
+}
+/// `horizon_glsl_pack::NormalCode` of a model face direction.
+fn normal_code(d: horizon_assets::model::Direction) -> horizon_glsl_pack::NormalCode {
+    use horizon_assets::model::Direction as D;
+    use horizon_glsl_pack::NormalCode as N;
+    match d {
+        D::Down => N::Down,
+        D::Up => N::Up,
+        D::North => N::North,
+        D::South => N::South,
+        D::West => N::West,
+        D::East => N::East,
+    }
+}
+/// `color` with its alpha byte replaced by the pack's vertex tag.
+fn tag_color(color: u32, material: u8, normal: horizon_glsl_pack::NormalCode) -> u32 {
+    color & 0x00FF_FFFF | u32::from(horizon_glsl_pack::vertex_tag(normal, material)) << 24
 }
 fn redstone_color(power: u8) -> u32 {
     // RedstoneWireBlock.COLORS
@@ -456,7 +503,16 @@ impl MeshTables {
             water_overlay: layer("minecraft:block/water_overlay")?,
             lava_still: layer("minecraft:block/lava_still")?,
             lava_flow: layer("minecraft:block/lava_flow")?,
+            pack: std::sync::OnceLock::new(),
         })
+    }
+    /// Installs a shader pack's vertex tags, once. Only for a pack that
+    /// compiled: the stock shaders would read the tags as alpha.
+    pub fn set_pack_tags(&self, tags: PackTags) {
+        let _ = self.pack.set(tags);
+    }
+    pub fn pack_active(&self) -> bool {
+        self.pack.get().is_some()
     }
     pub fn facts(&self, state: BlockStateId) -> Option<MeshFacts> {
         let i = self.info.get(state.0 as usize)?;
@@ -772,6 +828,7 @@ impl Mesher<'_> {
                         ],
                         None => [x as f32, y as f32, z as f32],
                     };
+                    let material = self.tables.pack.get().map(|p| p.states[id as usize]);
                     let mut visible = [false; 6];
                     for d in Direction::ALL {
                         let [dx, dy, dz] = d.normal();
@@ -807,6 +864,7 @@ impl Mesher<'_> {
                                 face,
                                 ao,
                                 state,
+                                material,
                             );
                         }
                     }
@@ -846,6 +904,7 @@ impl Mesher<'_> {
         face: &BakedFace,
         ao: bool,
         state: &Info,
+        material: Option<u8>,
     ) {
         let q = &face.quad;
         let shade_face = q.shade_direction_override.unwrap_or(q.facing);
@@ -886,7 +945,10 @@ impl Mesher<'_> {
                 } else {
                     face.layer as u16
                 },
-                pack_rgb(rgb),
+                match material {
+                    Some(m) => tag_color(pack_rgb(rgb), m, normal_code(q.facing)),
+                    None => pack_rgb(rgb),
+                },
                 pack_coords(lighting::with_emission(coords[i], q.light_emission)),
             ));
         }

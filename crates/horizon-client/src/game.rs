@@ -59,6 +59,7 @@ mod game_mode;
 mod game_rules_screen;
 mod gamemode_switcher;
 mod ghasts;
+mod glsl_pack;
 mod golems;
 mod growth;
 mod hand;
@@ -388,7 +389,7 @@ impl Options {
             match arg.as_str() {
                 "--help" | "-h" => {
                     println!(
-                        "Horizon — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (horizon-prepare)\n  --render-distance N     Chunks, 2..64 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain), write its report to benchmarks/ and quit\n  --control               Accept horizon-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/horizon-control.sock)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --name NAME             Player name for multiplayer (default: generated once, kept in horizon-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --dev-mod PATH          A Horizon mod (.hmod or folder) to develop: always on, reloaded when rebuilt\n  --in-frame              Run single player's world in the frame, not on its server thread\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
+                        "Horizon — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (horizon-prepare)\n  --render-distance N     Chunks, 2..64 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain), write its report to benchmarks/ and quit\n  --control               Accept horizon-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/horizon-control.sock)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --name NAME             Player name for multiplayer (default: generated once, kept in horizon-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --dev-mod PATH          A Horizon mod (.hmod or folder) to develop: always on, reloaded when rebuilt\n  --in-frame              Run single player's world in the frame, not on its server thread\n  --shader-pack PATH      Draw the overworld with an OptiFine-format shader pack (zip or folder; experimental)\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
                         horizon_core::VANILLA_VERSION
                     );
                     return Ok(None);
@@ -441,6 +442,8 @@ impl Options {
                         "--height" => o.window_size[1] = value.parse::<u32>()?.max(1),
                         "--world" => o.world = Some(value),
                         "--dev-mod" => o.dev_mods.push(std::path::absolute(&value)?),
+                        // An OptiFine-format shader pack (game/glsl_pack.rs).
+                        "--shader-pack" => glsl_pack::set_path(value.into()),
                         "--benchmark" => {
                             if horizon_client::benchmark::scenes(&value).is_none() {
                                 return Err(format!(
@@ -10251,6 +10254,7 @@ impl Game<'_> {
             self.gather_dynamic_lights(camera, alpha);
         }
         let frame = Frame {
+            shader_pack: self.pack_frame(camera.to_array(), title),
             weather: &weather,
             weather_time: horizon_client::weather::Time::new(self.world.game_time, alpha as f32),
             nether_lighting: self.dim == Dim::Nether,
@@ -12864,6 +12868,7 @@ fn build_renderer(
         .iter()
         .map(|(rect, animation)| (*rect, animation.clone(), usize::MAX))
         .collect();
+    glsl_pack::install(&mut renderer, pack);
     Ok(renderer)
 }
 
@@ -12918,6 +12923,7 @@ fn loading_renderer(
 /// A title-shaped frame: black clear and panorama, only the HUD is drawn.
 fn loading_frame(hud: &HudBatch) -> Frame<'_> {
     Frame {
+        shader_pack: None,
         weather: &[],
         weather_time: horizon_client::weather::Time::new(0, 0.0),
         camera: glam::DVec3::new(0.5, 100.0, 0.5),

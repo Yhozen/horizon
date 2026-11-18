@@ -3,7 +3,8 @@
 //! beside glass and leaves, back faces, cardinal shading and max(self, above)
 //! light.
 use super::{
-    Info, MeshTables, Padded, SectionMesh, TerrainVertex, lighting, pack_coords, pack_rgb, pi,
+    Info, MeshTables, Padded, SectionMesh, TerrainVertex, lighting, normal_code, pack_coords,
+    pack_rgb, pi, tag_color,
 };
 use horizon_core::{
     geometry::{Axis, Direction, VoxelShape, trig},
@@ -304,8 +305,16 @@ pub(super) fn tesselate(
     } else {
         &mut out.solid
     };
+    let material = tables
+        .pack
+        .get()
+        .map(|p| if water { p.water } else { p.lava });
     let mut quad =
-        |v: [([f32; 3], [f32; 2]); 4], layer: u16, color: u32, light: u16, back: bool| {
+        |v: [([f32; 3], [f32; 2]); 4], layer: u16, color: u32, light: u16, back: bool, d: D| {
+            let color = match material {
+                Some(m) => tag_color(color, m, normal_code(d)),
+                None => color,
+            };
             let vertex = |(pos, uv)| TerrainVertex::new(pos, uv, layer, color, light);
             target.extend(v.map(vertex));
             if back {
@@ -360,6 +369,7 @@ pub(super) fn tesselate(
             color(lighting::cardinal(nether, D::Up)),
             light([x, y, z]),
             backward,
+            D::Up,
         );
     }
     if render_down {
@@ -375,6 +385,7 @@ pub(super) fn tesselate(
             color(lighting::cardinal(nether, D::Down)),
             light([x, y - 1, z]),
             false,
+            D::Down,
         );
     }
     let side_light = light([x, y, z]);
@@ -429,6 +440,12 @@ pub(super) fn tesselate(
             color(up_shade * side),
             side_light,
             !is_overlay,
+            match d {
+                Direction::North => D::North,
+                Direction::South => D::South,
+                Direction::West => D::West,
+                _ => D::East,
+            },
         );
     }
 }

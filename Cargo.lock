@@ -1285,6 +1285,7 @@ dependencies = [
  "horizon-core",
  "horizon-dualsense",
  "horizon-friends",
+ "horizon-glsl-pack",
  "horizon-mods",
  "horizon-open-content",
  "horizon-protocol",
