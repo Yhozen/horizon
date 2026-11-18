@@ -100,6 +100,13 @@ The checks live at the boundaries, not through the game:
 - **Menus**: the title has Singleplayer, Multiplayer, Options and Quit; the pause menu offers Back
   to the World, Options, Credits, Statistics and Save and Quit to Title (Disconnect on a server);
   the options page offers video, controls, chat, accessibility and credits only.
+- **On a server** (a Java server through `horizon-open-relay`) these limits of open's own worlds
+  step aside: the chat parses and completes with the server's command tree (the relay passes it
+  when both sides number argument types alike; without one, `OPEN_COMMANDS`), the Nether and End
+  load with the sky, fog and light of the server's dimension type (the bundle's biomes are the
+  overworld's, so biome colours are left out there), and the pause menu offers Advancements once
+  the server sends them (the relay drops them today: their icons are Minecraft item numbers, and
+  the bundle has no advancement window art yet).
 
 ## Preparing the bundle
 

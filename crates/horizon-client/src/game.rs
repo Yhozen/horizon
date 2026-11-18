@@ -10080,7 +10080,14 @@ impl Game<'_> {
                     .map_or(plains, |c| c.biome(qx * 4, qy * 4, qz * 4))
             })
         };
+        // The open bundle's biomes are the overworld's (a server's Nether
+        // biomes read as its plains): with the server's dimension type, its
+        // colours stand alone.
+        let own_biomes = self.remote.as_ref().is_none_or(|r| r.environment.is_none());
         let blend = |pick: fn(&horizon_client::biome::BiomeInfo) -> Option<u32>, base: [f32; 3]| {
+            if !own_biomes {
+                return base;
+            }
             horizon_client::biome::blend_rgb(&weights, |b| {
                 pick(biomes.get(b)).map_or(base, horizon_client::biome::rgb)
             })

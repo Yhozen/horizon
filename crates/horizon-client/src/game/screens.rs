@@ -39,11 +39,24 @@ fn pause_buttons(
     h: f32,
     remote: bool,
     open: bool,
+    server_advancements: bool,
 ) -> Vec<(f32, f32, f32, &'static str, u8, bool)> {
     // GridLayout of two 98px columns (padding 4), aligned at (0.5, 0.25).
     let (grid_w, grid_h) = (212.0, 166.0);
     let x0 = ((w - grid_w) * 0.5).floor();
     let y0 = ((h - grid_h) * 0.25).floor();
+    if open && remote && server_advancements {
+        // Horizon Open Creative on a server that sends its advancements:
+        // they are the server's, so the menu offers them.
+        return vec![
+            (x0 + 4.0, y0 + 50.0, 204.0, "menu.returnToGame", 0, true),
+            (x0 + 4.0, y0 + 74.0, 98.0, "gui.advancements", 4, true),
+            (x0 + 110.0, y0 + 74.0, 98.0, "gui.stats", 3, true),
+            (x0 + 4.0, y0 + 98.0, 98.0, "menu.options", 1, true),
+            (x0 + 110.0, y0 + 98.0, 98.0, "open.credits", 11, true),
+            (x0 + 4.0, y0 + 122.0, 204.0, "menu.disconnect", 2, true),
+        ];
+    }
     if open {
         // Horizon Open Creative: no advancements, world options or LAN; its credits.
         return vec![
@@ -123,6 +136,15 @@ impl Game<'_> {
     pub(super) fn external_server(&self) -> bool {
         self.remote.is_some() && self.integrated.is_none()
     }
+    /// Whether the server this window plays on has sent advancements the
+    /// screen can show (ClientboundUpdateAdvancementsPacket, one with a
+    /// display). The open relay drops them today, as their icons carry
+    /// Minecraft's item numbers; an open server's are recipe unlocks only.
+    fn server_advancements(&self) -> bool {
+        self.external_server()
+            && self.adv.positions.is_some()
+            && self.adv.tree.list.iter().any(|a| a.display.is_some())
+    }
     pub(super) fn draw_pause_menu(&mut self, batch: &mut HudBatch) {
         let friends = self.friends_view().shown;
         let atlas = &self.gui.atlas;
@@ -139,7 +161,14 @@ impl Game<'_> {
             true,
         );
         let open = self.options.profile.is_open();
-        for (x, y, bw, key, _, active) in pause_buttons(w, h, self.external_server(), open) {
+        let buttons = pause_buttons(
+            w,
+            h,
+            self.external_server(),
+            open,
+            self.server_advancements(),
+        );
+        for (x, y, bw, key, _, active) in buttons {
             let hover = active && ui::hovered(self.cursor, x, y, bw, 20.0);
             ui::button(
                 batch,
@@ -206,16 +235,22 @@ impl Game<'_> {
         };
         let friends = pause_icons(w, h)[FRIENDS_ICON];
         let open = self.options.profile.is_open();
-        let hit = pause_buttons(w, h, self.external_server(), open)
-            .into_iter()
-            .find(|b| b.5 && ui::hovered(self.cursor, b.0, b.1, b.2, 20.0))
-            .map(|b| b.4)
-            .or_else(|| {
-                (!open
-                    && self.friends_view().shown
-                    && ui::hovered(self.cursor, friends.0, friends.1, 20.0, 20.0))
-                .then_some(10)
-            });
+        let hit = pause_buttons(
+            w,
+            h,
+            self.external_server(),
+            open,
+            self.server_advancements(),
+        )
+        .into_iter()
+        .find(|b| b.5 && ui::hovered(self.cursor, b.0, b.1, b.2, 20.0))
+        .map(|b| b.4)
+        .or_else(|| {
+            (!open
+                && self.friends_view().shown
+                && ui::hovered(self.cursor, friends.0, friends.1, 20.0, 20.0))
+            .then_some(10)
+        });
         match hit {
             Some(0) => {
                 self.screen = Screen::Playing;
@@ -407,11 +442,31 @@ mod tests {
     #[test]
     fn pause_menu_uses_disconnect_for_servers_and_keeps_world_options() {
         for (remote, label) in [(false, "menu.returnToMenu"), (true, "menu.disconnect")] {
-            let buttons = pause_buttons(427.0, 240.0, remote, false);
+            let buttons = pause_buttons(427.0, 240.0, remote, false, false);
             let quit = buttons.iter().find(|b| b.4 == 2).unwrap();
             assert_eq!(quit.3, label);
             assert!(quit.5);
             assert!(buttons.iter().any(|b| b.4 == 9 && b.5));
+        }
+    }
+
+    #[test]
+    fn open_pause_menu_offers_a_servers_advancements() {
+        let has = |b: &[(f32, f32, f32, &str, u8, bool)], id| b.iter().any(|b| b.4 == id && b.5);
+        // Open's own world, and a server that sent none: no advancements.
+        assert!(!has(&pause_buttons(427.0, 240.0, false, true, false), 4));
+        assert!(!has(&pause_buttons(427.0, 240.0, true, true, false), 4));
+        // A server's advancements: the button, credits and Disconnect stay.
+        let server = pause_buttons(427.0, 240.0, true, true, true);
+        assert!(has(&server, 4) && has(&server, 11) && has(&server, 3));
+        let quit = server.iter().find(|b| b.4 == 2).unwrap();
+        assert_eq!(quit.3, "menu.disconnect");
+        // No two buttons overlap.
+        for (i, a) in server.iter().enumerate() {
+            for b in &server[i + 1..] {
+                let apart = a.1 != b.1 || a.0 + a.2 <= b.0 || b.0 + b.2 <= a.0;
+                assert!(apart, "{} overlaps {}", a.3, b.3);
+            }
         }
     }
 }
