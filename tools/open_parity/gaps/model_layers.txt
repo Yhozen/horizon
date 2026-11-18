@@ -50,7 +50,6 @@ minecraft:cat#collar
 minecraft:cat#main
 minecraft:cat_baby#collar
 minecraft:cat_baby#main
-minecraft:chest#main
 minecraft:chest_boat/acacia#main
 minecraft:chest_boat/bamboo#main
 minecraft:chest_boat/birch#main
@@ -88,8 +87,6 @@ minecraft:dolphin_baby#main
 minecraft:donkey#main
 minecraft:donkey#saddle
 minecraft:donkey_baby#main
-minecraft:double_chest_left#main
-minecraft:double_chest_right#main
 minecraft:dragon_skull#main
 minecraft:drowned#boots
 minecraft:drowned#chestplate
@@ -220,7 +217,6 @@ minecraft:salmon_large#main
 minecraft:salmon_small#main
 minecraft:shield#main
 minecraft:shulker#main
-minecraft:shulker_box#main
 minecraft:shulker_bullet#main
 minecraft:silverfish#main
 minecraft:skeleton#boots

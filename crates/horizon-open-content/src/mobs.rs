@@ -30,18 +30,18 @@ pub enum Face {
 
 /// A face pixel's colour, from the face, the pixel (x from the viewer's left, y from the
 /// top) and the face's size. Alpha 0 leaves the pixel clear.
-type Paint = Box<dyn Fn(Face, u32, u32, u32, u32) -> [u8; 4]>;
+pub(crate) type Paint = Box<dyn Fn(Face, u32, u32, u32, u32) -> [u8; 4]>;
 
 /// One box of a part: at `min` with `size` (model units), its skin at texture origin
 /// `uv` in the standard box layout, grown by `grow` on every side (the texture keeps
 /// the unscaled size), and `mirror`ed left to right as Minecraft's mirrored boxes are.
-struct Box3 {
-    min: [f32; 3],
-    size: [f32; 3],
-    uv: [u32; 2],
-    grow: f32,
-    mirror: bool,
-    paint: Paint,
+pub(crate) struct Box3 {
+    pub(crate) min: [f32; 3],
+    pub(crate) size: [f32; 3],
+    pub(crate) uv: [u32; 2],
+    pub(crate) grow: f32,
+    pub(crate) mirror: bool,
+    pub(crate) paint: Paint,
 }
 
 /// One part: its boxes, posed at `pivot` with `rot` (radians), and optional child
@@ -126,7 +126,7 @@ fn walk<'a>(cubes: &'a [Cube], out: &mut Vec<&'a Cube>) {
 /// the order of the rectangle's (u1, v0) (u0, v0) (u0, v1) (u1, v1), the pixel
 /// rectangle (u0, v0, u1, v1) and its outward normal. A mirrored box swaps its X
 /// extent, so its sides and every face read the other way round.
-fn faces(b: &Box3) -> [(Face, [[f32; 3]; 4], [u32; 4], [f32; 3]); 6] {
+pub(crate) fn faces(b: &Box3) -> [(Face, [[f32; 3]; 4], [u32; 4], [f32; 3]); 6] {
     let [mut x0, y0, z0] = b.min.map(|v| v - b.grow);
     let [mut x1, y1, z1] = [
         b.min[0] + b.size[0] + b.grow,

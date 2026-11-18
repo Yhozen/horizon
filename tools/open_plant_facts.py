@@ -19,7 +19,8 @@ The file has one record per line, tab-separated, its kind first:
 - `block NAME CLASSES ITEM HARDNESS RESISTANCE FRICTION SOUND TOOL NEEDS
   REQUIRES_TOOL ITEM_MODEL ITEM_COMPONENTS STATES`: a block, in registry order. ITEM is the
   item its gameplay row names (`-` for none), ITEM_MODEL the item's texture and tints
-  (`TEXTURE` or `TEXTURE|TINTS-JSON`, `-` when the block has no item of its own), and
+  (`TEXTURE` or `TEXTURE|TINTS-JSON`; `@JSON`, the item model itself, for a special or
+  composite one; `-` when the block has no item of its own), and
   ITEM_COMPONENTS the item's default components besides the base set (its name
   included), as JSON. STATES is one entry per state, in state order, separated by spaces:
   `ROW:MODEL:X:Y:UVLOCK:WEIGHT`, with `|MODEL:X:Y:UVLOCK:WEIGHT` for each further model the
@@ -60,7 +61,8 @@ FAMILIES = {
     "CaveVinesPlantBlock", "HangingMossBlock", "AmethystClusterBlock", "TorchBlock", "WallTorchBlock", "RedstoneTorchBlock",
     "RedstoneWallTorchBlock", "LanternBlock", "WeatheringLanternBlock", "LilyPadBlock",
     "SeaPickleBlock", "VineBlock", "GlowLichenBlock", "SculkVeinBlock", "ChainBlock",
-    "WeatheringCopperChainBlock", "LeafLitterBlock",
+    "WeatheringCopperChainBlock", "LeafLitterBlock", "ChestBlock", "TrappedChestBlock",
+    "EnderChestBlock", "CopperChestBlock", "WeatheringCopperChestBlock", "BedBlock", "ShulkerBoxBlock",
 }
 # The geometries plants.rs draws, by the name of the model that holds the elements.
 LAYOUTS = {
@@ -71,7 +73,8 @@ LAYOUTS = {
     "vine", "glow_lichen", "sculk_vein", "sea_pickle", "two_sea_pickles", "three_sea_pickles",
     "four_sea_pickles", "dead_sea_pickle", "two_dead_sea_pickles", "three_dead_sea_pickles",
     "four_dead_sea_pickles", "template_chain", "template_leaf_litter_1", "template_leaf_litter_2",
-    "template_leaf_litter_3", "template_leaf_litter_4",
+    "template_leaf_litter_3", "template_leaf_litter_4", "none", "template_bed_head",
+    "template_bed_foot",
 }
 # Gameplay facts kept per state; the others are the block's.
 ROW_FIELDS = (
@@ -201,12 +204,23 @@ class Models:
                 return None
             return value(variables.get(v[1:]), depth + 1) if v.startswith("#") else strip(v)
 
-        layout = next((n for n, m in chain if "elements" in m), None)
+        # A model with no elements (a chest's, drawn by its block-entity renderer) is "none".
+        layout = next((n for n, m in chain if "elements" in m), "none")
         textures = {k: value(v) for k, v in variables.items()}
         return layout, {k: v for k, v in textures.items() if v is not None}
 
     def states(self, block):
         return json.loads((self.root / "blockstates" / f"{block}.json").read_text())
+
+    def item_definition(self, item):
+        """A special or composite item model (chests, beds): its definition, a date-picked
+        model replaced by its usual one."""
+        model = json.loads((self.root / "items" / f"{item}.json").read_text())["model"]
+        if model.get("type") == "minecraft:select":
+            model = model["fallback"]
+        if model.get("type") not in ("minecraft:special", "minecraft:composite"):
+            sys.exit(f"{item}: its item model is neither flat, special nor composite")
+        return model
 
     def item(self, item):
         path = self.root / "items" / f"{item}.json"
@@ -270,7 +284,7 @@ def rows(resources):
     def shape(table, index):
         cached = table["cached_shapes"][index]
         if cached < 0:
-            sys.exit(f"{names[index]}: shape computed in code")
+            return -1  # computed in code (a shulker box's, from its lid)
         text = json.dumps(shape_json(table["shapes"][cached]), separators=(",", ":"))
         if text not in shape_ids:
             shape_ids[text] = len(shapes)
@@ -339,10 +353,11 @@ def rows(resources):
         item_model, components = "-", "{}"
         if item == short:
             found = models.item(short)
-            if found is None:
-                sys.exit(f"{name}: its item model is not a flat item")
-            texture, tints = found
-            item_model = texture if not tints else f"{texture}|{json.dumps(tints, separators=(',', ':'))}"
+            if found is not None:
+                texture, tints = found
+                item_model = texture if not tints else f"{texture}|{json.dumps(tints, separators=(',', ':'))}"
+            else:
+                item_model = "@" + json.dumps(models.item_definition(short), separators=(",", ":"))
             own = {k: v for k, v in items[g["item"]].items()
                    if k != "minecraft:item_model" and base.get(k) != v}
             components = json.dumps(own, separators=(",", ":"), sort_keys=True)

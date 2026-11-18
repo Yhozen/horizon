@@ -542,11 +542,16 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             continue;
         }
         let plant = |occlusion: bool| {
-            crate::plants::shape(s.block, &s.properties, occlusion).map(crate::plants::voxel)
+            crate::plants::shape(s.block, &s.properties, occlusion)
+                .map(|id| id.map(crate::plants::voxel))
         };
         if let (Some(c), Some(o)) = (plant(false), plant(true)) {
-            collision.push(&c);
-            occlusion.push(&o);
+            for (table, shape) in [(&mut collision, c), (&mut occlusion, o)] {
+                match shape {
+                    Some(shape) => table.push(&shape),
+                    None => table.push_dynamic(),
+                }
+            }
             continue;
         }
         match sh {

@@ -517,13 +517,14 @@ pub fn write(
             let seed = texture
                 .bytes()
                 .fold(7u32, |h, b| h.wrapping_mul(31) ^ u32::from(b));
-            bundle.png(
-                destination,
-                &speckle_seeded(color, seed),
-                Origin::Generator("art"),
-            )?;
+            let image = match bed_placeholder(texture, blocks) {
+                Some(image) => image,
+                None => speckle_seeded(color, seed),
+            };
+            bundle.png(destination, &image, Origin::Generator("art"))?;
         }
     }
+    crate::chests::write(bundle, sources)?;
     // Breaking overlays: original art.
     for stage in 0..10 {
         bundle.png(
@@ -806,6 +807,37 @@ fn handheld_model() -> Value {
     })
 }
 
+/// A bed face's placeholder (`red_bed_head_up`): the cover in its wool's
+/// colour, the planks below it in the oak planks' colour, each side its own
+/// pattern so no two bed faces share a sprite.
+fn bed_placeholder(texture: &str, blocks: &[Block]) -> Option<Rgba> {
+    // `bed_down` and `bed_head_north` are every bed's: the frame's wood.
+    let (dye, side) = texture
+        .split_once("_bed_")
+        .or_else(|| Some(("", texture.strip_prefix("bed_")?)))?;
+    let rgb = match blocks.iter().find(|b| b.id == format!("{dye}_wool")) {
+        Some(wool) => wool.map_color,
+        None if dye.is_empty() => 0x8F7748,
+        None => return None,
+    };
+    let cover = [(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8];
+    let seed = side
+        .bytes()
+        .fold(dye.len() as u32, |h, b| h.wrapping_mul(31) + u32::from(b));
+    let mut image = Rgba::new(16, 16);
+    for y in 0..16 {
+        for x in 0..16 {
+            let n = (noise(x, y, seed) % 24) as i32 - 12;
+            let c = |v: u8| (v as i32 + n).clamp(0, 255) as u8;
+            // The sides show the cover above the frame (rows 7 to 12).
+            let wood = !side.ends_with("up") && y >= 10;
+            let base = if wood { [143, 119, 72] } else { cover };
+            image.set(x, y, [c(base[0]), c(base[1]), c(base[2]), 255]);
+        }
+    }
+    Some(image)
+}
+
 fn speckle(color: [u8; 4]) -> Rgba {
     speckle_seeded(color, 7)
 }
@@ -913,6 +945,29 @@ fn plant_item(
     prototypes: &mut BTreeMap<String, Value>,
 ) -> Result<()> {
     let id = block.id;
+    if let Some(definition) = &plant.item_definition {
+        // A special model draws over its base: a model with the block's
+        // particle and this edition's transforms (waxed copper shares the
+        // unwaxed chest's).
+        let base = definition["base"].as_str().map(|b| {
+            let path = b.strip_prefix("minecraft:").unwrap_or(b);
+            format!("assets/minecraft/models/{path}.json")
+        });
+        if let Some(file) = base.filter(|file| !bundle.contains(file)) {
+            let particle = crate::plants::particle(id).unwrap_or("oak_planks");
+            bundle.json(
+                file,
+                &json!({"parent": "minecraft:block/open_base", "textures": {"particle": tex(particle)}}),
+                GENERATOR,
+            )?;
+        }
+        bundle.json(
+            format!("assets/minecraft/items/{id}.json"),
+            &json!({"model": definition}),
+            GENERATOR,
+        )?;
+        return plant_prototype(block, plant, prototypes);
+    }
     let (texture, tints) = plant
         .item_model
         .clone()
@@ -941,6 +996,16 @@ fn plant_item(
         &json!({"model": item_model}),
         GENERATOR,
     )?;
+    plant_prototype(block, plant, prototypes)
+}
+
+/// A plant's item prototype: Minecraft's default components.
+fn plant_prototype(
+    block: &Block,
+    plant: &crate::plants::Plant,
+    prototypes: &mut BTreeMap<String, Value>,
+) -> Result<()> {
+    let id = block.id;
     let mut prototype = crate::items::base_components();
     prototype.insert(
         "minecraft:item_name".into(),

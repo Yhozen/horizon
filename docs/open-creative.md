@@ -254,8 +254,8 @@ to the plants and small decorations: flowers and tall flowers, saplings, grass, 
 mushrooms, fungi and roots, crops by age, sugar cane, sweet berry bushes, seagrass, kelp, coral,
 coral fans and wall fans (live and dead), sea pickles, the Nether and cave vines, vines, glow
 lichen, sculk veins, hanging roots, cobwebs, amethyst buds, torches, wall torches, redstone
-torches, lanterns, lily pads, chains and leaf litter. Numbers and names only: per state its light, dampening, map
-colour, flags, outline boxes, collision and occlusion shapes (the cached tables' cells, written
+torches, lanterns, lily pads, chains and leaf litter; and the chests, beds and shulker boxes.
+Numbers and names only: per state its light, dampening, map colour, flags, outline boxes, collision and occlusion shapes (the cached tables' cells, written
 through the shape library's table), random offset, behaviour row and the models, turns and
 weights its variant uses (or, for vines and lichen, the multipart cases); per model the layout
 its geometry follows (`cross`, `crop`, `coral_fan`, `template_torch`...) and its texture names.
@@ -265,6 +265,15 @@ name and tab. Blocks with their own item join the palette (the item flat, with M
 texture, tints and default components); the others (wall torches, crops, kelp's stem, tall
 seagrass) name Minecraft's item (`torch`, `wheat_seeds`) and are never offered. Seagrass, kelp
 and waterlogged states hold water, so the water draws around the plant.
+
+Chests (single and double, trapped, ender and copper) and shulker boxes have no block model of
+their own: the client's block-entity renderer draws them from their block states, with the
+`chest`, `double_chest_left`, `double_chest_right` and `shulker_box` layers of
+`entity-models.json` (`chests.rs`: Minecraft's part names, boxes, pivots and texture origins)
+and the skins under `textures/entity/chest/` and `entity/shulker/` from the pack. Their items
+are Minecraft's special item models. Beds are block models (a mattress and two legs per half),
+their textures placeholders in their wool's colour until a pack draws them. The block entity
+types `chest`, `trapped_chest`, `ender_chest` and `shulker_box` count as content.
 
 ### Support blocks
 
@@ -314,7 +323,8 @@ states); an item with a prototype in `items.json`; an entity type the bundle can
 item, experience orb, falling block and the mobs); a menu whose screen background is in the bundle (all
 25 since the container screens). Attributes, command argument types, custom statistics, data components, the recipe
 book's categories, recipe and slot displays and statistic types are complete: the shared code
-handles every name. Block entity types, map decorations, mob effects, particles, sound events
+handles every name. Block entity types have content for the chests and shulker boxes. Map
+decorations, mob effects, particles, sound events
 and villager professions and types have no content yet. A name without content still loads:
 an inert block, an item drawn as the missing model, an entity with no model.
 

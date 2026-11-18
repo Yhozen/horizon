@@ -44,6 +44,9 @@ pub struct Plant {
     pub mining: Mining,
     /// Its own item's texture (`block/poppy`, `item/kelp`) and tints.
     pub item_model: Option<(&'static str, Option<Value>)>,
+    /// Or its own item's model as Minecraft defines it (a chest's special
+    /// model, a bed's two halves).
+    pub item_definition: Option<Value>,
     /// Its own item's components besides the base set.
     pub components: Map<String, Value>,
     pub states: Vec<PlantState>,
@@ -105,9 +108,12 @@ fn parse() -> Facts {
                     "hoe" => Tool::Hoe,
                     _ => Tool::None,
                 };
-                let item_model = (f[11] != "-").then(|| match f[11].split_once('|') {
-                    Some((texture, tints)) => (texture, Some(json(tints))),
-                    None => (f[11], None),
+                let item_definition = f[11].strip_prefix('@').map(json);
+                let item_model = (f[11] != "-" && item_definition.is_none()).then(|| {
+                    match f[11].split_once('|') {
+                        Some((texture, tints)) => (texture, Some(json(tints))),
+                        None => (f[11], None),
+                    }
                 });
                 let Value::Object(components) = json(f[12]) else {
                     panic!("plants.txt: components of {}", f[1]);
@@ -140,6 +146,7 @@ fn parse() -> Facts {
                         needs: num(9) as u8,
                     },
                     item_model,
+                    item_definition,
                     components,
                     states,
                 });
@@ -243,10 +250,11 @@ pub fn holds_fluid(block: &Block, properties: &[(&str, &str)]) -> bool {
 
 /// The state's collision or occlusion shape, by its index among
 /// [`shapes`] (an empty or full shape gives the shared table's own 0 or 1).
-pub fn shape(block: &Block, properties: &[(&str, &str)], occlusion: bool) -> Option<usize> {
+/// `Some(None)` for a shape Minecraft computes in code (a shulker box's).
+pub fn shape(block: &Block, properties: &[(&str, &str)], occlusion: bool) -> Option<Option<usize>> {
     let (_, row) = state(block, properties)?;
-    let id = row[if occlusion { "occlusion" } else { "collision" }].as_u64()? as usize;
-    Some(id)
+    let id = row[if occlusion { "occlusion" } else { "collision" }].as_i64()?;
+    Some(usize::try_from(id).ok())
 }
 
 /// Every shape the plants use, in the shape table's terms: cell boundaries
@@ -371,39 +379,42 @@ pub fn add(blocks: &mut Vec<Block>) {
             },
             None => Drop::Nothing,
         };
-        let mut block =
-            Block {
-                id: plant.id,
-                name: title(plant.id),
-                tier: if own { Tier::Palette } else { Tier::Terrain },
-                form: Form::Cross,
-                layer: Layer::Cutout,
-                faces: Faces::Plant,
-                properties: &[],
-                defaults: &[],
-                hardness: 0.0,
-                resistance: 0.0,
-                light: 0,
-                lit_light: 0,
-                opacity: 0,
-                sound: Sound::Grass,
-                classes: &[],
-                map_color: 0,
-                category: own.then(|| {
-                    if plant.classes[0] == "AmethystClusterBlock" {
-                        Category::Minerals
-                    } else if plant.classes.iter().any(|c| {
-                        c.contains("Torch") || c.contains("Lantern") || c.contains("Chain")
-                    }) {
-                        Category::Construction
-                    } else {
-                        Category::Plants
-                    }
-                }),
-                mining: plant.mining,
-                drop,
-                friction: 0.6,
-            };
+        let mut block = Block {
+            id: plant.id,
+            name: title(plant.id),
+            tier: if own { Tier::Palette } else { Tier::Terrain },
+            form: Form::Cross,
+            layer: Layer::Cutout,
+            faces: Faces::Plant,
+            properties: &[],
+            defaults: &[],
+            hardness: 0.0,
+            resistance: 0.0,
+            light: 0,
+            lit_light: 0,
+            opacity: 0,
+            sound: Sound::Grass,
+            classes: &[],
+            map_color: 0,
+            category: own.then(|| {
+                if plant.classes[0] == "AmethystClusterBlock" {
+                    Category::Minerals
+                } else if plant.classes[0] == "BedBlock" {
+                    Category::Colored
+                } else if plant.classes.iter().any(|c| {
+                    ["Torch", "Lantern", "Chain", "Chest"]
+                        .iter()
+                        .any(|kind| c.contains(kind))
+                }) {
+                    Category::Construction
+                } else {
+                    Category::Plants
+                }
+            }),
+            mining: plant.mining,
+            drop,
+            friction: 0.6,
+        };
         set_facts(&mut block, plant);
         blocks.push(block);
     }
@@ -446,6 +457,12 @@ pub fn textures(id: &str) -> Vec<&'static str> {
         }
     }
     out.into_iter().collect()
+}
+
+/// The particle texture of the block's first model (a chest's planks).
+pub fn particle(id: &str) -> Option<&'static str> {
+    let model = plant(id)?.states.first()?.models.first()?.model;
+    facts().models.get(model)?.1.get("particle").copied()
 }
 
 fn tex(name: &str) -> String {
@@ -847,6 +864,89 @@ fn layout(name: &str) -> Option<(Vec<Value>, bool)> {
             ],
             true,
         ),
+        // Drawn by the block-entity renderer (chests): only a particle.
+        "none" => (Vec::new(), false),
+        // A bed half: the mattress 3 to 9 pixels up, open toward the other
+        // half, and two 3-pixel legs at its far corners. Each face names
+        // the texture of its side; the legs' faces the side they show.
+        "template_bed_head" | "template_bed_foot" => {
+            let head = name == "template_bed_head";
+            let end = if head { "north" } else { "south" };
+            let leg = |u: f64| [u, 13.0, u + 3.0, 16.0];
+            let mattress = [
+                ("down", FULL, "#down", None),
+                ("up", FULL, "#up", None),
+                (
+                    end,
+                    [0.0, 7.0, 16.0, 13.0],
+                    if head { "#north" } else { "#south" },
+                    Some(end),
+                ),
+                ("west", [0.0, 7.0, 16.0, 13.0], "#west", Some("west")),
+                ("east", [0.0, 7.0, 16.0, 13.0], "#east", Some("east")),
+            ];
+            // Each leg: its down, north, south, west and east faces.
+            let legs: [(
+                [f64; 3],
+                [f64; 3],
+                [(&str, [f64; 4], &str, Option<&str>); 5],
+            ); 2] = if head {
+                [
+                    (
+                        [0.0, 0.0, 0.0],
+                        [3.0, 3.0, 3.0],
+                        [
+                            ("down", leg(6.0), "#west", Some("down")),
+                            ("north", leg(13.0), "#north", Some("north")),
+                            ("south", leg(3.0), "#west", None),
+                            ("west", leg(0.0), "#west", Some("west")),
+                            ("east", leg(10.0), "#north", None),
+                        ],
+                    ),
+                    (
+                        [13.0, 0.0, 0.0],
+                        [16.0, 3.0, 3.0],
+                        [
+                            ("down", leg(7.0), "#east", Some("down")),
+                            ("north", leg(0.0), "#north", Some("north")),
+                            ("south", leg(10.0), "#east", None),
+                            ("west", leg(3.0), "#north", None),
+                            ("east", leg(13.0), "#east", Some("east")),
+                        ],
+                    ),
+                ]
+            } else {
+                [
+                    (
+                        [0.0, 0.0, 13.0],
+                        [3.0, 3.0, 16.0],
+                        [
+                            ("down", leg(7.0), "#west", Some("down")),
+                            ("north", leg(10.0), "#west", None),
+                            ("south", leg(0.0), "#south", Some("south")),
+                            ("west", leg(13.0), "#west", Some("west")),
+                            ("east", leg(3.0), "#south", None),
+                        ],
+                    ),
+                    (
+                        [13.0, 0.0, 13.0],
+                        [16.0, 3.0, 16.0],
+                        [
+                            ("down", leg(6.0), "#east", Some("down")),
+                            ("north", leg(3.0), "#east", None),
+                            ("south", leg(13.0), "#south", Some("south")),
+                            ("west", leg(10.0), "#south", None),
+                            ("east", leg(0.0), "#east", Some("east")),
+                        ],
+                    ),
+                ]
+            };
+            let mut elements = vec![mixed([0.0, 3.0, 0.0], [16.0, 9.0, 16.0], &mattress)];
+            for (from, to, faces) in &legs {
+                elements.push(mixed(*from, *to, faces));
+            }
+            (elements, false)
+        }
         // A chain: two narrow strips of its texture crossed at 45 degrees.
         "template_chain" => {
             let turn = Some(([8.0, 8.0, 8.0], "y", 45.0, false));
@@ -1020,6 +1120,19 @@ fn plain(
         e["rotation"] = json!({"origin": origin, "axis": axis, "angle": angle, "rescale": rescale});
     }
     e
+}
+
+/// An element whose faces each name their texture, UV and cull face.
+fn mixed(from: [f64; 3], to: [f64; 3], entries: &[(&str, [f64; 4], &str, Option<&str>)]) -> Value {
+    let mut faces = Map::new();
+    for (dir, uv, texture, cull) in entries {
+        let mut face = json!({"uv": uv, "texture": texture});
+        if let Some(cull) = cull {
+            face["cullface"] = json!(cull);
+        }
+        faces.insert((*dir).to_owned(), face);
+    }
+    json!({"from": from, "to": to, "faces": faces})
 }
 
 /// A torch's stick: a 2x10 box on `#torch`, its bottom culled when it stands.
