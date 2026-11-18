@@ -15,14 +15,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub mod directives;
+pub mod frame_math;
 pub mod host;
 pub mod legacy_ids;
 pub mod naga_out;
+pub mod noise;
 pub mod options;
 pub mod plan;
 pub mod preprocess;
 pub mod properties;
 pub mod rewrite;
+pub mod schedule;
 pub mod uniforms;
 
 pub use naga_out::Stage;

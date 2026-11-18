@@ -94,10 +94,10 @@ pack_uniforms! {
     block_entity_id: i32 = "int" "blockEntityId",
     hide_gui: i32 = "int" "hideGUI",
     render_stage: i32 = "int" "renderStage",
+    frame_time: f32 = "float" "frameTime",
+    eye_altitude: f32 = "float" "eyeAltitude",
     // std140 rounds the block up to 16 bytes; spelt out so the struct is Pod.
     pad0: i32 = "int" "hz_pad0",
-    pad1: i32 = "int" "hz_pad1",
-    pad2: i32 = "int" "hz_pad2",
 }
 
 const IDENTITY: Mat4 = [
@@ -184,6 +184,8 @@ mod tests {
         assert_eq!(uniform_type("gbufferModelView"), Some("mat4"));
         assert_eq!(uniform_type("eyeBrightnessSmooth"), Some("ivec2"));
         assert_eq!(uniform_type("worldTime"), Some("int"));
+        assert_eq!(uniform_type("frameTime"), Some("float"));
+        assert_eq!(uniform_type("eyeAltitude"), Some("float"));
         assert_eq!(uniform_type("hz_pad0"), None);
         assert_eq!(uniform_type("sunPathRotation"), None);
         assert_eq!(PackUniforms::default().shadow_projection, IDENTITY);
