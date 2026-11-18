@@ -2647,19 +2647,14 @@ impl Game<'_> {
             if !self.with_level(|b, level, ticks| b.scheduled_begin(level, ticks, fluids)) {
                 continue;
             }
-            // Horizon Open Creative's water is fixed scenery: due fluid ticks
-            // are taken and dropped, so nothing flows.
-            let fixed = fluids && self.options.profile.is_open();
-            if !fixed {
-                loop {
-                    let more =
-                        self.with_level(|b, level, ticks| b.scheduled_step(level, ticks, fluids));
-                    if !self.level_events.is_empty() {
-                        self.process_level_events()?;
-                    }
-                    if !more {
-                        break;
-                    }
+            loop {
+                let more =
+                    self.with_level(|b, level, ticks| b.scheduled_step(level, ticks, fluids));
+                if !self.level_events.is_empty() {
+                    self.process_level_events()?;
+                }
+                if !more {
+                    break;
                 }
             }
             self.with_level(|b, _, ticks| b.scheduled_finish(ticks, fluids));
