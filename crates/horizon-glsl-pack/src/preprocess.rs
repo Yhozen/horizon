@@ -133,7 +133,9 @@ pub const BIOME_CATEGORIES: [&str; 17] = [
 ];
 
 /// The macros the host defines before a pack's own (the "who Horizon says it
-/// is" contract): Iris at the OpenGL 4.1 level, no vendor or GPU named.
+/// is" contract): Iris 1.11.7's, as measured, except the GL and GLSL versions
+/// (4.1, a host without compute or SSBOs) and no vendor or GPU named.
+/// `IRIS_FEATURE_*` come from the pack's `iris.features.*` (`features.rs`).
 pub fn predefined(mc_version: u32) -> BTreeMap<String, String> {
     let os = if cfg!(target_os = "linux") {
         "MC_OS_LINUX"
@@ -153,6 +155,10 @@ pub fn predefined(mc_version: u32) -> BTreeMap<String, String> {
         ("MC_GL_RENDERER_OTHER", "1".into()),
         ("IS_IRIS", "1".into()),
         ("IRIS_VERSION", "11107".into()),
+        ("IRIS_TAG_SUPPORT", "2".into()),
+        // Iris defines both even for packs without normal or specular settings (measured).
+        ("MC_NORMAL_MAP", "1".into()),
+        ("MC_SPECULAR_MAP", "1".into()),
         ("MC_RENDER_QUALITY", "1.0".into()),
         ("MC_SHADOW_QUALITY", "1.0".into()),
         ("MC_HAND_DEPTH", "0.125".into()),
@@ -665,6 +671,17 @@ mod tests {
         pp_with(text, &[])
     }
 
+    fn pp_with_version(text: &str, mc_version: u32) -> String {
+        preprocess_text(
+            text,
+            "shaders/t.fsh",
+            &PackFiles::default(),
+            &predefined(mc_version),
+            &[],
+        )
+        .unwrap()
+    }
+
     fn pp_with(text: &str, overrides: &[(&str, Option<&str>)]) -> String {
         let o: Vec<_> = overrides
             .iter()
@@ -682,12 +699,15 @@ mod tests {
 
     #[test]
     fn horizon_says_it_is_iris_at_gl_410() {
-        let text = "#if defined IS_IRIS && IRIS_VERSION >= 10800 && MC_GL_VERSION == 410\nI\n#endif\n\
+        let text = "#if defined IS_IRIS && IRIS_VERSION >= 10800 && MC_GL_VERSION == 410 && defined MC_NORMAL_MAP\nI\n#endif\n\
                     #ifdef MC_GL_VENDOR_NVIDIA\nN\n#endif\n\
                     MC_RENDER_STAGE_NONE MC_RENDER_STAGE_SUN BIOME_BADLANDS BIOME_PLAINS CAT_NETHER PPT_SNOW";
         let out = pp(text);
         let words: Vec<&str> = out.split_whitespace().collect();
         assert_eq!(words, ["I", "0", "4", "0", "40", "16", "2"]);
+        let text =
+            "#if defined IS_IRIS && MC_VERSION >= 260300 && IRIS_TAG_SUPPORT == 2\nV\n#endif\n";
+        assert_eq!(pp_with_version(text, 260300).trim(), "V");
         assert_eq!(BIOMES[40], "plains");
     }
 

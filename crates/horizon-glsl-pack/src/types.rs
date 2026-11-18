@@ -31,7 +31,8 @@ impl PackFiles {
 /// How the pack is configured.
 #[derive(Clone, Debug)]
 pub struct PackOptions {
-    /// OptiFine's `MC_VERSION` macro (1.21.11 = 12111).
+    /// The `MC_VERSION` macro: Iris numbers 26.3 as 260300
+    /// (major × 10000 + minor × 100 + patch, measured).
     pub mc_version: u32,
     /// Option values, written into the sources before preprocessing (see
     /// [`options::apply`]): `(name, None)` or `Some("false")` turns a boolean
@@ -48,7 +49,7 @@ pub struct PackOptions {
 impl Default for PackOptions {
     fn default() -> Self {
         Self {
-            mc_version: 12111,
+            mc_version: 260300,
             overrides: Vec::new(),
             excluded: BTreeSet::new(),
         }
