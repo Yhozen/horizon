@@ -291,6 +291,21 @@ def mask_hud(png: Path, w: int, h: int) -> None:
     tmp.replace(png)
 
 
+def hotbar_diff(a: Path, b: Path, w: int, h: int) -> float:
+    """Mean absolute difference of two pictures over the hotbar's box (see `mask_hud`)."""
+    wa, ha, ra = read_png_rgb(a)
+    _, _, rb = read_png_rgb(b)
+    s = GUI_SCALE
+    x0, y0, bw = (w - 182 * s) // 2, h - 22 * s, 182 * s
+    total = n = 0
+    for y in range(y0, h, 2):
+        for x in range(x0, x0 + bw, 2):
+            i = (y * wa + x) * 3
+            total += abs(ra[i] - rb[i]) + abs(ra[i + 1] - rb[i + 1]) + abs(ra[i + 2] - rb[i + 2])
+            n += 3
+    return total / max(n, 1)
+
+
 def free_display() -> int:
     for n in range(91, 140):
         if not Path(f"/tmp/.X11-unix/X{n}").exists() and not Path(f"/tmp/.X{n}-lock").exists():
@@ -555,7 +570,7 @@ def run(args) -> int:
                 marker = f"oracle-scene-{i + 1}"
                 xin.hold("Shift_L", True)
                 t0 = time.time()
-                while marker not in log_path.read_text(errors="replace") and time.time() - t0 < 180:
+                while marker not in log_path.read_text(errors="replace") and time.time() - t0 < args.scene_timeout:
                     if game_proc.poll() is not None:
                         break
                     time.sleep(1)
@@ -565,8 +580,22 @@ def run(args) -> int:
                     break
                 print(f"scene {scene} set")
                 if i == 0 and args.hide_gui:
-                    time.sleep(2)
+                    # F1 applies on the next frame, which can take seconds with a heavy pack: wait until the
+                    # hotbar area changes before trusting it.
+                    before = out.with_suffix(".before.png")
+                    after = out.with_suffix(".after.png")
+                    grab(before)
                     xin.key("F1")
+                    t0 = time.time()
+                    hidden = False
+                    while time.time() - t0 < 120 and game_proc.poll() is None:
+                        time.sleep(3)
+                        if grab(after) and hotbar_diff(before, after, w, h) > 25:
+                            hidden = True
+                            break
+                    print("HUD hidden" if hidden else "HUD hide not seen (F1)")
+                    before.unlink(missing_ok=True)
+                    after.unlink(missing_ok=True)
                 time.sleep(SCENE_SETTLE.get(scene, 10) * args.settle)
                 path = out.with_name(f"{out.stem}-{scene}.png")
                 if grab(path):
@@ -825,6 +854,7 @@ def main() -> int:
     r.add_argument("--keep", action="store_true", help="keep the copied save")
     r.add_argument("--scenes", help="comma list of noon, dusk, underwater: typed as commands in one game, one "
                    "picture each (OUT-<scene>.png); needs <world>/oracle-pose.json")
+    r.add_argument("--scene-timeout", type=float, default=240, help="seconds to hold Shift for one scene")
     r.add_argument("--settle", type=float, default=1.0, help="multiply the per-scene settle times")
     r.add_argument("--no-hide-gui", dest="hide_gui", action="store_false", help="with --scenes: do not press F1")
     r.add_argument("--no-mask-hud", dest="mask_hud", action="store_false", help="leave the hotbar and crosshair visible")
