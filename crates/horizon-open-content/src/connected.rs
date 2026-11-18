@@ -4,7 +4,9 @@
 //! here. Every state has Minecraft's collision, outline and light occlusion
 //! boxes (fences, walls and closed gates collide 1.5 blocks high), and the
 //! models are drawn as multipart block states that join the parts each
-//! state's connections name.
+//! state's connections name. The doors, trapdoors, buttons and pressure
+//! plates of `data/blocks/openings.txt` share the format; their shapes and
+//! models are in [`crate::openings`].
 use crate::blocks::{Block, Category, Drop, Faces, Form, Layer, Mining, Tier, Tool};
 use horizon_core::geometry::{Axis, VoxelShape};
 use serde_json::{Map, Value, json};
@@ -19,6 +21,23 @@ pub enum Family {
     Gate,
     Pane,
     Bars,
+    Door,
+    Trapdoor,
+    /// A trapdoor whose texture turns with `facing`.
+    OrientableTrapdoor,
+    Button,
+    Plate,
+    /// A weighted plate: `power` rather than `powered`.
+    WeightedPlate,
+}
+impl Family {
+    /// Whether it is one of [`crate::openings`]'s.
+    pub fn opening(self) -> bool {
+        !matches!(
+            self,
+            Self::Wall | Self::Fence | Self::Gate | Self::Pane | Self::Bars
+        )
+    }
 }
 
 /// One line of `connected.txt`.
@@ -38,8 +57,12 @@ pub struct Line {
 
 /// Every line, in block registry order.
 pub fn lines() -> Vec<Line> {
-    CONNECTED
-        .lines()
+    parse(CONNECTED)
+}
+
+/// The lines of `connected.txt` or `openings.txt`.
+pub fn parse(text: &'static str) -> Vec<Line> {
+    text.lines()
         .skip(1)
         .filter(|line| !line.is_empty())
         .map(|line| {
@@ -62,6 +85,12 @@ pub fn lines() -> Vec<Line> {
                 "gate" => Family::Gate,
                 "pane" => Family::Pane,
                 "bars" => Family::Bars,
+                "door" => Family::Door,
+                "trapdoor" => Family::Trapdoor,
+                "orientable_trapdoor" => Family::OrientableTrapdoor,
+                "button" => Family::Button,
+                "plate" => Family::Plate,
+                "weighted_plate" => Family::WeightedPlate,
                 other => panic!("connected.txt: {} has the family {other}", f[0]),
             };
             let textures = f[10].split_once(',').unwrap_or((f[10], f[10]));
@@ -87,7 +116,7 @@ pub fn lines() -> Vec<Line> {
 /// Adds the families to the palette, in the file's order, each dropping
 /// itself.
 pub fn add(blocks: &mut Vec<Block>) {
-    for line in lines() {
+    for line in lines().into_iter().chain(crate::openings::lines()) {
         assert!(
             blocks.iter().all(|b| b.id != line.id),
             "{} is authored twice",
@@ -103,7 +132,9 @@ pub fn add(blocks: &mut Vec<Block>) {
             form: Form::Connected(line.family),
             layer: match line.family {
                 Family::Pane => Layer::Translucent,
-                Family::Bars => Layer::Cutout,
+                Family::Bars | Family::Door | Family::Trapdoor | Family::OrientableTrapdoor => {
+                    Layer::Cutout
+                }
                 _ => Layer::Solid,
             },
             faces: Faces::Connected {
@@ -147,7 +178,7 @@ fn px(b: [f64; 6]) -> [f64; 6] {
     b.map(|v| v / 16.0)
 }
 
-fn value<'a>(state: &[(&str, &'a str)], key: &str) -> &'a str {
+pub(crate) fn value<'a>(state: &[(&str, &'a str)], key: &str) -> &'a str {
     state.iter().find(|(k, _)| *k == key).map_or("", |(_, v)| v)
 }
 
@@ -167,6 +198,12 @@ const SIDES: [&str; 4] = ["north", "east", "south", "west"];
 
 /// A state's boxes (in blocks), unmerged.
 pub fn boxes(family: Family, state: &[(&str, &str)], shape: Shape) -> Boxes {
+    if family.opening() {
+        return crate::openings::boxes(family, state, shape)
+            .into_iter()
+            .map(px)
+            .collect();
+    }
     let mut out = Vec::new();
     match family {
         Family::Fence => {
@@ -235,6 +272,7 @@ pub fn boxes(family: Family, state: &[(&str, &str)], shape: Shape) -> Boxes {
                 out = out.into_iter().map(|b| arm("east", b)).collect();
             }
         }
+        _ => unreachable!("openings shape through crate::openings"),
     }
     out.into_iter().map(px).collect()
 }
@@ -297,9 +335,9 @@ pub fn waterlogged(state: &[(&str, &str)]) -> bool {
 
 /// One face: its UV (or the default from the element's bounds), texture
 /// variable and cull face.
-type FaceSpec<'a> = (&'a str, Option<[f64; 4]>, &'a str, Option<&'a str>);
+pub(crate) type FaceSpec<'a> = (&'a str, Option<[f64; 4]>, &'a str, Option<&'a str>);
 
-fn element(from: [f64; 3], to: [f64; 3], faces: &[FaceSpec]) -> Value {
+pub(crate) fn element(from: [f64; 3], to: [f64; 3], faces: &[FaceSpec]) -> Value {
     let mut map = Map::new();
     for (dir, uv, texture, cull) in faces {
         let mut face = json!({"texture": format!("#{texture}")});
@@ -314,7 +352,7 @@ fn element(from: [f64; 3], to: [f64; 3], faces: &[FaceSpec]) -> Value {
     json!({"from": from, "to": to, "faces": map})
 }
 
-fn template(elements: Vec<Value>, particle: &str, occlusion: bool) -> Value {
+pub(crate) fn template(elements: Vec<Value>, particle: &str, occlusion: bool) -> Value {
     let mut model = json!({
         "parent": "minecraft:block/open_base",
         "textures": {"particle": format!("#{particle}")},
@@ -555,7 +593,7 @@ pub fn templates() -> Vec<(&'static str, Value)> {
             ),
         ]
     };
-    vec![
+    let mut list = vec![
         (
             "fence_post",
             template(vec![post([6.0, 0.0, 6.0], [10.0, 16.0, 10.0], t)], t, true),
@@ -714,12 +752,20 @@ pub fn templates() -> Vec<(&'static str, Value)> {
         ("bars_side_alt", template(bars_side_alt, b, false)),
         ("bars_cap", template(cap(false), b, false)),
         ("bars_cap_alt", template(cap(true), b, false)),
-    ]
+    ];
+    list.extend(crate::openings::templates());
+    list
 }
 
 /// The templates each family's blocks have a child of, by suffix.
 fn parts(family: Family) -> &'static [(&'static str, &'static str)] {
     match family {
+        Family::Door
+        | Family::Trapdoor
+        | Family::OrientableTrapdoor
+        | Family::Button
+        | Family::Plate
+        | Family::WeightedPlate => &[],
         Family::Fence => &[
             ("_post", "fence_post"),
             ("_side", "fence_side"),
@@ -755,13 +801,16 @@ fn parts(family: Family) -> &'static [(&'static str, &'static str)] {
     }
 }
 
-fn tex(name: &str) -> String {
+pub(crate) fn tex(name: &str) -> String {
     format!("minecraft:block/{name}")
 }
 
 /// The block's models (children of the templates) and its block-state
 /// definition.
 pub fn models(block: &Block, family: Family) -> (Vec<(String, Value)>, Value) {
+    if family.opening() {
+        return crate::openings::models(block, family);
+    }
     let Faces::Connected { texture, edge } = block.faces else {
         unreachable!("{} has connected faces", block.id)
     };
@@ -775,6 +824,7 @@ pub fn models(block: &Block, family: Family) -> (Vec<(String, Value)>, Value) {
             "edge": {"sprite": tex(edge), "force_translucent": true},
         }),
         Family::Bars => json!({"bars": tex(texture), "edge": tex(edge)}),
+        _ => unreachable!("openings draw through crate::openings"),
     };
     let models = parts(family)
         .iter()
@@ -902,6 +952,7 @@ pub fn models(block: &Block, family: Family) -> (Vec<(String, Value)>, Value) {
             }
             json!({"multipart": list})
         }
+        _ => unreachable!("openings draw through crate::openings"),
     };
     (models, definition)
 }
@@ -912,7 +963,12 @@ pub fn item_model(block: &Block, family: Family) -> Option<String> {
     match family {
         Family::Fence | Family::Wall => Some(format!("minecraft:block/{}_inventory", block.id)),
         Family::Gate => Some(format!("minecraft:block/{}", block.id)),
-        Family::Pane | Family::Bars => None,
+        Family::Pane | Family::Bars | Family::Door => None,
+        Family::Trapdoor | Family::OrientableTrapdoor => {
+            Some(format!("minecraft:block/{}_bottom", block.id))
+        }
+        Family::Button => Some(format!("minecraft:block/{}", block.id)),
+        Family::Plate | Family::WeightedPlate => Some(format!("minecraft:block/{}", block.id)),
     }
 }
 

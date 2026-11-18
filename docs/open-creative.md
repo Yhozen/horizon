@@ -213,6 +213,13 @@ block naming its textures, and a multipart block state that draws a post and an 
 connection, as Minecraft's do. Fences and walls have an inventory model; panes and bars are flat
 items. The `fences`, `wooden_fences`, `walls`, `fence_gates` and `bars` tags list them.
 
+`data/blocks/openings.txt`, in the same format, lists the 22 doors, 22 trapdoors (11 whose
+texture turns with them), 15 buttons and 17 pressure plates; `openings.rs` gives them their
+shapes (a door swings to its hinge side, buttons and plates never collide, a pressed plate is
+half as thick) and their templates and variants. Doors are flat items, trapdoors, buttons and
+plates show their block model. The `doors`, `trapdoors`, `buttons` and `pressure_plates` tags
+list them, and their `wooden_` tags those an axe mines.
+
 ### Support blocks
 
 Every Minecraft block the bundle does not define is an inert support block: all of Minecraft's

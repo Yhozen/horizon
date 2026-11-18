@@ -340,6 +340,24 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
     tags.insert("walls".into(), names(&family(Family::Wall)));
     tags.insert("fence_gates".into(), names(&family(Family::Gate)));
     tags.insert("bars".into(), names(&family(Family::Bars)));
+    let doors = |b: &Block| family(Family::Door)(b);
+    let trapdoors =
+        |b: &Block| family(Family::Trapdoor)(b) || family(Family::OrientableTrapdoor)(b);
+    let buttons = |b: &Block| family(Family::Button)(b);
+    let plates = |b: &Block| family(Family::Plate)(b) || family(Family::WeightedPlate)(b);
+    let wooden = |b: &Block| b.mining.tool == Tool::Axe;
+    for (tag, filter) in [
+        ("doors", &doors as &dyn Fn(&Block) -> bool),
+        ("trapdoors", &trapdoors),
+        ("buttons", &buttons),
+        ("pressure_plates", &plates),
+    ] {
+        tags.insert(tag.into(), names(filter));
+        tags.insert(
+            format!("wooden_{tag}"),
+            names(&|b: &Block| filter(b) && wooden(b)),
+        );
+    }
     for empty in ["suppresses_bounce", "climbable", "fall_damage_resetting"] {
         tags.insert(empty.into(), Vec::new());
     }
