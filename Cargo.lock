@@ -1383,6 +1383,7 @@ dependencies = [
 name = "horizon-open-content"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "horizon-core",
  "horizon-protocol",
  "horizon-world",

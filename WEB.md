@@ -177,6 +177,7 @@ its `r2.dev` URL remain private, and Worker version preview URLs are disabled. T
 `X-Horizon-Asset-Cache` response header reports the internal entrypoint's cache status.
 
 The browser verifies SHA-256 and size before storing the WASM and resource archive in Cache Storage.
+A gzip archive (the open bundle's) is stored as downloaded and inflated (`inflateArchive`) before the game mounts it.
 Hashes depend on each file's bytes, independently: changing game code does not change the resource
 URL. Successful startup retains the current and previous release's browser entries. Quota failures
 fall back to normal downloads; clearing browser data or storage eviction can require downloading

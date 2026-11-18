@@ -563,10 +563,24 @@ pub fn verify(dir: &Path) -> Result<usize> {
     Ok(found.len())
 }
 
-/// The browser's data archive of the verified bundle at `dir` (WEB.md's
-/// format: per file a little-endian u32 path length, the path, a u32 data
-/// length and the data), files in path order.
+/// The browser's data archive of the verified bundle at `dir`: [`records`]
+/// compressed with gzip (the page inflates it before the game mounts it,
+/// `inflateArchive` in web/cache.js). The per-state tables repeat almost
+/// every row, so it is a few percent of the bundle's size.
 pub fn archive(dir: &Path) -> Result<Vec<u8>> {
+    use std::io::Write as _;
+    let records = records(dir)?;
+    let mut encoder = flate2::GzBuilder::new()
+        .mtime(0)
+        .write(Vec::new(), flate2::Compression::best());
+    encoder.write_all(&records).map_err(|e| e.to_string())?;
+    encoder.finish().map_err(|e| e.to_string())
+}
+
+/// The verified bundle at `dir` as one stream of records (WEB.md's format:
+/// per file a little-endian u32 path length, the path, a u32 data length and
+/// the data), files in path order.
+pub fn records(dir: &Path) -> Result<Vec<u8>> {
     verify(dir)?;
     let mut files = Vec::new();
     walk(dir, dir, &mut files)?;
@@ -753,8 +767,17 @@ mod tests {
         let _ = fs::remove_dir_all(&out);
         write(&a, &out).unwrap();
         assert_eq!(verify(&out).unwrap(), a.len());
-        let packed = archive(&out).unwrap();
-        assert_eq!(packed, archive(&out).unwrap());
+        let compressed = archive(&out).unwrap();
+        assert_eq!(compressed, archive(&out).unwrap());
+        // A gzip stream of the records.
+        assert_eq!(compressed[..2], [0x1f, 0x8b]);
+        let mut packed = Vec::new();
+        std::io::Read::read_to_end(
+            &mut flate2::read::GzDecoder::new(compressed.as_slice()),
+            &mut packed,
+        )
+        .unwrap();
+        assert_eq!(packed, records(&out).unwrap());
         // Every file is one record, in path order.
         let (mut at, mut paths) = (0usize, Vec::new());
         while at < packed.len() {

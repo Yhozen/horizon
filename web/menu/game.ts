@@ -2,7 +2,7 @@
 // game, its resources, then `start` on canvas#horizon. Ported from the pages' old
 // loaders; window.horizonStatus / horizonStarted / horizonError stay for the dev tools
 // (scripts/bench.mjs, scripts/test-multiplayer.mjs, tools/web/open_proof.sh).
-import { loadAsset, retainRelease } from "../cache.js";
+import { inflateArchive, loadAsset, retainRelease } from "../cache.js";
 import { validateRelease } from "../release.js";
 import type { Edition, WorldId } from "./edition.ts";
 
@@ -75,13 +75,14 @@ export async function* boot(edition: Edition, world: WorldId, name: string, cust
     yield step(2, edition.id === "open" ? "Loading the artwork" : "Loading resources");
     const report = (state: string) =>
       telemetry?.capture("resources_cache_resolved", { state, elapsed_ms: Math.round(performance.now()) });
-    const data: ArrayBuffer = await loadAsset(release.assets.resources, { report: report as () => void });
+    const data: ArrayBuffer = await inflateArchive(
+      await loadAsset(release.assets.resources, { report: report as () => void }));
     // The horizon world plays on the open bundle, which open.rccpr.tech's players share,
     // wearing this site's art where it has the same files (docs/open-creative.md).
     const overlaid = edition.id === "horizon" && world === "shared";
-    const shared: ArrayBuffer | undefined = overlaid ? await loadAsset(release.assets.sharedResources ?? (() => {
+    const shared: ArrayBuffer | undefined = overlaid ? await inflateArchive(await loadAsset(release.assets.sharedResources ?? (() => {
       throw new Error("This release can't join the Horizon world");
-    })()) : undefined;
+    })())) : undefined;
 
     const address = serverAddress(world, location);
     const args = gameArgs(edition, world, name, address, custom);
