@@ -23,6 +23,7 @@ pub mod lang;
 pub mod mobs;
 pub mod network;
 pub mod numbering;
+pub mod openings;
 pub mod screens;
 pub mod shapes;
 pub mod slabs;
@@ -824,16 +825,23 @@ mod tests {
         // defined here has content.
         let coverage = file(&bundle, coverage::PATH);
         let block = &coverage["registries"]["minecraft:block"];
-        let listed: Vec<&str> = block["content"]
+        // The shorter list is written: the names with content, or those
+        // without.
+        let (key, with) = match block.get("content") {
+            Some(_) => ("content", true),
+            None => ("missing", false),
+        };
+        let listed: Vec<&str> = block[key]
             .as_array()
             .unwrap()
             .iter()
             .map(|v| v.as_str().unwrap())
             .collect();
+        let has = |name: &str| listed.contains(&name) == with;
         for b in blocks::defined() {
-            assert!(listed.contains(&b.key().as_str()), "{}", b.id);
+            assert!(has(b.key().as_str()), "{}", b.id);
         }
-        assert!(listed.contains(&"minecraft:lava"));
+        assert!(has("minecraft:lava"));
         for (name, entry) in coverage["registries"].as_object().unwrap() {
             let one = entry.get("content").is_some() != entry.get("missing").is_some();
             assert!(one, "{name} lists exactly one of content and missing");

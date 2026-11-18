@@ -24,6 +24,11 @@ left out). Each line: the name, its class chain, destroy time, resistance, map c
 type, mining tool, needed level, whether it needs the tool, the family (`wall`, `fence`,
 `gate`, `pane`, `bars`) and its texture names (the main one, then the edge for panes and bars).
 
+And `data/blocks/openings.txt`, in the same format: the doors, trapdoors, buttons and pressure
+plates (classes `DoorBlock`, `TrapDoorBlock`, `ButtonBlock`, `PressurePlateBlock`,
+`WeightedPressurePlateBlock`), families `door` (textures: top, bottom), `trapdoor`,
+`orientable_trapdoor` (its texture turns with `facing`), `button`, `plate` and `weighted_plate`.
+
 Only numbers and identifiers are written: no texture, model or other Mojang file.
 
     python3 tools/open_block_facts.py [--resources DIR] [--check]
@@ -38,6 +43,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "crates" / "horizon-open-content" / "data" / "blocks" / "cubes.txt"
 CONNECTED = OUT.with_name("connected.txt")
+OPENINGS = OUT.with_name("openings.txt")
 RESOURCES = ROOT / ".local" / "horizon-client" / "26.3"
 FURNACES = ("furnace", "blast_furnace", "smoker")
 FACES = ("down", "up", "north", "south", "west", "east")
@@ -50,6 +56,11 @@ FAMILIES = (("WallBlock", "wall", "template_wall_post", ("wall",)),
             ("FenceGateBlock", "gate", "template_fence_gate", ("texture",)),
             ("FenceBlock", "fence", "fence_post", ("texture",)),
             ("IronBarsBlock", None, None, None))
+OPENING_FAMILIES = (("DoorBlock", "door", "door_bottom_left", ("top", "bottom")),
+                    ("TrapDoorBlock", "trapdoor", "template_trapdoor_bottom", ("texture",)),
+                    ("ButtonBlock", "button", "button", ("texture",)),
+                    ("WeightedPressurePlateBlock", "weighted_plate", "pressure_plate_up", ("texture",)),
+                    ("PressurePlateBlock", "plate", "pressure_plate_up", ("texture",)))
 HEADER = ("name", "classes", "hardness", "resistance", "emission", "lit_emission", "opacity",
           "friction", "map_color", "sound", "tool", "needs", "requires_tool", "layout") + FACES + ("lit_north",)
 
@@ -133,11 +144,16 @@ def sound_kind(name, sound):
     return kind
 
 
-def first_model(models, block):
+def all_models(models, block):
+    """Every model a block state definition names, in its order."""
     state = json.loads((models.root / "blockstates" / f"{block}.json").read_text())
-    part = state["multipart"][0] if "multipart" in state else next(iter(state["variants"].values()))
-    part = part.get("apply", part)
-    return (part[0] if isinstance(part, list) else part)["model"]
+    parts = [p["apply"] for p in state["multipart"]] if "multipart" in state else state["variants"].values()
+    out = []
+    for part in parts:
+        model = (part[0] if isinstance(part, list) else part)["model"]
+        if model not in out:
+            out.append(model)
+    return out
 
 
 def sprite(value):
@@ -146,7 +162,7 @@ def sprite(value):
     return strip(value).removeprefix("block/")
 
 
-def connected_rows(resources):
+def connected_rows(resources, families=FAMILIES):
     behaviours = json.loads((resources / "block-behaviours.json").read_text())
     names = [row[0] for row in json.loads((resources / "facts.json").read_text())["states"]]
     gameplay = json.loads((resources / "gameplay-facts.json").read_text())["states"]
@@ -167,11 +183,11 @@ def connected_rows(resources):
     for block in behaviours["blocks"]:
         name, classes = block["name"], block["class"]
         short = strip(name)
-        family = next((f for f in FAMILIES if f[0] in classes), None)
+        family = next((f for f in families if f[0] in classes), None)
         if family is None:
             continue
-        model = first_model(models, short)
-        chain = models.parents(model)
+        names = all_models(models, short)
+        chain = [parent for model in names for parent in models.parents(model)]
         if family[1] is None:
             kind = "bars" if "template_bars_post_ends" in chain else "pane"
             if kind == "pane" and "template_glass_pane_post" not in chain:
@@ -179,11 +195,14 @@ def connected_rows(resources):
             variables = ("bars", "edge") if kind == "bars" else ("pane", "edge")
         else:
             kind, template, variables = family[1:]
+            if kind == "trapdoor" and "template_orientable_trapdoor_bottom" in chain:
+                kind, template = "orientable_trapdoor", "template_orientable_trapdoor_bottom"
             if template not in chain:
                 continue  # its own templates (bamboo)
         textures = {}
-        for parent in reversed(chain):
-            textures.update(models.load(f"block/{parent}").get("textures", {}))
+        for model in names:
+            for parent in reversed(models.parents(model)):
+                textures.update(models.load(f"block/{parent}").get("textures", {}))
         facts = gameplay[first[name]]
         out.append((
             short, ",".join(classes), number(facts["hardness"]), number(facts["explosion_resistance"]),
@@ -263,6 +282,7 @@ def main():
     files = (
         (OUT, [HEADER, *rows(args.resources)]),
         (CONNECTED, [CONNECTED_HEADER, *connected_rows(args.resources)]),
+        (OPENINGS, [CONNECTED_HEADER, *connected_rows(args.resources, OPENING_FAMILIES)]),
     )
     for out, lines in files:
         text = "".join("\t".join(row) + "\n" for row in lines)
