@@ -630,7 +630,7 @@ mod tests {
             .iter()
             .map(|t| (t.stage, t.sampler.as_str(), t.path.as_str()))
             .collect();
-        assert_eq!(t.len(), 7);
+        assert_eq!(t.len(), 5);
         assert_eq!(
             t[0],
             (
@@ -643,9 +643,10 @@ mod tests {
             t[1],
             (TextureStage::Composite, "colortex3", "shaders/tex/b.dat")
         );
-        assert_eq!(t[2], (TextureStage::Gbuffers, "noisetex", "shaders/n.png"));
+        assert_eq!(t[2], (TextureStage::Prepare, "colortex3", "shaders/c.png"));
+        assert_eq!(t[3], (TextureStage::All, "noisetex", "shaders/n.png"));
         assert_eq!(
-            t[6],
+            t[4],
             (TextureStage::Deferred, "shadowcolor0", "shaders/f.png")
         );
         assert_eq!(

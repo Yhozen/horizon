@@ -76,6 +76,7 @@ void hz_pack_main() {
             "hz_gl_FogFragCoord",
         ]),
         sample_calls: set(&["hz_sample_gtexture", "hz_sample_lightmap", "hz_fetch_lightmap", "hz_size_lightmap"]),
+        ..Default::default()
     };
     // The fragment stage skips `level`; `weights` has an array.
     varyings.retain(|v| v.name != "level");
@@ -524,6 +525,7 @@ fn entity_geometry_reads_horizon_s_entity_vertex() {
         stage: crate::plan::TextureStage::Gbuffers,
         sampler: "colortex4".into(),
         path: "shaders/textures/a.png".into(),
+        ..Default::default()
     });
     plan.buffers[2].format = crate::plan::BufferFormat::Rgba16F;
     let (out, vs, fs) = run(ProgramKind::Entities, &plan, &[0, 2], &entity_program());
@@ -558,6 +560,8 @@ fn entity_geometry_reads_horizon_s_entity_vertex() {
             binding: 6,
             source: TextureSource::Custom(0),
             sampler: SamplerKind::PointRepeat,
+            dimension: crate::TexDim::D2,
+            sample: crate::SampleKind::Float,
             vertex: false,
             fragment: true,
         }]
@@ -623,6 +627,7 @@ fn sampling_kinds_follow_the_plan() {
         stage: crate::plan::TextureStage::Composite,
         sampler: "colortex4".into(),
         path: "shaders/textures/a.png".into(),
+        ..Default::default()
     });
     let calls = [
         "hz_shadow_shadow",
@@ -656,7 +661,7 @@ fn sampling_kinds_follow_the_plan() {
     assert_eq!(
         got,
         vec![
-            (2, Buffer(0), SamplerKind::Linear),
+            // `mysteryTexture` reads a 1×1 default, not colortex0.
             (3, Buffer(1), SamplerKind::Point),
             (4, Buffer(2), SamplerKind::Linear),
             // An earlier composite wrote colortex4: the custom texture no longer applies.

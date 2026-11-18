@@ -544,3 +544,65 @@ fn dfdy_is_negated_in_fragment_shaders() {
     let vs = "void main() { gl_Position = vec4(0.0); }\n";
     assert!(!rewrite(vs, Stage::Vertex).unwrap().body.contains("hz_dFdy"));
 }
+
+#[test]
+fn sampler_types_and_tagged_calls() {
+    let src = "uniform sampler3D vol;\nuniform usampler2D ids;\nuniform sampler2DShadow sh;\nuniform samplerCube sky;\n\
+               void main() {\n    vec4 a = texture3D(vol, vec3(0.5)) + texelFetchOffset(vol, ivec3(1), 0, ivec3(1));\n    \
+               uvec4 b = texture(ids, vec2(0.5));\n    float s = texture(sh, vec3(0.5));\n    \
+               vec4 t = shadow2D(sh, vec3(0.5));\n    float u = texture(sh, vec3(0.5)).x;\n}\n";
+    let out = rewrite(src, Stage::Fragment).unwrap();
+    assert_eq!(out.sampler_types["vol"], "sampler3D");
+    assert_eq!(out.sampler_types["sky"], "samplerCube");
+    assert_eq!(
+        out.sample_calls,
+        set(&[
+            "hz_fetch_3_vol",
+            "hz_sample_2u_ids",
+            "hz_sample_3_vol",
+            "hz_shadow_sh"
+        ])
+    );
+    // The fetch offset is added to the coordinate; modern shadow reads are scalars.
+    assert!(
+        out.body
+            .contains("hz_fetch_3_vol((( ivec3(1)) + ( ivec3(1))), 0)"),
+        "{}",
+        out.body
+    );
+    assert!(
+        out.body.contains("float s = hz_shadow_sh( vec3(0.5)).x;"),
+        "{}",
+        out.body
+    );
+    assert!(
+        out.body.contains("vec4 t = hz_shadow_sh( vec3(0.5));"),
+        "{}",
+        out.body
+    );
+    assert!(
+        out.body.contains("float u = hz_shadow_sh( vec3(0.5)).x;"),
+        "{}",
+        out.body
+    );
+    let parsed = crate::host::parse_sampling_call("hz_sample_2u_ids").unwrap();
+    assert_eq!(
+        (parsed.op, parsed.dim, parsed.sample, parsed.name),
+        (
+            "hz_sample_",
+            crate::TexDim::D2,
+            crate::SampleKind::Uint,
+            "ids"
+        )
+    );
+}
+
+#[test]
+fn a_plain_overload_beside_a_sampler_one() {
+    let src = "uniform sampler2D colortex9;\nvec3 f(vec3 p, bool lod) { return p; }\n\
+               vec3 f(vec3 p, sampler2D v) { return texelFetch(v, ivec2(p.xy), 0).xyz + f(p, false); }\n\
+               void main() { gl_FragData[0] = vec4(f(vec3(0.5), colortex9) + f(vec3(0.5), true), 1.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(rw.body.contains("f_hz_colortex9("), "{}", rw.body);
+    assert!(rw.body.contains("f(vec3(0.5), true)"), "{}", rw.body);
+}

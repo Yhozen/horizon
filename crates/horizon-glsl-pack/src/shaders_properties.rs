@@ -155,6 +155,8 @@ pub fn shaders_properties(
             }
         }
     }
+    // Every stage, custom names, raw and resource textures, `.mcmeta` flags.
+    out.textures = crate::textures::custom_textures(&out.entries, files);
     Ok(out)
 }
 
@@ -256,6 +258,7 @@ fn texture(stage: TextureStage, sampler: &str, value: &str) -> CustomTexture {
         stage,
         sampler: canonical_sampler(sampler),
         path: format!("shaders/{path}"),
+        ..CustomTexture::default()
     }
 }
 

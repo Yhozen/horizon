@@ -94,6 +94,9 @@ impl Ctx<'_> {
                 self.sampler_shadow
                     .insert(name.into(), ty.ends_with("Shadow"));
                 self.out.samplers.insert(emit::sampler_alias(name).into());
+                self.out
+                    .sampler_types
+                    .insert(emit::sampler_alias(name).into(), ty.into());
             }
             "uniform" if len.is_some() => return Err(format!("uniform array `{name}`")),
             "uniform" => self.out.uniforms.push(Uniform {

@@ -44,6 +44,8 @@ pub struct Rewritten {
     pub builtins: BTreeSet<String>,
     /// Calls the body makes to host sampling functions, e.g. `hz_sample_gtexture`.
     pub sample_calls: BTreeSet<String>,
+    /// Each declared sampler's full GLSL type (`sampler2D`, `usampler3D`…), by name.
+    pub sampler_types: BTreeMap<String, String>,
 }
 
 /// Compatibility-profile built-ins the host provides as plain globals named `hz_` + name.

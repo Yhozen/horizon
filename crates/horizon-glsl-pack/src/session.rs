@@ -819,6 +819,7 @@ fn compile_program(
         fragment: fs_glsl,
         textures,
         unknown_uniforms,
+        notes,
     } = host::program_sources(&vertex, &fragment, &spec).map_err(|m| PackError::new(program, m))?;
     let vertex_wgsl = naga_out::glsl_to_wgsl(&vs_glsl, Stage::Vertex)
         .map_err(|m| PackError::new(&vsh_path, m))?;
@@ -839,5 +840,6 @@ fn compile_program(
         samplers,
         textures,
         unknown_uniforms,
+        notes,
     })
 }

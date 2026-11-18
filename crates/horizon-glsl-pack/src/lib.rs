@@ -29,6 +29,7 @@ pub mod schedule;
 pub mod screens;
 pub mod session;
 pub mod shaders_properties;
+pub mod textures;
 pub mod types;
 pub mod uniforms;
 

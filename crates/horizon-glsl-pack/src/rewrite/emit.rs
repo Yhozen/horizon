@@ -1,6 +1,7 @@
 //! Copying the body with renames and the sampling rewrites.
 
 use super::*;
+use crate::host;
 
 impl Ctx<'_> {
     pub(super) fn next_sig(&self, mut i: usize, end: usize) -> Option<usize> {
@@ -156,53 +157,242 @@ impl Ctx<'_> {
             [k] => self.text(k).to_string(),
             _ => return Ok(None),
         };
-        let Some(&shadow) = self.sampler_shadow.get(&sampler) else {
+        let Some(&declared_shadow) = self.sampler_shadow.get(&sampler) else {
             return Ok(None);
         };
-        let n = args.len();
-        let (prefix, keep) = match name {
-            "texture" | "texture2D" if shadow && (2..=3).contains(&n) => ("hz_shadow_", 1..2),
-            "texture2D" | "texture" if n == 2 => ("hz_sample_", 1..2),
-            "texture2D" | "texture" if n == 3 => ("hz_sampleBias_", 1..3),
-            "texture2DProj" | "textureProj" if !shadow && (2..=3).contains(&n) => {
-                ("hz_sample_", 1..2)
-            }
-            "texture2DLod" | "textureLod" if n == 3 => ("hz_sampleLod_", 1..3),
-            "texture2DGrad" | "texture2DGradARB" | "textureGrad" if n == 4 => {
-                ("hz_sampleGrad_", 1..4)
-            }
-            "shadow2D" if (2..=3).contains(&n) => ("hz_shadow_", 1..2),
-            "shadow2DLod" if n == 3 => ("hz_shadowLod_", 1..3),
-            "texelFetch" | "texelFetch2D" if n == 3 => ("hz_fetch_", 1..3),
-            "textureSize" | "textureSize2D" if n == 2 => ("hz_size_", 1..2),
-            // A sampler handed to a pack function (or an unknown sampling call) has no host form.
-            _ => return Err(format!("sampler `{sampler}` passed to `{name}`")),
+        let alias = sampler_alias(&sampler).to_string();
+        let ty = self
+            .out
+            .sampler_types
+            .get(&alias)
+            .cloned()
+            .unwrap_or_else(|| "sampler2D".into());
+        let (dim, sample) = host::sampler_type(&ty)
+            .ok_or_else(|| format!("`{ty} {sampler}` is not supported (sampled with `{name}`)"))?;
+        // A sampler handed to a pack function (or an unknown sampling call) has no host form.
+        let passed = || format!("sampler `{sampler}` passed to `{name}`");
+        let form = CallForm::parse(name).ok_or_else(passed)?;
+        let named_dim = if name.contains("3D") {
+            Some(crate::TexDim::D3)
+        } else if name.contains("2D") {
+            Some(crate::TexDim::D2)
+        } else {
+            None
         };
-        let func = format!("{prefix}{}", sampler_alias(&sampler));
-        out.push_str(&func);
-        // The projective forms divide by the last component, a vec3's z or a vec4's w.
-        let proj = name.ends_with("Proj");
-        if proj {
+        if named_dim.is_some_and(|d| d != dim) {
+            return Err(format!("{} (a `{ty}`)", passed()));
+        }
+        let shadow = declared_shadow || form.legacy_shadow;
+        let n = args.len();
+        // Arguments after the coordinate, before the offset.
+        let core = match form.op {
+            Op::Implicit | Op::QueryLod => 0,
+            Op::Lod | Op::Fetch => 1,
+            Op::Grad => 2,
+            Op::Gather => usize::from(shadow),
+            Op::Size => {
+                if n > 2 {
+                    return Err(passed());
+                }
+                let call = host::sampling_call("hz_size_", dim, sample, &alias);
+                out.push_str(&call);
+                out.push('(');
+                match args.get(1) {
+                    Some(&(a, b)) => self.emit(a, b, out)?,
+                    None => out.push('0'),
+                }
+                out.push(')');
+                self.out.sample_calls.insert(call);
+                return Ok(Some(after));
+            }
+        };
+        let fixed = 2 + core + usize::from(form.offset);
+        // texture(s, P[, bias]), textureGather(s, P[, comp]).
+        let optional = matches!(form.op, Op::Implicit) || (form.op == Op::Gather && !shadow);
+        if n != fixed && !(optional && n == fixed + 1) {
+            return Err(format!("`{name}` on `{sampler}` with {} arguments", n - 1));
+        }
+        let mut text = Vec::new();
+        for &(a, b) in &args[1..] {
+            let mut s = String::new();
+            self.emit(a, b, &mut s)?;
+            text.push(s);
+        }
+        let mut coord = text[0].clone();
+        let d3 = dim == crate::TexDim::D3;
+        if form.proj {
+            // The projective forms divide by the last component.
             self.prelude.insert(
                 "vec2 hz_proj(vec3 p) { return p.xy / p.z; }\n\
-                 vec2 hz_proj(vec4 p) { return p.xy / p.w; }"
+                 vec2 hz_proj(vec4 p) { return p.xy / p.w; }\n\
+                 vec3 hz_proj3(vec4 p) { return p.xyz / p.w; }"
                     .into(),
             );
-            out.push_str("(hz_proj");
+            let f = if shadow || d3 { "hz_proj3" } else { "hz_proj" };
+            coord = format!("{f}({coord})");
         }
-        out.push('(');
-        for (n, &(a, b)) in args[keep].iter().enumerate() {
-            if n > 0 {
-                out.push(',');
+        if form.offset {
+            // WGSL wants constant offsets: the offset moves the coordinate by whole texels
+            // of level 0 instead (exact for fetches, and at level 0).
+            let off = &text[1 + core];
+            if form.op == Op::Fetch {
+                coord = format!("(({coord}) + ({off}))");
+            } else {
+                let size = host::sampling_call("hz_size_", dim, sample, &alias);
+                self.out.sample_calls.insert(size.clone());
+                self.prelude.insert(
+                    "vec2 hz_off(vec2 p, ivec2 o, ivec2 s) { return p + vec2(o) / vec2(s); }\n\
+                     vec3 hz_off(vec3 p, ivec3 o, ivec3 s) { return p + vec3(o) / vec3(s); }\n\
+                     vec3 hz_off_shadow(vec3 p, ivec2 o, ivec2 s) \
+                     { return vec3(p.xy + vec2(o) / vec2(s), p.z); }\n\
+                     vec4 hz_off_shadow(vec4 p, ivec2 o, ivec2 s) \
+                     { return vec4(p.xy + vec2(o) / vec2(s) * p.w, p.zw); }"
+                        .into(),
+                );
+                let f = if shadow && form.op != Op::Gather {
+                    "hz_off_shadow"
+                } else {
+                    "hz_off"
+                };
+                coord = format!("{f}({coord}, {off}, {size}(0))");
             }
-            self.emit(a, b, out)?;
         }
+        let extra: Vec<&str> = text[1..1 + core].iter().map(String::as_str).collect();
+        let trailing = text.get(fixed - 1).map(String::as_str);
+        // Modern names on shadow samplers return a float, the GLSL 120 ones a vec4.
+        // A swizzle after it (`texture(shadowtex0, p).x`, accepted by many drivers) reads the
+        // vec4 instead, whose channels are all the result.
+        let swizzled = self
+            .next_sig(after, end)
+            .is_some_and(|k| self.text(k) == ".");
+        let scalar = shadow && !form.legacy_shadow && !name.starts_with("texture2D") && !swizzled;
+        let (op, args, wrap): (&str, Vec<String>, Option<String>) = match (form.op, shadow) {
+            (Op::Implicit | Op::Grad, true) => ("hz_shadow_", vec![coord], None),
+            (Op::Lod, true) => ("hz_shadowLod_", vec![coord, extra[0].into()], None),
+            (Op::Gather, true) => (
+                "hz_gather_",
+                vec![coord, "0".into()],
+                // GL's LEQUAL per texel: 1 where the reference is not behind.
+                Some(format!("step(vec4({}), ", extra[0])),
+            ),
+            (Op::Implicit, false) => match trailing {
+                Some(bias) => ("hz_sampleBias_", vec![coord, bias.into()], None),
+                None => ("hz_sample_", vec![coord], None),
+            },
+            (Op::Lod, false) => ("hz_sampleLod_", vec![coord, extra[0].into()], None),
+            (Op::Grad, false) => (
+                "hz_sampleGrad_",
+                vec![coord, extra[0].into(), extra[1].into()],
+                None,
+            ),
+            (Op::Fetch, _) => ("hz_fetch_", vec![coord, extra[0].into()], None),
+            (Op::Gather, false) => (
+                "hz_gather_",
+                vec![coord, trailing.unwrap_or("0").into()],
+                None,
+            ),
+            (Op::QueryLod, _) => ("hz_queryLod_", vec![coord], None),
+            (Op::Size, _) => unreachable!(),
+        };
+        if d3 && matches!(op, "hz_gather_" | "hz_shadow_" | "hz_shadowLod_") {
+            return Err(format!("`{name}` on the 3D sampler `{sampler}`"));
+        }
+        let func = host::sampling_call(op, dim, sample, &alias);
+        if let Some(w) = &wrap {
+            out.push_str(w);
+        }
+        out.push_str(&func);
+        out.push('(');
+        out.push_str(&args.join(","));
         out.push(')');
-        if proj {
+        if wrap.is_some() {
             out.push(')');
+        }
+        if scalar && op.starts_with("hz_shadow") {
+            out.push_str(".x");
         }
         self.out.sample_calls.insert(func);
         Ok(Some(after))
+    }
+}
+
+/// What a GLSL sampling function does, from its name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Op {
+    /// `texture`, `texture2D`…: the level from derivatives (and an optional bias).
+    Implicit,
+    Lod,
+    Grad,
+    Fetch,
+    Size,
+    Gather,
+    QueryLod,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CallForm {
+    op: Op,
+    /// `…Proj…`: the coordinate is divided by its last component.
+    proj: bool,
+    /// `…Offset`: an integer texel offset follows the core arguments.
+    offset: bool,
+    /// `shadow2D…`: a comparison returning a `vec4`.
+    legacy_shadow: bool,
+}
+
+impl CallForm {
+    /// `texture2DProjLod` → Lod + proj; `textureGatherOffset` → Gather + offset…
+    fn parse(name: &str) -> Option<Self> {
+        let mut f = CallForm {
+            op: Op::Implicit,
+            proj: false,
+            offset: false,
+            legacy_shadow: false,
+        };
+        let strip = |rest: &mut &str, word: &str| {
+            let found = rest.strip_prefix(word);
+            if let Some(r) = found {
+                *rest = r;
+            }
+            found.is_some()
+        };
+        let mut rest;
+        if let Some(r) = name.strip_prefix("shadow2D") {
+            rest = r;
+            f.legacy_shadow = true;
+            f.proj = strip(&mut rest, "Proj");
+            if strip(&mut rest, "Lod") {
+                f.op = Op::Lod;
+            }
+        } else if let Some(r) = name.strip_prefix("texelFetch") {
+            rest = r;
+            f.op = Op::Fetch;
+            let _ = strip(&mut rest, "2D") || strip(&mut rest, "3D");
+            f.offset = strip(&mut rest, "Offset");
+        } else if let Some(r) = name.strip_prefix("textureSize") {
+            rest = r;
+            f.op = Op::Size;
+            let _ = strip(&mut rest, "2D") || strip(&mut rest, "3D");
+        } else if let Some(r) = name.strip_prefix("textureQueryLod") {
+            rest = r;
+            f.op = Op::QueryLod;
+        } else if let Some(r) = name.strip_prefix("textureGather") {
+            rest = r;
+            f.op = Op::Gather;
+            f.offset = strip(&mut rest, "Offset");
+        } else {
+            rest = name.strip_prefix("texture")?;
+            let _ = strip(&mut rest, "2D") || strip(&mut rest, "3D");
+            f.proj = strip(&mut rest, "Proj");
+            if strip(&mut rest, "Lod") {
+                f.op = Op::Lod;
+            } else if strip(&mut rest, "Grad") {
+                f.op = Op::Grad;
+            }
+            f.offset = strip(&mut rest, "Offset");
+        }
+        let _ = strip(&mut rest, "ARB") || strip(&mut rest, "EXT");
+        rest.is_empty().then_some(f)
     }
 }
 
