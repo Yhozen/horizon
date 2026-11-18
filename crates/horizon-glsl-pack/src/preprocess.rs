@@ -41,74 +41,8 @@ pub const RENDER_STAGES: [&str; 24] = [
 ];
 
 /// The vanilla biomes, alphabetical: `BIOME_<NAME>` is the index, and the
-/// `biome` uniform must use the same numbers.
-pub const BIOMES: [&str; 65] = [
-    "badlands",
-    "bamboo_jungle",
-    "basalt_deltas",
-    "beach",
-    "birch_forest",
-    "cherry_grove",
-    "cold_ocean",
-    "crimson_forest",
-    "dark_forest",
-    "deep_cold_ocean",
-    "deep_dark",
-    "deep_frozen_ocean",
-    "deep_lukewarm_ocean",
-    "deep_ocean",
-    "desert",
-    "dripstone_caves",
-    "end_barrens",
-    "end_highlands",
-    "end_midlands",
-    "eroded_badlands",
-    "flower_forest",
-    "forest",
-    "frozen_ocean",
-    "frozen_peaks",
-    "frozen_river",
-    "grove",
-    "ice_spikes",
-    "jagged_peaks",
-    "jungle",
-    "lukewarm_ocean",
-    "lush_caves",
-    "mangrove_swamp",
-    "meadow",
-    "mushroom_fields",
-    "nether_wastes",
-    "ocean",
-    "old_growth_birch_forest",
-    "old_growth_pine_taiga",
-    "old_growth_spruce_taiga",
-    "pale_garden",
-    "plains",
-    "river",
-    "savanna",
-    "savanna_plateau",
-    "small_end_islands",
-    "snowy_beach",
-    "snowy_plains",
-    "snowy_slopes",
-    "snowy_taiga",
-    "soul_sand_valley",
-    "sparse_jungle",
-    "stony_peaks",
-    "stony_shore",
-    "sunflower_plains",
-    "swamp",
-    "taiga",
-    "the_end",
-    "the_void",
-    "warm_ocean",
-    "warped_forest",
-    "windswept_forest",
-    "windswept_gravelly_hills",
-    "windswept_hills",
-    "windswept_savanna",
-    "wooded_badlands",
-];
+/// `biome` uniform uses the same numbers (one table, in `custom_uniforms`).
+pub use crate::custom_uniforms::BIOMES;
 
 /// Biome categories (`CAT_<NAME>`), numbered in the docs' order from `NONE` = 0
 /// (the `biome_category` uniform).
@@ -166,7 +100,7 @@ pub fn predefined(mc_version: u32) -> BTreeMap<String, String> {
     .collect();
     let numbered = [
         ("MC_RENDER_STAGE_", &RENDER_STAGES[..], false),
-        ("BIOME_", &BIOMES[..], true),
+        ("BIOME_", BIOMES, true),
         ("CAT_", &BIOME_CATEGORIES[..], false),
     ];
     for (prefix, names, upper) in numbered {
@@ -638,8 +572,8 @@ mod tests {
                     MC_RENDER_STAGE_NONE MC_RENDER_STAGE_SUN BIOME_BADLANDS BIOME_PLAINS CAT_NETHER PPT_SNOW";
         let out = pp(text);
         let words: Vec<&str> = out.split_whitespace().collect();
-        assert_eq!(words, ["I", "0", "4", "0", "40", "16", "2"]);
-        assert_eq!(BIOMES[40], "plains");
+        assert_eq!(words, ["I", "0", "4", "0", "41", "16", "2"]);
+        assert_eq!(BIOMES[41], "plains");
     }
 
     #[test]
