@@ -28,7 +28,7 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | `events [--since SEQ]` | `events` | What happened since SEQ, oldest first: screens, chat, deaths, respawns, items gained or lost, dimensions, worlds | `--since` (integer): only events after this seq |
 | `state` | `state` | Player, world, screen and crosshair target in one reply | none |
 | `looking-at` | `looking_at` | The block or entity under the crosshair | none |
-| `entities [RADIUS] [TYPE]` | `entities` | Mobs, dropped items and experience orbs near the player, nearest first | `radius` (number): search radius in blocks (default 32)<br>`type` (string): entity type filter |
+| `entities [RADIUS] [TYPE]` | `entities` | Mobs, dropped items, experience orbs and other entities near the player, nearest first | `radius` (number): search radius in blocks (default 32)<br>`type` (string): entity type filter |
 | `block X Y Z` | `block` | The block state at a position | `x` (integer, required): block X<br>`y` (integer, required): block Y<br>`z` (integer, required): block Z |
 | `light X1 Y1 Z1 X2 Y2 Z2` | `light` | The stored sky and block light of a box | `x1` (integer, required): corner X<br>`y1` (integer, required): corner Y<br>`z1` (integer, required): corner Z<br>`x2` (integer, required): opposite X<br>`y2` (integer, required): opposite Y<br>`z2` (integer, required): opposite Z |
 | `blocks X1 Y1 Z1 X2 Y2 Z2` | `blocks` | The non-air blocks of a box, with counts per block | `x1` (integer, required): corner X<br>`y1` (integer, required): corner Y<br>`z1` (integer, required): corner Z<br>`x2` (integer, required): opposite X<br>`y2` (integer, required): opposite Y<br>`z2` (integer, required): opposite Z |
