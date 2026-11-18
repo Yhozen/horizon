@@ -636,3 +636,10 @@ fn entity_atlas_and_lightmap_forms() {
     .unwrap();
     assert!(pack.programs[&ProgramKind::Entities].textures.is_empty());
 }
+
+#[test]
+fn integer_levels_and_biases() {
+    let decls = "uniform sampler2D colortex1;\nuniform sampler2DShadow shadowtex0;";
+    let body = "    c += textureLod(colortex1, uv, 0) + texture(colortex1, uv, 1) + vec4(textureLod(shadowtex0, vec3(uv, 0.5), 0));";
+    deferred(&sampling_pack(decls, body, "", &[])).unwrap();
+}

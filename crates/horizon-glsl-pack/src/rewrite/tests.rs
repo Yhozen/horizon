@@ -596,3 +596,13 @@ fn sampler_types_and_tagged_calls() {
         )
     );
 }
+
+#[test]
+fn a_plain_overload_beside_a_sampler_one() {
+    let src = "uniform sampler2D colortex9;\nvec3 f(vec3 p, bool lod) { return p; }\n\
+               vec3 f(vec3 p, sampler2D v) { return texelFetch(v, ivec2(p.xy), 0).xyz + f(p, false); }\n\
+               void main() { gl_FragData[0] = vec4(f(vec3(0.5), colortex9) + f(vec3(0.5), true), 1.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(rw.body.contains("f_hz_colortex9("), "{}", rw.body);
+    assert!(rw.body.contains("f(vec3(0.5), true)"), "{}", rw.body);
+}

@@ -647,6 +647,29 @@ pub(super) fn sampling(
             }
         };
         writeln!(functions, "{signature} {{\n    {body}\n}}").unwrap();
+        // GLSL converts an `int` level or bias implicitly; naga needs the overload.
+        if let Some(head) = signature
+            .strip_suffix(", float lod)")
+            .or_else(|| signature.strip_suffix(", float bias)"))
+        {
+            let ret = if signature.starts_with("void") {
+                ""
+            } else {
+                "return "
+            };
+            let arg = if signature.ends_with("lod)") {
+                "lod"
+            } else {
+                "bias"
+            };
+            let first = head.rsplit_once('(').map_or("", |(_, a)| a);
+            let first = first.split_whitespace().last().unwrap_or("uv");
+            writeln!(
+                functions,
+                "{head}, int {arg}) {{\n    {ret}{call}({first}, float({arg}));\n}}"
+            )
+            .unwrap();
+        }
     }
     let own = horizon_textures(spec);
     let total = entries.len() as u32 + own;

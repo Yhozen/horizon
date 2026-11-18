@@ -62,6 +62,9 @@ struct Mono<'a> {
     /// Samplers declared by `uniform sampler… name;` at the top level.
     globals: BTreeSet<String>,
     generics: BTreeMap<String, Vec<Generic>>,
+    /// Functions defined with no sampler parameter: a call to an overloaded
+    /// name whose sampler position holds no sampler is one of these.
+    plain: BTreeSet<String>,
 }
 
 impl Mono<'_> {
@@ -210,8 +213,20 @@ impl Mono<'_> {
                             t.text
                         ));
                     }
+                    // `f(x, false)` beside `f(vec3, sampler2D)`: the plain overload.
+                    let plain_call = self.plain.contains(t.text)
+                        && positions.iter().any(|&k| {
+                            let words = self.sig(args[k].0, args[k].1);
+                            !matches!(words[..], [w] if {
+                                let arg = self.text(w);
+                                self.globals.contains(subst.get(arg).copied().unwrap_or(arg))
+                            })
+                        });
                     let mut samplers = Vec::new();
                     for &k in &positions {
+                        if plain_call {
+                            break;
+                        }
                         let words = self.sig(args[k].0, args[k].1);
                         let arg = match words[..] {
                             [w] if self.toks[w].kind == Kind::Ident => self.text(w),
@@ -231,6 +246,10 @@ impl Mono<'_> {
                             ));
                         }
                         samplers.push(global.to_string());
+                    }
+                    if plain_call {
+                        out.push_str(t.text);
+                        continue;
                     }
                     let key = (t.text.to_string(), n, samplers);
                     out.push_str(&clone_name(&key));
@@ -303,6 +322,7 @@ pub(super) fn monomorphise(src: &str) -> Result<Option<String>, String> {
         toks,
         globals: BTreeSet::new(),
         generics: BTreeMap::new(),
+        plain: BTreeSet::new(),
     };
     let mut generic_items = BTreeSet::new();
     for &item in &items {
@@ -324,6 +344,12 @@ pub(super) fn monomorphise(src: &str) -> Result<Option<String>, String> {
             generic_items.insert(item.0);
             let name = mono.text(g.name_tok).to_string();
             mono.generics.entry(name).or_default().push(g);
+        } else if let Some(p) = words.iter().position(|w| *w == "(")
+            && p >= 2
+            && words.contains(&"{")
+            && !words[..p].iter().any(|w| matches!(*w, "=" | "struct"))
+        {
+            mono.plain.insert(words[p - 1].to_string());
         }
     }
     if mono.generics.is_empty() {
