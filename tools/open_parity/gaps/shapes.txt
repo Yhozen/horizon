@@ -508,9 +508,6 @@ minecraft:acacia_wall_sign[facing=south,waterlogged=false]
 minecraft:acacia_wall_sign[facing=south,waterlogged=true]
 minecraft:acacia_wall_sign[facing=west,waterlogged=false]
 minecraft:acacia_wall_sign[facing=west,waterlogged=true]
-minecraft:acacia_wood[axis=x]
-minecraft:acacia_wood[axis=y]
-minecraft:acacia_wood[axis=z]
 minecraft:activator_rail[powered=false,shape=ascending_east,waterlogged=false]
 minecraft:activator_rail[powered=false,shape=ascending_east,waterlogged=true]
 minecraft:activator_rail[powered=false,shape=ascending_north,waterlogged=false]
@@ -549,8 +546,6 @@ minecraft:amethyst_cluster[facing=up,waterlogged=false]
 minecraft:amethyst_cluster[facing=up,waterlogged=true]
 minecraft:amethyst_cluster[facing=west,waterlogged=false]
 minecraft:amethyst_cluster[facing=west,waterlogged=true]
-minecraft:ancient_debris
-minecraft:andesite
 minecraft:andesite_slab[type=bottom,waterlogged=false]
 minecraft:andesite_slab[type=bottom,waterlogged=true]
 minecraft:andesite_slab[type=double,waterlogged=false]
@@ -1015,9 +1010,6 @@ minecraft:bamboo[age=1,leaves=none,stage=0]
 minecraft:bamboo[age=1,leaves=none,stage=1]
 minecraft:bamboo[age=1,leaves=small,stage=0]
 minecraft:bamboo[age=1,leaves=small,stage=1]
-minecraft:bamboo_block[axis=x]
-minecraft:bamboo_block[axis=y]
-minecraft:bamboo_block[axis=z]
 minecraft:bamboo_button[face=ceiling,facing=east,powered=false]
 minecraft:bamboo_button[face=ceiling,facing=east,powered=true]
 minecraft:bamboo_button[face=ceiling,facing=north,powered=false]
@@ -1234,7 +1226,6 @@ minecraft:bamboo_hanging_sign[attached=true,rotation=8,waterlogged=false]
 minecraft:bamboo_hanging_sign[attached=true,rotation=8,waterlogged=true]
 minecraft:bamboo_hanging_sign[attached=true,rotation=9,waterlogged=false]
 minecraft:bamboo_hanging_sign[attached=true,rotation=9,waterlogged=true]
-minecraft:bamboo_mosaic
 minecraft:bamboo_mosaic_slab[type=bottom,waterlogged=false]
 minecraft:bamboo_mosaic_slab[type=bottom,waterlogged=true]
 minecraft:bamboo_mosaic_slab[type=double,waterlogged=false]
@@ -1321,7 +1312,6 @@ minecraft:bamboo_mosaic_stairs[facing=west,half=top,shape=outer_right,waterlogge
 minecraft:bamboo_mosaic_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:bamboo_mosaic_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:bamboo_mosaic_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:bamboo_planks
 minecraft:bamboo_pressure_plate[powered=false]
 minecraft:bamboo_pressure_plate[powered=true]
 minecraft:bamboo_sapling
@@ -1601,9 +1591,6 @@ minecraft:barrel[facing=west,open=false]
 minecraft:barrel[facing=west,open=true]
 minecraft:barrier[waterlogged=false]
 minecraft:barrier[waterlogged=true]
-minecraft:basalt[axis=x]
-minecraft:basalt[axis=y]
-minecraft:basalt[axis=z]
 minecraft:beacon
 minecraft:bee_nest[facing=east,honey_level=0]
 minecraft:bee_nest[facing=east,honey_level=1]
@@ -2239,9 +2226,6 @@ minecraft:birch_wall_sign[facing=south,waterlogged=false]
 minecraft:birch_wall_sign[facing=south,waterlogged=true]
 minecraft:birch_wall_sign[facing=west,waterlogged=false]
 minecraft:birch_wall_sign[facing=west,waterlogged=true]
-minecraft:birch_wood[axis=x]
-minecraft:birch_wood[axis=y]
-minecraft:birch_wood[axis=z]
 minecraft:black_banner[rotation=0]
 minecraft:black_banner[rotation=10]
 minecraft:black_banner[rotation=11]
@@ -2293,7 +2277,6 @@ minecraft:black_candle[candles=4,lit=true,waterlogged=true]
 minecraft:black_candle_cake[lit=false]
 minecraft:black_candle_cake[lit=true]
 minecraft:black_carpet
-minecraft:black_concrete
 minecraft:black_concrete_powder
 minecraft:black_concrete_slab[type=bottom,waterlogged=false]
 minecraft:black_concrete_slab[type=bottom,waterlogged=true]
@@ -2424,7 +2407,6 @@ minecraft:black_stained_glass_pane[east=true,north=true,south=true,waterlogged=f
 minecraft:black_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:black_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:black_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:black_terracotta
 minecraft:black_wall_banner[facing=east]
 minecraft:black_wall_banner[facing=north]
 minecraft:black_wall_banner[facing=south]
@@ -2515,7 +2497,6 @@ minecraft:black_wool_stairs[facing=west,half=top,shape=outer_right,waterlogged=f
 minecraft:black_wool_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:black_wool_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:black_wool_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:blackstone
 minecraft:blackstone_slab[type=bottom,waterlogged=false]
 minecraft:blackstone_slab[type=bottom,waterlogged=true]
 minecraft:blackstone_slab[type=double,waterlogged=false]
@@ -2926,14 +2907,6 @@ minecraft:blackstone_wall[east=tall,north=tall,south=tall,up=true,waterlogged=fa
 minecraft:blackstone_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:blackstone_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:blackstone_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:blast_furnace[facing=east,lit=false]
-minecraft:blast_furnace[facing=east,lit=true]
-minecraft:blast_furnace[facing=north,lit=false]
-minecraft:blast_furnace[facing=north,lit=true]
-minecraft:blast_furnace[facing=south,lit=false]
-minecraft:blast_furnace[facing=south,lit=true]
-minecraft:blast_furnace[facing=west,lit=false]
-minecraft:blast_furnace[facing=west,lit=true]
 minecraft:blue_banner[rotation=0]
 minecraft:blue_banner[rotation=10]
 minecraft:blue_banner[rotation=11]
@@ -2985,7 +2958,6 @@ minecraft:blue_candle[candles=4,lit=true,waterlogged=true]
 minecraft:blue_candle_cake[lit=false]
 minecraft:blue_candle_cake[lit=true]
 minecraft:blue_carpet
-minecraft:blue_concrete
 minecraft:blue_concrete_powder
 minecraft:blue_concrete_slab[type=bottom,waterlogged=false]
 minecraft:blue_concrete_slab[type=bottom,waterlogged=true]
@@ -3118,7 +3090,6 @@ minecraft:blue_stained_glass_pane[east=true,north=true,south=true,waterlogged=fa
 minecraft:blue_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:blue_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:blue_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:blue_terracotta
 minecraft:blue_wall_banner[facing=east]
 minecraft:blue_wall_banner[facing=north]
 minecraft:blue_wall_banner[facing=south]
@@ -3209,9 +3180,6 @@ minecraft:blue_wool_stairs[facing=west,half=top,shape=outer_right,waterlogged=fa
 minecraft:blue_wool_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:blue_wool_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:blue_wool_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:bone_block[axis=x]
-minecraft:bone_block[axis=y]
-minecraft:bone_block[axis=z]
 minecraft:brain_coral[waterlogged=false]
 minecraft:brain_coral[waterlogged=true]
 minecraft:brain_coral_block
@@ -3694,7 +3662,6 @@ minecraft:brown_candle[candles=4,lit=true,waterlogged=true]
 minecraft:brown_candle_cake[lit=false]
 minecraft:brown_candle_cake[lit=true]
 minecraft:brown_carpet
-minecraft:brown_concrete
 minecraft:brown_concrete_powder
 minecraft:brown_concrete_slab[type=bottom,waterlogged=false]
 minecraft:brown_concrete_slab[type=bottom,waterlogged=true]
@@ -3890,7 +3857,6 @@ minecraft:brown_stained_glass_pane[east=true,north=true,south=true,waterlogged=f
 minecraft:brown_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:brown_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:brown_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:brown_terracotta
 minecraft:brown_wall_banner[facing=east]
 minecraft:brown_wall_banner[facing=north]
 minecraft:brown_wall_banner[facing=south]
@@ -3981,8 +3947,6 @@ minecraft:brown_wool_stairs[facing=west,half=top,shape=outer_right,waterlogged=f
 minecraft:brown_wool_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:brown_wool_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:brown_wool_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:bubble_column[drag=false]
-minecraft:bubble_column[drag=true]
 minecraft:bubble_coral[waterlogged=false]
 minecraft:bubble_coral[waterlogged=true]
 minecraft:bubble_coral_block
@@ -4022,7 +3986,6 @@ minecraft:cake[bites=3]
 minecraft:cake[bites=4]
 minecraft:cake[bites=5]
 minecraft:cake[bites=6]
-minecraft:calcite
 minecraft:calibrated_sculk_sensor[facing=east,power=0,sculk_sensor_phase=active,waterlogged=false]
 minecraft:calibrated_sculk_sensor[facing=east,power=0,sculk_sensor_phase=active,waterlogged=true]
 minecraft:calibrated_sculk_sensor[facing=east,power=0,sculk_sensor_phase=cooldown,waterlogged=false]
@@ -4781,10 +4744,6 @@ minecraft:cherry_leaves[distance=7,persistent=false,waterlogged=false]
 minecraft:cherry_leaves[distance=7,persistent=false,waterlogged=true]
 minecraft:cherry_leaves[distance=7,persistent=true,waterlogged=false]
 minecraft:cherry_leaves[distance=7,persistent=true,waterlogged=true]
-minecraft:cherry_log[axis=x]
-minecraft:cherry_log[axis=y]
-minecraft:cherry_log[axis=z]
-minecraft:cherry_planks
 minecraft:cherry_pressure_plate[powered=false]
 minecraft:cherry_pressure_plate[powered=true]
 minecraft:cherry_sapling[stage=0]
@@ -5051,9 +5010,6 @@ minecraft:cherry_wall_sign[facing=south,waterlogged=false]
 minecraft:cherry_wall_sign[facing=south,waterlogged=true]
 minecraft:cherry_wall_sign[facing=west,waterlogged=false]
 minecraft:cherry_wall_sign[facing=west,waterlogged=true]
-minecraft:cherry_wood[axis=x]
-minecraft:cherry_wood[axis=y]
-minecraft:cherry_wood[axis=z]
 minecraft:chest[facing=east,type=left,waterlogged=false]
 minecraft:chest[facing=east,type=left,waterlogged=true]
 minecraft:chest[facing=east,type=right,waterlogged=false]
@@ -5338,17 +5294,7 @@ minecraft:chiseled_bookshelf[facing=west,slot_0_occupied=true,slot_1_occupied=tr
 minecraft:chiseled_bookshelf[facing=west,slot_0_occupied=true,slot_1_occupied=true,slot_2_occupied=true,slot_3_occupied=true,slot_4_occupied=false,slot_5_occupied=true]
 minecraft:chiseled_bookshelf[facing=west,slot_0_occupied=true,slot_1_occupied=true,slot_2_occupied=true,slot_3_occupied=true,slot_4_occupied=true,slot_5_occupied=false]
 minecraft:chiseled_bookshelf[facing=west,slot_0_occupied=true,slot_1_occupied=true,slot_2_occupied=true,slot_3_occupied=true,slot_4_occupied=true,slot_5_occupied=true]
-minecraft:chiseled_cinnabar
 minecraft:chiseled_copper
-minecraft:chiseled_deepslate
-minecraft:chiseled_nether_bricks
-minecraft:chiseled_polished_blackstone
-minecraft:chiseled_quartz_block
-minecraft:chiseled_resin_bricks
-minecraft:chiseled_stone_bricks
-minecraft:chiseled_sulfur
-minecraft:chiseled_tuff
-minecraft:chiseled_tuff_bricks
 minecraft:chorus_flower[age=0]
 minecraft:chorus_flower[age=1]
 minecraft:chorus_flower[age=2]
@@ -5419,7 +5365,6 @@ minecraft:chorus_plant[down=true,east=true,north=true,south=true,up=false,west=f
 minecraft:chorus_plant[down=true,east=true,north=true,south=true,up=false,west=true]
 minecraft:chorus_plant[down=true,east=true,north=true,south=true,up=true,west=false]
 minecraft:chorus_plant[down=true,east=true,north=true,south=true,up=true,west=true]
-minecraft:cinnabar
 minecraft:cinnabar_brick_slab[type=bottom,waterlogged=false]
 minecraft:cinnabar_brick_slab[type=bottom,waterlogged=true]
 minecraft:cinnabar_brick_slab[type=double,waterlogged=false]
@@ -5830,7 +5775,6 @@ minecraft:cinnabar_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogge
 minecraft:cinnabar_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:cinnabar_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:cinnabar_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:cinnabar_bricks
 minecraft:cinnabar_slab[type=bottom,waterlogged=false]
 minecraft:cinnabar_slab[type=bottom,waterlogged=true]
 minecraft:cinnabar_slab[type=double,waterlogged=false]
@@ -6242,8 +6186,6 @@ minecraft:cinnabar_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true
 minecraft:cinnabar_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:cinnabar_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
 minecraft:closed_eyeblossom
-minecraft:coarse_dirt
-minecraft:cobbled_deepslate
 minecraft:cobbled_deepslate_slab[type=bottom,waterlogged=false]
 minecraft:cobbled_deepslate_slab[type=bottom,waterlogged=true]
 minecraft:cobbled_deepslate_slab[type=double,waterlogged=false]
@@ -7354,11 +7296,6 @@ minecraft:copper_wall_torch[facing=north]
 minecraft:copper_wall_torch[facing=south]
 minecraft:copper_wall_torch[facing=west]
 minecraft:cornflower
-minecraft:cracked_deepslate_bricks
-minecraft:cracked_deepslate_tiles
-minecraft:cracked_nether_bricks
-minecraft:cracked_polished_blackstone_bricks
-minecraft:cracked_stone_bricks
 minecraft:crafter[crafting=false,orientation=down_east,triggered=false]
 minecraft:crafter[crafting=false,orientation=down_east,triggered=true]
 minecraft:crafter[crafting=false,orientation=down_north,triggered=false]
@@ -7682,11 +7619,7 @@ minecraft:crimson_hanging_sign[attached=true,rotation=8,waterlogged=false]
 minecraft:crimson_hanging_sign[attached=true,rotation=8,waterlogged=true]
 minecraft:crimson_hanging_sign[attached=true,rotation=9,waterlogged=false]
 minecraft:crimson_hanging_sign[attached=true,rotation=9,waterlogged=true]
-minecraft:crimson_hyphae[axis=x]
-minecraft:crimson_hyphae[axis=y]
-minecraft:crimson_hyphae[axis=z]
 minecraft:crimson_nylium
-minecraft:crimson_planks
 minecraft:crimson_pressure_plate[powered=false]
 minecraft:crimson_pressure_plate[powered=true]
 minecraft:crimson_roots
@@ -7872,9 +7805,6 @@ minecraft:crimson_stairs[facing=west,half=top,shape=outer_right,waterlogged=fals
 minecraft:crimson_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:crimson_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:crimson_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:crimson_stem[axis=x]
-minecraft:crimson_stem[axis=y]
-minecraft:crimson_stem[axis=z]
 minecraft:crimson_trapdoor[facing=east,half=bottom,open=false,powered=false,waterlogged=false]
 minecraft:crimson_trapdoor[facing=east,half=bottom,open=false,powered=false,waterlogged=true]
 minecraft:crimson_trapdoor[facing=east,half=bottom,open=false,powered=true,waterlogged=false]
@@ -8106,7 +8036,6 @@ minecraft:cyan_candle[candles=4,lit=true,waterlogged=true]
 minecraft:cyan_candle_cake[lit=false]
 minecraft:cyan_candle_cake[lit=true]
 minecraft:cyan_carpet
-minecraft:cyan_concrete
 minecraft:cyan_concrete_powder
 minecraft:cyan_concrete_slab[type=bottom,waterlogged=false]
 minecraft:cyan_concrete_slab[type=bottom,waterlogged=true]
@@ -8237,7 +8166,6 @@ minecraft:cyan_stained_glass_pane[east=true,north=true,south=true,waterlogged=fa
 minecraft:cyan_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:cyan_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:cyan_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:cyan_terracotta
 minecraft:cyan_wall_banner[facing=east]
 minecraft:cyan_wall_banner[facing=north]
 minecraft:cyan_wall_banner[facing=south]
@@ -8577,10 +8505,6 @@ minecraft:dark_oak_leaves[distance=7,persistent=false,waterlogged=false]
 minecraft:dark_oak_leaves[distance=7,persistent=false,waterlogged=true]
 minecraft:dark_oak_leaves[distance=7,persistent=true,waterlogged=false]
 minecraft:dark_oak_leaves[distance=7,persistent=true,waterlogged=true]
-minecraft:dark_oak_log[axis=x]
-minecraft:dark_oak_log[axis=y]
-minecraft:dark_oak_log[axis=z]
-minecraft:dark_oak_planks
 minecraft:dark_oak_pressure_plate[powered=false]
 minecraft:dark_oak_pressure_plate[powered=true]
 minecraft:dark_oak_sapling[stage=0]
@@ -8847,10 +8771,6 @@ minecraft:dark_oak_wall_sign[facing=south,waterlogged=false]
 minecraft:dark_oak_wall_sign[facing=south,waterlogged=true]
 minecraft:dark_oak_wall_sign[facing=west,waterlogged=false]
 minecraft:dark_oak_wall_sign[facing=west,waterlogged=true]
-minecraft:dark_oak_wood[axis=x]
-minecraft:dark_oak_wood[axis=y]
-minecraft:dark_oak_wood[axis=z]
-minecraft:dark_prismarine
 minecraft:dark_prismarine_slab[type=bottom,waterlogged=false]
 minecraft:dark_prismarine_slab[type=bottom,waterlogged=true]
 minecraft:dark_prismarine_slab[type=double,waterlogged=false]
@@ -8971,7 +8891,6 @@ minecraft:daylight_detector[inverted=true,power=8]
 minecraft:daylight_detector[inverted=true,power=9]
 minecraft:dead_brain_coral[waterlogged=false]
 minecraft:dead_brain_coral[waterlogged=true]
-minecraft:dead_brain_coral_block
 minecraft:dead_brain_coral_fan[waterlogged=false]
 minecraft:dead_brain_coral_fan[waterlogged=true]
 minecraft:dead_brain_coral_wall_fan[facing=east,waterlogged=false]
@@ -8984,7 +8903,6 @@ minecraft:dead_brain_coral_wall_fan[facing=west,waterlogged=false]
 minecraft:dead_brain_coral_wall_fan[facing=west,waterlogged=true]
 minecraft:dead_bubble_coral[waterlogged=false]
 minecraft:dead_bubble_coral[waterlogged=true]
-minecraft:dead_bubble_coral_block
 minecraft:dead_bubble_coral_fan[waterlogged=false]
 minecraft:dead_bubble_coral_fan[waterlogged=true]
 minecraft:dead_bubble_coral_wall_fan[facing=east,waterlogged=false]
@@ -8998,7 +8916,6 @@ minecraft:dead_bubble_coral_wall_fan[facing=west,waterlogged=true]
 minecraft:dead_bush
 minecraft:dead_fire_coral[waterlogged=false]
 minecraft:dead_fire_coral[waterlogged=true]
-minecraft:dead_fire_coral_block
 minecraft:dead_fire_coral_fan[waterlogged=false]
 minecraft:dead_fire_coral_fan[waterlogged=true]
 minecraft:dead_fire_coral_wall_fan[facing=east,waterlogged=false]
@@ -9011,7 +8928,6 @@ minecraft:dead_fire_coral_wall_fan[facing=west,waterlogged=false]
 minecraft:dead_fire_coral_wall_fan[facing=west,waterlogged=true]
 minecraft:dead_horn_coral[waterlogged=false]
 minecraft:dead_horn_coral[waterlogged=true]
-minecraft:dead_horn_coral_block
 minecraft:dead_horn_coral_fan[waterlogged=false]
 minecraft:dead_horn_coral_fan[waterlogged=true]
 minecraft:dead_horn_coral_wall_fan[facing=east,waterlogged=false]
@@ -9024,7 +8940,6 @@ minecraft:dead_horn_coral_wall_fan[facing=west,waterlogged=false]
 minecraft:dead_horn_coral_wall_fan[facing=west,waterlogged=true]
 minecraft:dead_tube_coral[waterlogged=false]
 minecraft:dead_tube_coral[waterlogged=true]
-minecraft:dead_tube_coral_block
 minecraft:dead_tube_coral_fan[waterlogged=false]
 minecraft:dead_tube_coral_fan[waterlogged=true]
 minecraft:dead_tube_coral_wall_fan[facing=east,waterlogged=false]
@@ -9051,9 +8966,6 @@ minecraft:decorated_pot[cracked=true,facing=south,waterlogged=false]
 minecraft:decorated_pot[cracked=true,facing=south,waterlogged=true]
 minecraft:decorated_pot[cracked=true,facing=west,waterlogged=false]
 minecraft:decorated_pot[cracked=true,facing=west,waterlogged=true]
-minecraft:deepslate[axis=x]
-minecraft:deepslate[axis=y]
-minecraft:deepslate[axis=z]
 minecraft:deepslate_brick_slab[type=bottom,waterlogged=false]
 minecraft:deepslate_brick_slab[type=bottom,waterlogged=true]
 minecraft:deepslate_brick_slab[type=double,waterlogged=false]
@@ -9464,7 +9376,6 @@ minecraft:deepslate_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogg
 minecraft:deepslate_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:deepslate_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:deepslate_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:deepslate_bricks
 minecraft:deepslate_coal_ore
 minecraft:deepslate_copper_ore
 minecraft:deepslate_diamond_ore
@@ -9884,7 +9795,6 @@ minecraft:deepslate_tile_wall[east=tall,north=tall,south=tall,up=true,waterlogge
 minecraft:deepslate_tile_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:deepslate_tile_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:deepslate_tile_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:deepslate_tiles
 minecraft:detector_rail[powered=false,shape=ascending_east,waterlogged=false]
 minecraft:detector_rail[powered=false,shape=ascending_east,waterlogged=true]
 minecraft:detector_rail[powered=false,shape=ascending_north,waterlogged=false]
@@ -9909,7 +9819,6 @@ minecraft:detector_rail[powered=true,shape=east_west,waterlogged=false]
 minecraft:detector_rail[powered=true,shape=east_west,waterlogged=true]
 minecraft:detector_rail[powered=true,shape=north_south,waterlogged=false]
 minecraft:detector_rail[powered=true,shape=north_south,waterlogged=true]
-minecraft:diorite
 minecraft:diorite_slab[type=bottom,waterlogged=false]
 minecraft:diorite_slab[type=bottom,waterlogged=true]
 minecraft:diorite_slab[type=double,waterlogged=false]
@@ -10406,8 +10315,6 @@ minecraft:dried_ghast[facing=west,hydration=2,waterlogged=false]
 minecraft:dried_ghast[facing=west,hydration=2,waterlogged=true]
 minecraft:dried_ghast[facing=west,hydration=3,waterlogged=false]
 minecraft:dried_ghast[facing=west,hydration=3,waterlogged=true]
-minecraft:dried_kelp_block
-minecraft:dripstone_block
 minecraft:dropper[facing=down,triggered=false]
 minecraft:dropper[facing=down,triggered=true]
 minecraft:dropper[facing=east,triggered=false]
@@ -10420,7 +10327,6 @@ minecraft:dropper[facing=up,triggered=false]
 minecraft:dropper[facing=up,triggered=true]
 minecraft:dropper[facing=west,triggered=false]
 minecraft:dropper[facing=west,triggered=true]
-minecraft:emerald_block
 minecraft:emerald_ore
 minecraft:enchanting_table
 minecraft:end_gateway
@@ -10439,7 +10345,6 @@ minecraft:end_rod[facing=north]
 minecraft:end_rod[facing=south]
 minecraft:end_rod[facing=up]
 minecraft:end_rod[facing=west]
-minecraft:end_stone
 minecraft:end_stone_brick_slab[type=bottom,waterlogged=false]
 minecraft:end_stone_brick_slab[type=bottom,waterlogged=true]
 minecraft:end_stone_brick_slab[type=double,waterlogged=false]
@@ -10850,7 +10755,6 @@ minecraft:end_stone_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogg
 minecraft:end_stone_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:end_stone_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:end_stone_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:end_stone_bricks
 minecraft:ender_chest[facing=east,waterlogged=false]
 minecraft:ender_chest[facing=east,waterlogged=true]
 minecraft:ender_chest[facing=north,waterlogged=false]
@@ -11739,7 +11643,6 @@ minecraft:fire_coral_wall_fan[facing=south,waterlogged=true]
 minecraft:fire_coral_wall_fan[facing=west,waterlogged=false]
 minecraft:fire_coral_wall_fan[facing=west,waterlogged=true]
 minecraft:firefly_bush
-minecraft:fletching_table
 minecraft:flower_pot
 minecraft:flowering_azalea
 minecraft:flowering_azalea_leaves[distance=1,persistent=false,waterlogged=false]
@@ -11775,15 +11678,6 @@ minecraft:frosted_ice[age=0]
 minecraft:frosted_ice[age=1]
 minecraft:frosted_ice[age=2]
 minecraft:frosted_ice[age=3]
-minecraft:furnace[facing=east,lit=false]
-minecraft:furnace[facing=east,lit=true]
-minecraft:furnace[facing=north,lit=false]
-minecraft:furnace[facing=north,lit=true]
-minecraft:furnace[facing=south,lit=false]
-minecraft:furnace[facing=south,lit=true]
-minecraft:furnace[facing=west,lit=false]
-minecraft:furnace[facing=west,lit=true]
-minecraft:gilded_blackstone
 minecraft:glass
 minecraft:glass_pane[east=false,north=false,south=false,waterlogged=false,west=false]
 minecraft:glass_pane[east=false,north=false,south=false,waterlogged=false,west=true]
@@ -12356,8 +12250,6 @@ minecraft:granite_wall[east=tall,north=tall,south=tall,up=true,waterlogged=false
 minecraft:granite_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:granite_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:granite_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:grass_block[snowy=false]
-minecraft:grass_block[snowy=true]
 minecraft:gray_banner[rotation=0]
 minecraft:gray_banner[rotation=10]
 minecraft:gray_banner[rotation=11]
@@ -12409,7 +12301,6 @@ minecraft:gray_candle[candles=4,lit=true,waterlogged=true]
 minecraft:gray_candle_cake[lit=false]
 minecraft:gray_candle_cake[lit=true]
 minecraft:gray_carpet
-minecraft:gray_concrete
 minecraft:gray_concrete_powder
 minecraft:gray_concrete_slab[type=bottom,waterlogged=false]
 minecraft:gray_concrete_slab[type=bottom,waterlogged=true]
@@ -12540,7 +12431,6 @@ minecraft:gray_stained_glass_pane[east=true,north=true,south=true,waterlogged=fa
 minecraft:gray_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:gray_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:gray_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:gray_terracotta
 minecraft:gray_wall_banner[facing=east]
 minecraft:gray_wall_banner[facing=north]
 minecraft:gray_wall_banner[facing=south]
@@ -12682,7 +12572,6 @@ minecraft:green_candle[candles=4,lit=true,waterlogged=true]
 minecraft:green_candle_cake[lit=false]
 minecraft:green_candle_cake[lit=true]
 minecraft:green_carpet
-minecraft:green_concrete
 minecraft:green_concrete_powder
 minecraft:green_concrete_slab[type=bottom,waterlogged=false]
 minecraft:green_concrete_slab[type=bottom,waterlogged=true]
@@ -12813,7 +12702,6 @@ minecraft:green_stained_glass_pane[east=true,north=true,south=true,waterlogged=f
 minecraft:green_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:green_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:green_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:green_terracotta
 minecraft:green_wall_banner[facing=east]
 minecraft:green_wall_banner[facing=north]
 minecraft:green_wall_banner[facing=south]
@@ -12940,7 +12828,6 @@ minecraft:heavy_weighted_pressure_plate[power=7]
 minecraft:heavy_weighted_pressure_plate[power=8]
 minecraft:heavy_weighted_pressure_plate[power=9]
 minecraft:honey_block
-minecraft:honeycomb_block
 minecraft:hopper[enabled=false,facing=down]
 minecraft:hopper[enabled=false,facing=east]
 minecraft:hopper[enabled=false,facing=north]
@@ -13668,9 +13555,6 @@ minecraft:jungle_wall_sign[facing=south,waterlogged=false]
 minecraft:jungle_wall_sign[facing=south,waterlogged=true]
 minecraft:jungle_wall_sign[facing=west,waterlogged=false]
 minecraft:jungle_wall_sign[facing=west,waterlogged=true]
-minecraft:jungle_wood[axis=x]
-minecraft:jungle_wood[axis=y]
-minecraft:jungle_wood[axis=z]
 minecraft:kelp[age=0]
 minecraft:kelp[age=10]
 minecraft:kelp[age=11]
@@ -13710,7 +13594,6 @@ minecraft:lantern[hanging=false,waterlogged=false]
 minecraft:lantern[hanging=false,waterlogged=true]
 minecraft:lantern[hanging=true,waterlogged=false]
 minecraft:lantern[hanging=true,waterlogged=true]
-minecraft:lapis_block
 minecraft:lapis_ore
 minecraft:large_amethyst_bud[facing=down,waterlogged=false]
 minecraft:large_amethyst_bud[facing=down,waterlogged=true]
@@ -13783,38 +13666,6 @@ minecraft:lever[face=wall,facing=south,powered=false]
 minecraft:lever[face=wall,facing=south,powered=true]
 minecraft:lever[face=wall,facing=west,powered=false]
 minecraft:lever[face=wall,facing=west,powered=true]
-minecraft:light[level=0,waterlogged=false]
-minecraft:light[level=0,waterlogged=true]
-minecraft:light[level=1,waterlogged=false]
-minecraft:light[level=1,waterlogged=true]
-minecraft:light[level=10,waterlogged=false]
-minecraft:light[level=10,waterlogged=true]
-minecraft:light[level=11,waterlogged=false]
-minecraft:light[level=11,waterlogged=true]
-minecraft:light[level=12,waterlogged=false]
-minecraft:light[level=12,waterlogged=true]
-minecraft:light[level=13,waterlogged=false]
-minecraft:light[level=13,waterlogged=true]
-minecraft:light[level=14,waterlogged=false]
-minecraft:light[level=14,waterlogged=true]
-minecraft:light[level=15,waterlogged=false]
-minecraft:light[level=15,waterlogged=true]
-minecraft:light[level=2,waterlogged=false]
-minecraft:light[level=2,waterlogged=true]
-minecraft:light[level=3,waterlogged=false]
-minecraft:light[level=3,waterlogged=true]
-minecraft:light[level=4,waterlogged=false]
-minecraft:light[level=4,waterlogged=true]
-minecraft:light[level=5,waterlogged=false]
-minecraft:light[level=5,waterlogged=true]
-minecraft:light[level=6,waterlogged=false]
-minecraft:light[level=6,waterlogged=true]
-minecraft:light[level=7,waterlogged=false]
-minecraft:light[level=7,waterlogged=true]
-minecraft:light[level=8,waterlogged=false]
-minecraft:light[level=8,waterlogged=true]
-minecraft:light[level=9,waterlogged=false]
-minecraft:light[level=9,waterlogged=true]
 minecraft:light_blue_banner[rotation=0]
 minecraft:light_blue_banner[rotation=10]
 minecraft:light_blue_banner[rotation=11]
@@ -13866,7 +13717,6 @@ minecraft:light_blue_candle[candles=4,lit=true,waterlogged=true]
 minecraft:light_blue_candle_cake[lit=false]
 minecraft:light_blue_candle_cake[lit=true]
 minecraft:light_blue_carpet
-minecraft:light_blue_concrete
 minecraft:light_blue_concrete_powder
 minecraft:light_blue_concrete_slab[type=bottom,waterlogged=false]
 minecraft:light_blue_concrete_slab[type=bottom,waterlogged=true]
@@ -13997,12 +13847,10 @@ minecraft:light_blue_stained_glass_pane[east=true,north=true,south=true,waterlog
 minecraft:light_blue_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:light_blue_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:light_blue_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:light_blue_terracotta
 minecraft:light_blue_wall_banner[facing=east]
 minecraft:light_blue_wall_banner[facing=north]
 minecraft:light_blue_wall_banner[facing=south]
 minecraft:light_blue_wall_banner[facing=west]
-minecraft:light_blue_wool
 minecraft:light_blue_wool_slab[type=bottom,waterlogged=false]
 minecraft:light_blue_wool_slab[type=bottom,waterlogged=true]
 minecraft:light_blue_wool_slab[type=double,waterlogged=false]
@@ -14140,7 +13988,6 @@ minecraft:light_gray_candle[candles=4,lit=true,waterlogged=true]
 minecraft:light_gray_candle_cake[lit=false]
 minecraft:light_gray_candle_cake[lit=true]
 minecraft:light_gray_carpet
-minecraft:light_gray_concrete
 minecraft:light_gray_concrete_powder
 minecraft:light_gray_concrete_slab[type=bottom,waterlogged=false]
 minecraft:light_gray_concrete_slab[type=bottom,waterlogged=true]
@@ -14271,7 +14118,6 @@ minecraft:light_gray_stained_glass_pane[east=true,north=true,south=true,waterlog
 minecraft:light_gray_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:light_gray_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:light_gray_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:light_gray_terracotta
 minecraft:light_gray_wall_banner[facing=east]
 minecraft:light_gray_wall_banner[facing=north]
 minecraft:light_gray_wall_banner[facing=south]
@@ -14457,7 +14303,6 @@ minecraft:lime_candle[candles=4,lit=true,waterlogged=true]
 minecraft:lime_candle_cake[lit=false]
 minecraft:lime_candle_cake[lit=true]
 minecraft:lime_carpet
-minecraft:lime_concrete
 minecraft:lime_concrete_powder
 minecraft:lime_concrete_slab[type=bottom,waterlogged=false]
 minecraft:lime_concrete_slab[type=bottom,waterlogged=true]
@@ -14588,7 +14433,6 @@ minecraft:lime_stained_glass_pane[east=true,north=true,south=true,waterlogged=fa
 minecraft:lime_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:lime_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:lime_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:lime_terracotta
 minecraft:lime_wall_banner[facing=east]
 minecraft:lime_wall_banner[facing=north]
 minecraft:lime_wall_banner[facing=south]
@@ -14679,7 +14523,6 @@ minecraft:lime_wool_stairs[facing=west,half=top,shape=outer_right,waterlogged=fa
 minecraft:lime_wool_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:lime_wool_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:lime_wool_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:lodestone
 minecraft:loom[facing=east]
 minecraft:loom[facing=north]
 minecraft:loom[facing=south]
@@ -14735,7 +14578,6 @@ minecraft:magenta_candle[candles=4,lit=true,waterlogged=true]
 minecraft:magenta_candle_cake[lit=false]
 minecraft:magenta_candle_cake[lit=true]
 minecraft:magenta_carpet
-minecraft:magenta_concrete
 minecraft:magenta_concrete_powder
 minecraft:magenta_concrete_slab[type=bottom,waterlogged=false]
 minecraft:magenta_concrete_slab[type=bottom,waterlogged=true]
@@ -14866,7 +14708,6 @@ minecraft:magenta_stained_glass_pane[east=true,north=true,south=true,waterlogged
 minecraft:magenta_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:magenta_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:magenta_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:magenta_terracotta
 minecraft:magenta_wall_banner[facing=east]
 minecraft:magenta_wall_banner[facing=north]
 minecraft:magenta_wall_banner[facing=south]
@@ -15202,10 +15043,6 @@ minecraft:mangrove_leaves[distance=7,persistent=false,waterlogged=false]
 minecraft:mangrove_leaves[distance=7,persistent=false,waterlogged=true]
 minecraft:mangrove_leaves[distance=7,persistent=true,waterlogged=false]
 minecraft:mangrove_leaves[distance=7,persistent=true,waterlogged=true]
-minecraft:mangrove_log[axis=x]
-minecraft:mangrove_log[axis=y]
-minecraft:mangrove_log[axis=z]
-minecraft:mangrove_planks
 minecraft:mangrove_pressure_plate[powered=false]
 minecraft:mangrove_pressure_plate[powered=true]
 minecraft:mangrove_propagule[age=0,hanging=false,stage=0,waterlogged=false]
@@ -15512,9 +15349,6 @@ minecraft:mangrove_wall_sign[facing=south,waterlogged=false]
 minecraft:mangrove_wall_sign[facing=south,waterlogged=true]
 minecraft:mangrove_wall_sign[facing=west,waterlogged=false]
 minecraft:mangrove_wall_sign[facing=west,waterlogged=true]
-minecraft:mangrove_wood[axis=x]
-minecraft:mangrove_wood[axis=y]
-minecraft:mangrove_wood[axis=z]
 minecraft:medium_amethyst_bud[facing=down,waterlogged=false]
 minecraft:medium_amethyst_bud[facing=down,waterlogged=true]
 minecraft:medium_amethyst_bud[facing=east,waterlogged=false]
@@ -15527,7 +15361,6 @@ minecraft:medium_amethyst_bud[facing=up,waterlogged=false]
 minecraft:medium_amethyst_bud[facing=up,waterlogged=true]
 minecraft:medium_amethyst_bud[facing=west,waterlogged=false]
 minecraft:medium_amethyst_bud[facing=west,waterlogged=true]
-minecraft:melon
 minecraft:melon_stem[age=0]
 minecraft:melon_stem[age=1]
 minecraft:melon_stem[age=2]
@@ -16358,7 +16191,6 @@ minecraft:mossy_stone_brick_wall[east=tall,north=tall,south=tall,up=true,waterlo
 minecraft:mossy_stone_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:mossy_stone_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:mossy_stone_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:mossy_stone_bricks
 minecraft:moving_piston[facing=down,type=normal]
 minecraft:moving_piston[facing=down,type=sticky]
 minecraft:moving_piston[facing=east,type=normal]
@@ -16782,10 +16614,6 @@ minecraft:mud_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=fal
 minecraft:mud_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:mud_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:mud_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:mud_bricks
-minecraft:muddy_mangrove_roots[axis=x]
-minecraft:muddy_mangrove_roots[axis=y]
-minecraft:muddy_mangrove_roots[axis=z]
 minecraft:mushroom_stem[down=false,east=false,north=false,south=false,up=false,west=false]
 minecraft:mushroom_stem[down=false,east=false,north=false,south=false,up=false,west=true]
 minecraft:mushroom_stem[down=false,east=false,north=false,south=false,up=true,west=false]
@@ -17294,7 +17122,6 @@ minecraft:nether_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=
 minecraft:nether_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:nether_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:nether_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:nether_bricks
 minecraft:nether_gold_ore
 minecraft:nether_portal[axis=x]
 minecraft:nether_portal[axis=z]
@@ -17304,8 +17131,6 @@ minecraft:nether_wart[age=0]
 minecraft:nether_wart[age=1]
 minecraft:nether_wart[age=2]
 minecraft:nether_wart[age=3]
-minecraft:nether_wart_block
-minecraft:netherite_block
 minecraft:netherrack
 minecraft:note_block[instrument=banjo,note=0,powered=false]
 minecraft:note_block[instrument=banjo,note=0,powered=true]
@@ -19167,9 +18992,6 @@ minecraft:oak_wall_sign[facing=south,waterlogged=false]
 minecraft:oak_wall_sign[facing=south,waterlogged=true]
 minecraft:oak_wall_sign[facing=west,waterlogged=false]
 minecraft:oak_wall_sign[facing=west,waterlogged=true]
-minecraft:oak_wood[axis=x]
-minecraft:oak_wood[axis=y]
-minecraft:oak_wood[axis=z]
 minecraft:observer[facing=down,powered=false]
 minecraft:observer[facing=down,powered=true]
 minecraft:observer[facing=east,powered=false]
@@ -19182,9 +19004,6 @@ minecraft:observer[facing=up,powered=false]
 minecraft:observer[facing=up,powered=true]
 minecraft:observer[facing=west,powered=false]
 minecraft:observer[facing=west,powered=true]
-minecraft:ochre_froglight[axis=x]
-minecraft:ochre_froglight[axis=y]
-minecraft:ochre_froglight[axis=z]
 minecraft:open_eyeblossom
 minecraft:orange_banner[rotation=0]
 minecraft:orange_banner[rotation=10]
@@ -19237,7 +19056,6 @@ minecraft:orange_candle[candles=4,lit=true,waterlogged=true]
 minecraft:orange_candle_cake[lit=false]
 minecraft:orange_candle_cake[lit=true]
 minecraft:orange_carpet
-minecraft:orange_concrete
 minecraft:orange_concrete_powder
 minecraft:orange_concrete_slab[type=bottom,waterlogged=false]
 minecraft:orange_concrete_slab[type=bottom,waterlogged=true]
@@ -19396,7 +19214,6 @@ minecraft:orange_stained_glass_pane[east=true,north=true,south=true,waterlogged=
 minecraft:orange_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:orange_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:orange_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:orange_terracotta
 minecraft:orange_tulip
 minecraft:orange_wall_banner[facing=east]
 minecraft:orange_wall_banner[facing=north]
@@ -19834,8 +19651,6 @@ minecraft:oxidized_lightning_rod[facing=west,powered=false,waterlogged=false]
 minecraft:oxidized_lightning_rod[facing=west,powered=false,waterlogged=true]
 minecraft:oxidized_lightning_rod[facing=west,powered=true,waterlogged=false]
 minecraft:oxidized_lightning_rod[facing=west,powered=true,waterlogged=true]
-minecraft:packed_ice
-minecraft:packed_mud
 minecraft:pale_hanging_moss[tip=false]
 minecraft:pale_hanging_moss[tip=true]
 minecraft:pale_moss_block
@@ -20245,10 +20060,6 @@ minecraft:pale_oak_leaves[distance=7,persistent=false,waterlogged=false]
 minecraft:pale_oak_leaves[distance=7,persistent=false,waterlogged=true]
 minecraft:pale_oak_leaves[distance=7,persistent=true,waterlogged=false]
 minecraft:pale_oak_leaves[distance=7,persistent=true,waterlogged=true]
-minecraft:pale_oak_log[axis=x]
-minecraft:pale_oak_log[axis=y]
-minecraft:pale_oak_log[axis=z]
-minecraft:pale_oak_planks
 minecraft:pale_oak_pressure_plate[powered=false]
 minecraft:pale_oak_pressure_plate[powered=true]
 minecraft:pale_oak_sapling[stage=0]
@@ -20515,12 +20326,6 @@ minecraft:pale_oak_wall_sign[facing=south,waterlogged=false]
 minecraft:pale_oak_wall_sign[facing=south,waterlogged=true]
 minecraft:pale_oak_wall_sign[facing=west,waterlogged=false]
 minecraft:pale_oak_wall_sign[facing=west,waterlogged=true]
-minecraft:pale_oak_wood[axis=x]
-minecraft:pale_oak_wood[axis=y]
-minecraft:pale_oak_wood[axis=z]
-minecraft:pearlescent_froglight[axis=x]
-minecraft:pearlescent_froglight[axis=y]
-minecraft:pearlescent_froglight[axis=z]
 minecraft:peony[half=lower]
 minecraft:peony[half=upper]
 minecraft:petrified_oak_slab[type=bottom,waterlogged=false]
@@ -20620,7 +20425,6 @@ minecraft:pink_candle[candles=4,lit=true,waterlogged=true]
 minecraft:pink_candle_cake[lit=false]
 minecraft:pink_candle_cake[lit=true]
 minecraft:pink_carpet
-minecraft:pink_concrete
 minecraft:pink_concrete_powder
 minecraft:pink_concrete_slab[type=bottom,waterlogged=false]
 minecraft:pink_concrete_slab[type=bottom,waterlogged=true]
@@ -20767,7 +20571,6 @@ minecraft:pink_stained_glass_pane[east=true,north=true,south=true,waterlogged=fa
 minecraft:pink_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:pink_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:pink_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:pink_terracotta
 minecraft:pink_tulip
 minecraft:pink_wall_banner[facing=east]
 minecraft:pink_wall_banner[facing=north]
@@ -20896,11 +20699,8 @@ minecraft:piston_head[facing=west,short=false,type=sticky]
 minecraft:piston_head[facing=west,short=true,type=normal]
 minecraft:piston_head[facing=west,short=true,type=sticky]
 minecraft:pitcher_crop[age=0,half=lower]
-minecraft:pitcher_crop[age=0,half=upper]
 minecraft:pitcher_crop[age=1,half=lower]
-minecraft:pitcher_crop[age=1,half=upper]
 minecraft:pitcher_crop[age=2,half=lower]
-minecraft:pitcher_crop[age=2,half=upper]
 minecraft:pitcher_crop[age=3,half=lower]
 minecraft:pitcher_crop[age=3,half=upper]
 minecraft:pitcher_crop[age=4,half=lower]
@@ -20969,7 +20769,6 @@ minecraft:pointed_dripstone[thickness=tip_merge,vertical_direction=down,waterlog
 minecraft:pointed_dripstone[thickness=tip_merge,vertical_direction=down,waterlogged=true]
 minecraft:pointed_dripstone[thickness=tip_merge,vertical_direction=up,waterlogged=false]
 minecraft:pointed_dripstone[thickness=tip_merge,vertical_direction=up,waterlogged=true]
-minecraft:polished_andesite
 minecraft:polished_andesite_slab[type=bottom,waterlogged=false]
 minecraft:polished_andesite_slab[type=bottom,waterlogged=true]
 minecraft:polished_andesite_slab[type=double,waterlogged=false]
@@ -21056,10 +20855,6 @@ minecraft:polished_andesite_stairs[facing=west,half=top,shape=outer_right,waterl
 minecraft:polished_andesite_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:polished_andesite_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:polished_andesite_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:polished_basalt[axis=x]
-minecraft:polished_basalt[axis=y]
-minecraft:polished_basalt[axis=z]
-minecraft:polished_blackstone
 minecraft:polished_blackstone_brick_slab[type=bottom,waterlogged=false]
 minecraft:polished_blackstone_brick_slab[type=bottom,waterlogged=true]
 minecraft:polished_blackstone_brick_slab[type=double,waterlogged=false]
@@ -21470,7 +21265,6 @@ minecraft:polished_blackstone_brick_wall[east=tall,north=tall,south=tall,up=true
 minecraft:polished_blackstone_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:polished_blackstone_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:polished_blackstone_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:polished_blackstone_bricks
 minecraft:polished_blackstone_button[face=ceiling,facing=east,powered=false]
 minecraft:polished_blackstone_button[face=ceiling,facing=east,powered=true]
 minecraft:polished_blackstone_button[face=ceiling,facing=north,powered=false]
@@ -21907,7 +21701,6 @@ minecraft:polished_blackstone_wall[east=tall,north=tall,south=tall,up=true,water
 minecraft:polished_blackstone_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:polished_blackstone_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:polished_blackstone_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:polished_cinnabar
 minecraft:polished_cinnabar_slab[type=bottom,waterlogged=false]
 minecraft:polished_cinnabar_slab[type=bottom,waterlogged=true]
 minecraft:polished_cinnabar_slab[type=double,waterlogged=false]
@@ -22318,7 +22111,6 @@ minecraft:polished_cinnabar_wall[east=tall,north=tall,south=tall,up=true,waterlo
 minecraft:polished_cinnabar_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:polished_cinnabar_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:polished_cinnabar_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:polished_deepslate
 minecraft:polished_deepslate_slab[type=bottom,waterlogged=false]
 minecraft:polished_deepslate_slab[type=bottom,waterlogged=true]
 minecraft:polished_deepslate_slab[type=double,waterlogged=false]
@@ -22729,7 +22521,6 @@ minecraft:polished_deepslate_wall[east=tall,north=tall,south=tall,up=true,waterl
 minecraft:polished_deepslate_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:polished_deepslate_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:polished_deepslate_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:polished_diorite
 minecraft:polished_diorite_slab[type=bottom,waterlogged=false]
 minecraft:polished_diorite_slab[type=bottom,waterlogged=true]
 minecraft:polished_diorite_slab[type=double,waterlogged=false]
@@ -22902,7 +22693,6 @@ minecraft:polished_granite_stairs[facing=west,half=top,shape=outer_right,waterlo
 minecraft:polished_granite_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:polished_granite_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:polished_granite_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:polished_sulfur
 minecraft:polished_sulfur_slab[type=bottom,waterlogged=false]
 minecraft:polished_sulfur_slab[type=bottom,waterlogged=true]
 minecraft:polished_sulfur_slab[type=double,waterlogged=false]
@@ -23313,7 +23103,6 @@ minecraft:polished_sulfur_wall[east=tall,north=tall,south=tall,up=true,waterlogg
 minecraft:polished_sulfur_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:polished_sulfur_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:polished_sulfur_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:polished_tuff
 minecraft:polished_tuff_slab[type=bottom,waterlogged=false]
 minecraft:polished_tuff_slab[type=bottom,waterlogged=true]
 minecraft:polished_tuff_slab[type=double,waterlogged=false]
@@ -23940,10 +23729,6 @@ minecraft:poplar_hanging_sign[attached=true,rotation=8,waterlogged=false]
 minecraft:poplar_hanging_sign[attached=true,rotation=8,waterlogged=true]
 minecraft:poplar_hanging_sign[attached=true,rotation=9,waterlogged=false]
 minecraft:poplar_hanging_sign[attached=true,rotation=9,waterlogged=true]
-minecraft:poplar_log[axis=x]
-minecraft:poplar_log[axis=y]
-minecraft:poplar_log[axis=z]
-minecraft:poplar_planks
 minecraft:poplar_pressure_plate[powered=false]
 minecraft:poplar_pressure_plate[powered=true]
 minecraft:poplar_sapling[stage=0]
@@ -24210,9 +23995,6 @@ minecraft:poplar_wall_sign[facing=south,waterlogged=false]
 minecraft:poplar_wall_sign[facing=south,waterlogged=true]
 minecraft:poplar_wall_sign[facing=west,waterlogged=false]
 minecraft:poplar_wall_sign[facing=west,waterlogged=true]
-minecraft:poplar_wood[axis=x]
-minecraft:poplar_wood[axis=y]
-minecraft:poplar_wood[axis=z]
 minecraft:poppy
 minecraft:potatoes[age=0]
 minecraft:potatoes[age=1]
@@ -24294,7 +24076,6 @@ minecraft:powered_rail[powered=true,shape=east_west,waterlogged=false]
 minecraft:powered_rail[powered=true,shape=east_west,waterlogged=true]
 minecraft:powered_rail[powered=true,shape=north_south,waterlogged=false]
 minecraft:powered_rail[powered=true,shape=north_south,waterlogged=true]
-minecraft:prismarine
 minecraft:prismarine_brick_slab[type=bottom,waterlogged=false]
 minecraft:prismarine_brick_slab[type=bottom,waterlogged=true]
 minecraft:prismarine_brick_slab[type=double,waterlogged=false]
@@ -24381,7 +24162,6 @@ minecraft:prismarine_brick_stairs[facing=west,half=top,shape=outer_right,waterlo
 minecraft:prismarine_brick_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:prismarine_brick_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:prismarine_brick_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:prismarine_bricks
 minecraft:prismarine_slab[type=bottom,waterlogged=false]
 minecraft:prismarine_slab[type=bottom,waterlogged=true]
 minecraft:prismarine_slab[type=double,waterlogged=false]
@@ -24852,7 +24632,6 @@ minecraft:purple_candle[candles=4,lit=true,waterlogged=true]
 minecraft:purple_candle_cake[lit=false]
 minecraft:purple_candle_cake[lit=true]
 minecraft:purple_carpet
-minecraft:purple_concrete
 minecraft:purple_concrete_powder
 minecraft:purple_concrete_slab[type=bottom,waterlogged=false]
 minecraft:purple_concrete_slab[type=bottom,waterlogged=true]
@@ -24983,7 +24762,6 @@ minecraft:purple_stained_glass_pane[east=true,north=true,south=true,waterlogged=
 minecraft:purple_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:purple_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:purple_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:purple_terracotta
 minecraft:purple_wall_banner[facing=east]
 minecraft:purple_wall_banner[facing=north]
 minecraft:purple_wall_banner[facing=south]
@@ -25074,10 +24852,6 @@ minecraft:purple_wool_stairs[facing=west,half=top,shape=outer_right,waterlogged=
 minecraft:purple_wool_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:purple_wool_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:purple_wool_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:purpur_block
-minecraft:purpur_pillar[axis=x]
-minecraft:purpur_pillar[axis=y]
-minecraft:purpur_pillar[axis=z]
 minecraft:purpur_slab[type=bottom,waterlogged=false]
 minecraft:purpur_slab[type=bottom,waterlogged=true]
 minecraft:purpur_slab[type=double,waterlogged=false]
@@ -25164,11 +24938,6 @@ minecraft:purpur_stairs[facing=west,half=top,shape=outer_right,waterlogged=false
 minecraft:purpur_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:purpur_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:purpur_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:quartz_block
-minecraft:quartz_bricks
-minecraft:quartz_pillar[axis=x]
-minecraft:quartz_pillar[axis=y]
-minecraft:quartz_pillar[axis=z]
 minecraft:quartz_slab[type=bottom,waterlogged=false]
 minecraft:quartz_slab[type=bottom,waterlogged=true]
 minecraft:quartz_slab[type=double,waterlogged=false]
@@ -25275,9 +25044,6 @@ minecraft:rail[shape=south_east,waterlogged=false]
 minecraft:rail[shape=south_east,waterlogged=true]
 minecraft:rail[shape=south_west,waterlogged=false]
 minecraft:rail[shape=south_west,waterlogged=true]
-minecraft:raw_copper_block
-minecraft:raw_gold_block
-minecraft:raw_iron_block
 minecraft:red_banner[rotation=0]
 minecraft:red_banner[rotation=10]
 minecraft:red_banner[rotation=11]
@@ -25329,7 +25095,6 @@ minecraft:red_candle[candles=4,lit=true,waterlogged=true]
 minecraft:red_candle_cake[lit=false]
 minecraft:red_candle_cake[lit=true]
 minecraft:red_carpet
-minecraft:red_concrete
 minecraft:red_concrete_powder
 minecraft:red_concrete_slab[type=bottom,waterlogged=false]
 minecraft:red_concrete_slab[type=bottom,waterlogged=true]
@@ -25896,7 +25661,6 @@ minecraft:red_nether_brick_wall[east=tall,north=tall,south=tall,up=true,waterlog
 minecraft:red_nether_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:red_nether_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:red_nether_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:red_nether_bricks
 minecraft:red_poplar_leaves[distance=1,persistent=false,waterlogged=false]
 minecraft:red_poplar_leaves[distance=1,persistent=false,waterlogged=true]
 minecraft:red_poplar_leaves[distance=1,persistent=true,waterlogged=false]
@@ -26375,7 +26139,6 @@ minecraft:red_stained_glass_pane[east=true,north=true,south=true,waterlogged=fal
 minecraft:red_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:red_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:red_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:red_terracotta
 minecraft:red_tulip
 minecraft:red_wall_banner[facing=east]
 minecraft:red_wall_banner[facing=north]
@@ -27778,7 +27541,6 @@ minecraft:redstone_wire[east=up,north=up,power=9,south=side,west=up]
 minecraft:redstone_wire[east=up,north=up,power=9,south=up,west=none]
 minecraft:redstone_wire[east=up,north=up,power=9,south=up,west=side]
 minecraft:redstone_wire[east=up,north=up,power=9,south=up,west=up]
-minecraft:reinforced_deepslate
 minecraft:repeater[delay=1,facing=east,locked=false,powered=false]
 minecraft:repeater[delay=1,facing=east,locked=false,powered=true]
 minecraft:repeater[delay=1,facing=east,locked=true,powered=false]
@@ -27855,7 +27617,6 @@ minecraft:repeating_command_block[conditional=true,facing=north]
 minecraft:repeating_command_block[conditional=true,facing=south]
 minecraft:repeating_command_block[conditional=true,facing=up]
 minecraft:repeating_command_block[conditional=true,facing=west]
-minecraft:resin_block
 minecraft:resin_brick_slab[type=bottom,waterlogged=false]
 minecraft:resin_brick_slab[type=bottom,waterlogged=true]
 minecraft:resin_brick_slab[type=double,waterlogged=false]
@@ -28266,7 +28027,6 @@ minecraft:resin_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=f
 minecraft:resin_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:resin_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:resin_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:resin_bricks
 minecraft:resin_clump[down=false,east=false,north=false,south=false,up=false,waterlogged=false,west=false]
 minecraft:resin_clump[down=false,east=false,north=false,south=false,up=false,waterlogged=false,west=true]
 minecraft:resin_clump[down=false,east=false,north=false,south=false,up=false,waterlogged=true,west=false]
@@ -29080,7 +28840,6 @@ minecraft:sculk_vein[down=true,east=true,north=true,south=true,up=true,waterlogg
 minecraft:sculk_vein[down=true,east=true,north=true,south=true,up=true,waterlogged=false,west=true]
 minecraft:sculk_vein[down=true,east=true,north=true,south=true,up=true,waterlogged=true,west=false]
 minecraft:sculk_vein[down=true,east=true,north=true,south=true,up=true,waterlogged=true,west=true]
-minecraft:sea_lantern
 minecraft:sea_pickle[pickles=1,waterlogged=false]
 minecraft:sea_pickle[pickles=1,waterlogged=true]
 minecraft:sea_pickle[pickles=2,waterlogged=false]
@@ -29100,7 +28859,6 @@ minecraft:shelf_mushroom[age=1,facing=south]
 minecraft:shelf_mushroom[age=1,facing=west]
 minecraft:short_dry_grass
 minecraft:short_grass
-minecraft:shroomlight
 minecraft:shulker_box[facing=down]
 minecraft:shulker_box[facing=east]
 minecraft:shulker_box[facing=north]
@@ -29177,16 +28935,6 @@ minecraft:small_dripleaf[facing=west,half=lower,waterlogged=true]
 minecraft:small_dripleaf[facing=west,half=upper,waterlogged=false]
 minecraft:small_dripleaf[facing=west,half=upper,waterlogged=true]
 minecraft:smithing_table
-minecraft:smoker[facing=east,lit=false]
-minecraft:smoker[facing=east,lit=true]
-minecraft:smoker[facing=north,lit=false]
-minecraft:smoker[facing=north,lit=true]
-minecraft:smoker[facing=south,lit=false]
-minecraft:smoker[facing=south,lit=true]
-minecraft:smoker[facing=west,lit=false]
-minecraft:smoker[facing=west,lit=true]
-minecraft:smooth_basalt
-minecraft:smooth_quartz
 minecraft:smooth_quartz_slab[type=bottom,waterlogged=false]
 minecraft:smooth_quartz_slab[type=bottom,waterlogged=true]
 minecraft:smooth_quartz_slab[type=double,waterlogged=false]
@@ -29273,7 +29021,6 @@ minecraft:smooth_quartz_stairs[facing=west,half=top,shape=outer_right,waterlogge
 minecraft:smooth_quartz_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:smooth_quartz_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:smooth_quartz_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:smooth_red_sandstone
 minecraft:smooth_red_sandstone_slab[type=bottom,waterlogged=false]
 minecraft:smooth_red_sandstone_slab[type=bottom,waterlogged=true]
 minecraft:smooth_red_sandstone_slab[type=double,waterlogged=false]
@@ -29360,7 +29107,6 @@ minecraft:smooth_red_sandstone_stairs[facing=west,half=top,shape=outer_right,wat
 minecraft:smooth_red_sandstone_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:smooth_red_sandstone_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:smooth_red_sandstone_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:smooth_sandstone
 minecraft:smooth_sandstone_slab[type=bottom,waterlogged=false]
 minecraft:smooth_sandstone_slab[type=bottom,waterlogged=true]
 minecraft:smooth_sandstone_slab[type=double,waterlogged=false]
@@ -29502,7 +29248,6 @@ minecraft:soul_lantern[hanging=false,waterlogged=true]
 minecraft:soul_lantern[hanging=true,waterlogged=false]
 minecraft:soul_lantern[hanging=true,waterlogged=true]
 minecraft:soul_sand
-minecraft:soul_soil
 minecraft:soul_torch
 minecraft:soul_wall_torch[facing=east]
 minecraft:soul_wall_torch[facing=north]
@@ -30021,9 +29766,6 @@ minecraft:spruce_wall_sign[facing=south,waterlogged=false]
 minecraft:spruce_wall_sign[facing=south,waterlogged=true]
 minecraft:spruce_wall_sign[facing=west,waterlogged=false]
 minecraft:spruce_wall_sign[facing=west,waterlogged=true]
-minecraft:spruce_wood[axis=x]
-minecraft:spruce_wood[axis=y]
-minecraft:spruce_wood[axis=z]
 minecraft:sticky_piston[extended=false,facing=down]
 minecraft:sticky_piston[extended=false,facing=east]
 minecraft:sticky_piston[extended=false,facing=north]
@@ -30578,81 +30320,6 @@ minecraft:straw_bed[facing=west,occupied=false,part=foot]
 minecraft:straw_bed[facing=west,occupied=false,part=head]
 minecraft:straw_bed[facing=west,occupied=true,part=foot]
 minecraft:straw_bed[facing=west,occupied=true,part=head]
-minecraft:stripped_acacia_log[axis=x]
-minecraft:stripped_acacia_log[axis=y]
-minecraft:stripped_acacia_log[axis=z]
-minecraft:stripped_acacia_wood[axis=x]
-minecraft:stripped_acacia_wood[axis=y]
-minecraft:stripped_acacia_wood[axis=z]
-minecraft:stripped_bamboo_block[axis=x]
-minecraft:stripped_bamboo_block[axis=y]
-minecraft:stripped_bamboo_block[axis=z]
-minecraft:stripped_birch_log[axis=x]
-minecraft:stripped_birch_log[axis=y]
-minecraft:stripped_birch_log[axis=z]
-minecraft:stripped_birch_wood[axis=x]
-minecraft:stripped_birch_wood[axis=y]
-minecraft:stripped_birch_wood[axis=z]
-minecraft:stripped_cherry_log[axis=x]
-minecraft:stripped_cherry_log[axis=y]
-minecraft:stripped_cherry_log[axis=z]
-minecraft:stripped_cherry_wood[axis=x]
-minecraft:stripped_cherry_wood[axis=y]
-minecraft:stripped_cherry_wood[axis=z]
-minecraft:stripped_crimson_hyphae[axis=x]
-minecraft:stripped_crimson_hyphae[axis=y]
-minecraft:stripped_crimson_hyphae[axis=z]
-minecraft:stripped_crimson_stem[axis=x]
-minecraft:stripped_crimson_stem[axis=y]
-minecraft:stripped_crimson_stem[axis=z]
-minecraft:stripped_dark_oak_log[axis=x]
-minecraft:stripped_dark_oak_log[axis=y]
-minecraft:stripped_dark_oak_log[axis=z]
-minecraft:stripped_dark_oak_wood[axis=x]
-minecraft:stripped_dark_oak_wood[axis=y]
-minecraft:stripped_dark_oak_wood[axis=z]
-minecraft:stripped_jungle_log[axis=x]
-minecraft:stripped_jungle_log[axis=y]
-minecraft:stripped_jungle_log[axis=z]
-minecraft:stripped_jungle_wood[axis=x]
-minecraft:stripped_jungle_wood[axis=y]
-minecraft:stripped_jungle_wood[axis=z]
-minecraft:stripped_mangrove_log[axis=x]
-minecraft:stripped_mangrove_log[axis=y]
-minecraft:stripped_mangrove_log[axis=z]
-minecraft:stripped_mangrove_wood[axis=x]
-minecraft:stripped_mangrove_wood[axis=y]
-minecraft:stripped_mangrove_wood[axis=z]
-minecraft:stripped_oak_log[axis=x]
-minecraft:stripped_oak_log[axis=y]
-minecraft:stripped_oak_log[axis=z]
-minecraft:stripped_oak_wood[axis=x]
-minecraft:stripped_oak_wood[axis=y]
-minecraft:stripped_oak_wood[axis=z]
-minecraft:stripped_pale_oak_log[axis=x]
-minecraft:stripped_pale_oak_log[axis=y]
-minecraft:stripped_pale_oak_log[axis=z]
-minecraft:stripped_pale_oak_wood[axis=x]
-minecraft:stripped_pale_oak_wood[axis=y]
-minecraft:stripped_pale_oak_wood[axis=z]
-minecraft:stripped_poplar_log[axis=x]
-minecraft:stripped_poplar_log[axis=y]
-minecraft:stripped_poplar_log[axis=z]
-minecraft:stripped_poplar_wood[axis=x]
-minecraft:stripped_poplar_wood[axis=y]
-minecraft:stripped_poplar_wood[axis=z]
-minecraft:stripped_spruce_log[axis=x]
-minecraft:stripped_spruce_log[axis=y]
-minecraft:stripped_spruce_log[axis=z]
-minecraft:stripped_spruce_wood[axis=x]
-minecraft:stripped_spruce_wood[axis=y]
-minecraft:stripped_spruce_wood[axis=z]
-minecraft:stripped_warped_hyphae[axis=x]
-minecraft:stripped_warped_hyphae[axis=y]
-minecraft:stripped_warped_hyphae[axis=z]
-minecraft:stripped_warped_stem[axis=x]
-minecraft:stripped_warped_stem[axis=y]
-minecraft:stripped_warped_stem[axis=z]
 minecraft:structure_block[mode=corner]
 minecraft:structure_block[mode=data]
 minecraft:structure_block[mode=load]
@@ -30674,7 +30341,6 @@ minecraft:sugar_cane[age=6]
 minecraft:sugar_cane[age=7]
 minecraft:sugar_cane[age=8]
 minecraft:sugar_cane[age=9]
-minecraft:sulfur
 minecraft:sulfur_brick_slab[type=bottom,waterlogged=false]
 minecraft:sulfur_brick_slab[type=bottom,waterlogged=true]
 minecraft:sulfur_brick_slab[type=double,waterlogged=false]
@@ -31085,7 +30751,6 @@ minecraft:sulfur_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=
 minecraft:sulfur_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:sulfur_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:sulfur_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:sulfur_bricks
 minecraft:sulfur_slab[type=bottom,waterlogged=false]
 minecraft:sulfur_slab[type=bottom,waterlogged=true]
 minecraft:sulfur_slab[type=double,waterlogged=false]
@@ -31551,7 +31216,6 @@ minecraft:target[power=6]
 minecraft:target[power=7]
 minecraft:target[power=8]
 minecraft:target[power=9]
-minecraft:terracotta
 minecraft:test_block[mode=accept]
 minecraft:test_block[mode=fail]
 minecraft:test_block[mode=log]
@@ -31757,7 +31421,6 @@ minecraft:tube_coral_wall_fan[facing=south,waterlogged=false]
 minecraft:tube_coral_wall_fan[facing=south,waterlogged=true]
 minecraft:tube_coral_wall_fan[facing=west,waterlogged=false]
 minecraft:tube_coral_wall_fan[facing=west,waterlogged=true]
-minecraft:tuff
 minecraft:tuff_brick_slab[type=bottom,waterlogged=false]
 minecraft:tuff_brick_slab[type=bottom,waterlogged=true]
 minecraft:tuff_brick_slab[type=double,waterlogged=false]
@@ -32168,7 +31831,6 @@ minecraft:tuff_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=fa
 minecraft:tuff_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=low]
 minecraft:tuff_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=none]
 minecraft:tuff_brick_wall[east=tall,north=tall,south=tall,up=true,waterlogged=true,west=tall]
-minecraft:tuff_bricks
 minecraft:tuff_slab[type=bottom,waterlogged=false]
 minecraft:tuff_slab[type=bottom,waterlogged=true]
 minecraft:tuff_slab[type=double,waterlogged=false]
@@ -32650,9 +32312,6 @@ minecraft:vault[facing=west,ominous=true,vault_state=active]
 minecraft:vault[facing=west,ominous=true,vault_state=ejecting]
 minecraft:vault[facing=west,ominous=true,vault_state=inactive]
 minecraft:vault[facing=west,ominous=true,vault_state=unlocking]
-minecraft:verdant_froglight[axis=x]
-minecraft:verdant_froglight[axis=y]
-minecraft:verdant_froglight[axis=z]
 minecraft:vine[east=false,north=false,south=false,up=false,west=false]
 minecraft:vine[east=false,north=false,south=false,up=false,west=true]
 minecraft:vine[east=false,north=false,south=false,up=true,west=false]
@@ -32906,11 +32565,7 @@ minecraft:warped_hanging_sign[attached=true,rotation=8,waterlogged=false]
 minecraft:warped_hanging_sign[attached=true,rotation=8,waterlogged=true]
 minecraft:warped_hanging_sign[attached=true,rotation=9,waterlogged=false]
 minecraft:warped_hanging_sign[attached=true,rotation=9,waterlogged=true]
-minecraft:warped_hyphae[axis=x]
-minecraft:warped_hyphae[axis=y]
-minecraft:warped_hyphae[axis=z]
 minecraft:warped_nylium
-minecraft:warped_planks
 minecraft:warped_pressure_plate[powered=false]
 minecraft:warped_pressure_plate[powered=true]
 minecraft:warped_roots
@@ -33096,9 +32751,6 @@ minecraft:warped_stairs[facing=west,half=top,shape=outer_right,waterlogged=false
 minecraft:warped_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:warped_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:warped_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:warped_stem[axis=x]
-minecraft:warped_stem[axis=y]
-minecraft:warped_stem[axis=z]
 minecraft:warped_trapdoor[facing=east,half=bottom,open=false,powered=false,waterlogged=false]
 minecraft:warped_trapdoor[facing=east,half=bottom,open=false,powered=false,waterlogged=true]
 minecraft:warped_trapdoor[facing=east,half=bottom,open=false,powered=true,waterlogged=false]
@@ -33179,11 +32831,9 @@ minecraft:warped_wall_sign[facing=south,waterlogged=false]
 minecraft:warped_wall_sign[facing=south,waterlogged=true]
 minecraft:warped_wall_sign[facing=west,waterlogged=false]
 minecraft:warped_wall_sign[facing=west,waterlogged=true]
-minecraft:warped_wart_block
 minecraft:water_cauldron[level=1]
 minecraft:water_cauldron[level=2]
 minecraft:water_cauldron[level=3]
-minecraft:waxed_chiseled_copper
 minecraft:waxed_copper_bars[east=false,north=false,south=false,waterlogged=false,west=false]
 minecraft:waxed_copper_bars[east=false,north=false,south=false,waterlogged=false,west=true]
 minecraft:waxed_copper_bars[east=false,north=false,south=false,waterlogged=true,west=false]
@@ -33216,7 +32866,6 @@ minecraft:waxed_copper_bars[east=true,north=true,south=true,waterlogged=false,we
 minecraft:waxed_copper_bars[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:waxed_copper_bars[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:waxed_copper_bars[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:waxed_copper_block
 minecraft:waxed_copper_bulb[lit=false,powered=false]
 minecraft:waxed_copper_bulb[lit=false,powered=true]
 minecraft:waxed_copper_bulb[lit=true,powered=false]
@@ -33417,7 +33066,6 @@ minecraft:waxed_copper_trapdoor[facing=west,half=top,open=true,powered=false,wat
 minecraft:waxed_copper_trapdoor[facing=west,half=top,open=true,powered=false,waterlogged=true]
 minecraft:waxed_copper_trapdoor[facing=west,half=top,open=true,powered=true,waterlogged=false]
 minecraft:waxed_copper_trapdoor[facing=west,half=top,open=true,powered=true,waterlogged=true]
-minecraft:waxed_cut_copper
 minecraft:waxed_cut_copper_slab[type=bottom,waterlogged=false]
 minecraft:waxed_cut_copper_slab[type=bottom,waterlogged=true]
 minecraft:waxed_cut_copper_slab[type=double,waterlogged=false]
@@ -33504,8 +33152,6 @@ minecraft:waxed_cut_copper_stairs[facing=west,half=top,shape=outer_right,waterlo
 minecraft:waxed_cut_copper_stairs[facing=west,half=top,shape=outer_right,waterlogged=true]
 minecraft:waxed_cut_copper_stairs[facing=west,half=top,shape=straight,waterlogged=false]
 minecraft:waxed_cut_copper_stairs[facing=west,half=top,shape=straight,waterlogged=true]
-minecraft:waxed_exposed_chiseled_copper
-minecraft:waxed_exposed_copper
 minecraft:waxed_exposed_copper_bars[east=false,north=false,south=false,waterlogged=false,west=false]
 minecraft:waxed_exposed_copper_bars[east=false,north=false,south=false,waterlogged=false,west=true]
 minecraft:waxed_exposed_copper_bars[east=false,north=false,south=false,waterlogged=true,west=false]
@@ -33738,7 +33384,6 @@ minecraft:waxed_exposed_copper_trapdoor[facing=west,half=top,open=true,powered=f
 minecraft:waxed_exposed_copper_trapdoor[facing=west,half=top,open=true,powered=false,waterlogged=true]
 minecraft:waxed_exposed_copper_trapdoor[facing=west,half=top,open=true,powered=true,waterlogged=false]
 minecraft:waxed_exposed_copper_trapdoor[facing=west,half=top,open=true,powered=true,waterlogged=true]
-minecraft:waxed_exposed_cut_copper
 minecraft:waxed_exposed_cut_copper_slab[type=bottom,waterlogged=false]
 minecraft:waxed_exposed_cut_copper_slab[type=bottom,waterlogged=true]
 minecraft:waxed_exposed_cut_copper_slab[type=double,waterlogged=false]
@@ -33873,8 +33518,6 @@ minecraft:waxed_lightning_rod[facing=west,powered=false,waterlogged=false]
 minecraft:waxed_lightning_rod[facing=west,powered=false,waterlogged=true]
 minecraft:waxed_lightning_rod[facing=west,powered=true,waterlogged=false]
 minecraft:waxed_lightning_rod[facing=west,powered=true,waterlogged=true]
-minecraft:waxed_oxidized_chiseled_copper
-minecraft:waxed_oxidized_copper
 minecraft:waxed_oxidized_copper_bars[east=false,north=false,south=false,waterlogged=false,west=false]
 minecraft:waxed_oxidized_copper_bars[east=false,north=false,south=false,waterlogged=false,west=true]
 minecraft:waxed_oxidized_copper_bars[east=false,north=false,south=false,waterlogged=true,west=false]
@@ -34107,7 +33750,6 @@ minecraft:waxed_oxidized_copper_trapdoor[facing=west,half=top,open=true,powered=
 minecraft:waxed_oxidized_copper_trapdoor[facing=west,half=top,open=true,powered=false,waterlogged=true]
 minecraft:waxed_oxidized_copper_trapdoor[facing=west,half=top,open=true,powered=true,waterlogged=false]
 minecraft:waxed_oxidized_copper_trapdoor[facing=west,half=top,open=true,powered=true,waterlogged=true]
-minecraft:waxed_oxidized_cut_copper
 minecraft:waxed_oxidized_cut_copper_slab[type=bottom,waterlogged=false]
 minecraft:waxed_oxidized_cut_copper_slab[type=bottom,waterlogged=true]
 minecraft:waxed_oxidized_cut_copper_slab[type=double,waterlogged=false]
@@ -34218,8 +33860,6 @@ minecraft:waxed_oxidized_lightning_rod[facing=west,powered=false,waterlogged=fal
 minecraft:waxed_oxidized_lightning_rod[facing=west,powered=false,waterlogged=true]
 minecraft:waxed_oxidized_lightning_rod[facing=west,powered=true,waterlogged=false]
 minecraft:waxed_oxidized_lightning_rod[facing=west,powered=true,waterlogged=true]
-minecraft:waxed_weathered_chiseled_copper
-minecraft:waxed_weathered_copper
 minecraft:waxed_weathered_copper_bars[east=false,north=false,south=false,waterlogged=false,west=false]
 minecraft:waxed_weathered_copper_bars[east=false,north=false,south=false,waterlogged=false,west=true]
 minecraft:waxed_weathered_copper_bars[east=false,north=false,south=false,waterlogged=true,west=false]
@@ -34452,7 +34092,6 @@ minecraft:waxed_weathered_copper_trapdoor[facing=west,half=top,open=true,powered
 minecraft:waxed_weathered_copper_trapdoor[facing=west,half=top,open=true,powered=false,waterlogged=true]
 minecraft:waxed_weathered_copper_trapdoor[facing=west,half=top,open=true,powered=true,waterlogged=false]
 minecraft:waxed_weathered_copper_trapdoor[facing=west,half=top,open=true,powered=true,waterlogged=true]
-minecraft:waxed_weathered_cut_copper
 minecraft:waxed_weathered_cut_copper_slab[type=bottom,waterlogged=false]
 minecraft:waxed_weathered_cut_copper_slab[type=bottom,waterlogged=true]
 minecraft:waxed_weathered_cut_copper_slab[type=double,waterlogged=false]
@@ -34995,7 +34634,6 @@ minecraft:white_candle[candles=4,lit=true,waterlogged=true]
 minecraft:white_candle_cake[lit=false]
 minecraft:white_candle_cake[lit=true]
 minecraft:white_carpet
-minecraft:white_concrete
 minecraft:white_concrete_powder
 minecraft:white_concrete_slab[type=bottom,waterlogged=false]
 minecraft:white_concrete_slab[type=bottom,waterlogged=true]
@@ -35126,7 +34764,6 @@ minecraft:white_stained_glass_pane[east=true,north=true,south=true,waterlogged=f
 minecraft:white_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:white_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:white_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:white_terracotta
 minecraft:white_tulip
 minecraft:white_wall_banner[facing=east]
 minecraft:white_wall_banner[facing=north]
@@ -35326,7 +34963,6 @@ minecraft:yellow_candle[candles=4,lit=true,waterlogged=true]
 minecraft:yellow_candle_cake[lit=false]
 minecraft:yellow_candle_cake[lit=true]
 minecraft:yellow_carpet
-minecraft:yellow_concrete
 minecraft:yellow_concrete_powder
 minecraft:yellow_concrete_slab[type=bottom,waterlogged=false]
 minecraft:yellow_concrete_slab[type=bottom,waterlogged=true]
@@ -35485,7 +35121,6 @@ minecraft:yellow_stained_glass_pane[east=true,north=true,south=true,waterlogged=
 minecraft:yellow_stained_glass_pane[east=true,north=true,south=true,waterlogged=false,west=true]
 minecraft:yellow_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=false]
 minecraft:yellow_stained_glass_pane[east=true,north=true,south=true,waterlogged=true,west=true]
-minecraft:yellow_terracotta
 minecraft:yellow_wall_banner[facing=east]
 minecraft:yellow_wall_banner[facing=north]
 minecraft:yellow_wall_banner[facing=south]

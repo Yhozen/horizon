@@ -1545,10 +1545,8 @@ minecraft:pillager minecraft:scale
 minecraft:pillager minecraft:step_height
 minecraft:pillager minecraft:water_movement_efficiency
 minecraft:pillager minecraft:waypoint_transmit_range
-minecraft:player minecraft:below_name_distance
 minecraft:player minecraft:jump_strength
 minecraft:player minecraft:movement_speed
-minecraft:player minecraft:name_tag_distance
 minecraft:player minecraft:waypoint_receive_range
 minecraft:player minecraft:waypoint_transmit_range
 minecraft:polar_bear minecraft:air_drag_modifier
