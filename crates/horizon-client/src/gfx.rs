@@ -4068,9 +4068,14 @@ impl Renderer {
             timer.begin(&mut encoder);
         }
         // The world's targets: the screen, or the scaled target of `post`.
-        let scaled = self
-            .world_post
-            .prepare(&self.device, [self.config.width, self.config.height]);
+        // A shader pack draws at the window's size, with its own
+        // anti-aliasing: resolution scale and FXAA wait while it runs.
+        let scaled = if pack_on {
+            None
+        } else {
+            self.world_post
+                .prepare(&self.device, [self.config.width, self.config.height])
+        };
         let (world_view, world_depth) = match &scaled {
             Some((color, depth)) => (color, depth),
             None => (&view_target, &self.depth),
@@ -4088,7 +4093,6 @@ impl Renderer {
         };
         // With a pack, its programs draw the world into the view, then
         // Horizon's overlays over its depth (`gfx/glsl_pack/frame.rs`).
-        let pack_on = pack_on && scaled.is_none();
         let pack_hand = pack_on
             && self
                 .glsl_pack
