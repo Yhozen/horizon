@@ -33,6 +33,9 @@ pub enum Form {
     Cross,
     /// A fluid surface drawn by the fluid renderer.
     Fluid,
+    /// Solid but not a full cube in some states: its shapes come from
+    /// [`crate::shapes::of`] per state (slabs, stairs).
+    Shaped,
     /// Present only so loaders resolve its name.
     Inert,
 }
@@ -81,6 +84,20 @@ pub enum Faces {
         lit_north: &'static str,
     },
     Cross(&'static str),
+    /// A slab: its halves' bottom, top and side, and the six faces of the
+    /// double slab (down, up, north, south, west, east).
+    Slab {
+        bottom: &'static str,
+        top: &'static str,
+        side: &'static str,
+        double: [&'static str; 6],
+    },
+    /// Stairs: the bottom, top and side of its models.
+    Stairs {
+        bottom: &'static str,
+        top: &'static str,
+        side: &'static str,
+    },
     Fluid {
         still: &'static str,
         flow: &'static str,
@@ -530,6 +547,7 @@ pub fn defined() -> Vec<Block> {
         numbering::blocks().iter().map(|b| (b.name, b)).collect();
     let mut blocks = authored();
     crate::cubes::add(&mut blocks);
+    crate::slabs::add(&mut blocks);
     blocks
         .into_iter()
         .map(|mut block| {
@@ -1082,7 +1100,7 @@ impl Block {
         self.tier == Tier::Palette
     }
     pub fn collides(&self) -> bool {
-        matches!(self.form, Form::Cube | Form::SeeThroughCube)
+        matches!(self.form, Form::Cube | Form::SeeThroughCube | Form::Shaped)
     }
     pub fn opaque(&self) -> bool {
         self.form == Form::Cube
@@ -1090,7 +1108,9 @@ impl Block {
     /// Its outline when targeted: a full cube, the grass's smaller box, or none.
     pub fn outline(&self) -> Vec<[f64; 6]> {
         match self.form {
-            Form::Cube | Form::SeeThroughCube => vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]],
+            Form::Cube | Form::SeeThroughCube | Form::Shaped => {
+                vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]
+            }
             Form::Cross if self.id == "short_grass" => {
                 vec![[0.125, 0.0, 0.125, 0.875, 0.8125, 0.875]]
             }
@@ -1136,6 +1156,17 @@ impl Block {
                 all.push(lit_north);
                 all
             }
+            Faces::Slab {
+                bottom,
+                top,
+                side,
+                double,
+            } => {
+                let mut all = vec![bottom, top, side];
+                all.extend(double);
+                unique(&all)
+            }
+            Faces::Stairs { bottom, top, side } => unique(&[bottom, top, side]),
             Faces::Fluid { still, flow } => vec![still, flow],
         }
     }
@@ -1216,7 +1247,7 @@ mod tests {
     }
 
     /// The number of palette blocks (checked again by the client's test).
-    pub const PALETTE_BLOCKS: usize = 281;
+    pub const PALETTE_BLOCKS: usize = 479;
 
     #[test]
     fn states_vary_the_last_property_fastest_and_have_a_default() {

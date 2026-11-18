@@ -23,6 +23,8 @@ pub mod mobs;
 pub mod network;
 pub mod numbering;
 pub mod screens;
+pub mod shapes;
+pub mod slabs;
 pub mod sources;
 pub mod tables;
 

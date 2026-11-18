@@ -767,7 +767,6 @@ block/smithing_table_front.png
 block/smithing_table_side.png
 block/smithing_table_top.png
 block/smoker_front_on.png
-block/smooth_stone_slab_side.png
 block/sniffer_egg_not_cracked_bottom.png
 block/sniffer_egg_not_cracked_east.png
 block/sniffer_egg_not_cracked_north.png

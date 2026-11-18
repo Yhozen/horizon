@@ -552,7 +552,13 @@ pub fn loot_table(block: &Block) -> Option<Value> {
     let pools = match block.drop {
         Drop::Nothing => return None,
         Drop::Itself => {
-            json!([{"rolls": 1.0, "entries": [item(block.key())], "conditions": [explosion]}])
+            let mut entry = item(block.key());
+            if block.classes.contains(&"SlabBlock") {
+                // A double slab gives two.
+                entry["modifier"] = json!([{"type": "minecraft:set_count", "count": 2,
+                    "conditions": [{"type": "minecraft:block_state_property", "block": block.key(), "properties": {"type": "double"}}]}]);
+            }
+            json!([{"rolls": 1.0, "entries": [entry], "conditions": [explosion]}])
         }
         Drop::Item { id, min, max, ore } => {
             let mut entry = item(format!("minecraft:{id}"));

@@ -128,6 +128,8 @@ The generator is `crates/horizon-open-content`:
 | `sources.rs` | `content/open/sources.json`: inputs, checksums, credits and notices |
 | `numbering.rs`, `network.rs` | Minecraft's numbering from `data/` ([Numbering](#numbering)) and `registries.json` |
 | `coverage.rs` | `horizon-open-coverage.json` ([Coverage](#coverage)) |
+| `shapes.rs` | the shape library: per-state collision, outline and occlusion shapes, the facts that follow from them, the cached shape tables |
+| `slabs.rs` | slabs and stairs ([Slabs and stairs](#slabs-and-stairs)) |
 
 Building fails on a missing or changed input, a licence whose text is not vendored, a vendored
 file nobody attributed, or an unresolved model, texture, parent or item reference.
@@ -182,6 +184,21 @@ The bubble column is water to look at and swim in (its fluid is a water source).
 state holds a water source, as Minecraft's do. On a Java server, through the relay, they all
 show as Minecraft's; in the edition's own worlds water and lava do not flow (see
 [The content profile](#the-content-profile)).
+
+### Slabs and stairs
+
+`data/blocks/slabs.txt` (written by `python3 tools/open_slab_facts.py`, `--check` as above) lists
+the 101 slabs and 97 stairs (the copper ones too): class chain, destroy time, resistance,
+friction, map colour, sound type, mining tool and level, note block instrument, whether lava
+ignites it, the bottom, top and side textures of its models, and a slab's double-block faces.
+`slabs.rs` adds them to the palette with all of Minecraft's states. Their shapes come from the
+shape library (`shapes.rs`): boxes joined with the shared engine's `VoxelShape`, as
+`Shapes.box` and `Shapes.or` do, turned and flipped per state. From each state's shapes the
+generator writes its collision and light occlusion (`cached-collision.nbt`, `occlusion.nbt`),
+outline and edges, sturdy faces, light dampening and full-block flags. A waterlogged state
+holds a water source. The models are the bundle's own, with the boxes, UVs and cull faces
+Minecraft's slab and stairs templates have; stairs have a straight, an inner and an outer
+model, turned per state with `uvlock` as Minecraft's block states do. A double slab drops two.
 
 ### Support blocks
 
