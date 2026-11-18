@@ -1,6 +1,7 @@
 //! `--shader-pack PATH`: an OptiFine-format shader pack (zip or folder) that
-//! draws the overworld's terrain and the final image (a proof of concept,
-//! docs/shader-packs.md). Off unless the argument is given; nothing is saved.
+//! draws the overworld (docs/shader-packs.md), with `--shader-pack-option
+//! NAME=VALUE` to change its options. Off unless the argument is given;
+//! nothing is saved.
 
 use super::{Dim, Game, PackResources};
 use horizon_client::gfx::{PackFrame, Renderer};
@@ -13,9 +14,23 @@ use std::sync::OnceLock;
 static PATH: OnceLock<PathBuf> = OnceLock::new();
 /// The pack's files, read once (a renderer is rebuilt on every resource reload).
 static FILES: OnceLock<Result<PackFiles, String>> = OnceLock::new();
+/// `--shader-pack-option NAME=VALUE` (repeatable), in order.
+static OPTIONS: std::sync::Mutex<Vec<(String, Option<String>)>> = std::sync::Mutex::new(Vec::new());
 
 pub(super) fn set_path(path: PathBuf) {
     let _ = PATH.set(path);
+}
+
+/// `NAME=VALUE` (a boolean option takes `true` or `false`); `NAME` alone turns it on.
+pub(super) fn add_option(arg: &str) {
+    let (name, value) = match arg.split_once('=') {
+        Some((n, v)) => (n.trim().to_string(), v.trim().to_string()),
+        None => (arg.trim().to_string(), "true".to_string()),
+    };
+    OPTIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push((name, Some(value)));
 }
 
 /// Every file of a folder or zip, by its path inside the pack.
@@ -73,30 +88,46 @@ pub(super) fn install(renderer: &mut Renderer, pack: &PackResources) {
         }
     };
     let started = web_time::Instant::now();
-    let host = renderer.shader_pack_host();
+    let mut host = renderer.shader_pack_host();
     let mut try_compile = |shadows: bool| {
         let mut options = PackOptions::default();
-        let mut kinds = vec![ProgramKind::Terrain, ProgramKind::Water, ProgramKind::Final];
-        if shadows {
-            kinds.push(ProgramKind::Shadow);
-        } else {
+        options.overrides.extend(
+            OPTIONS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .cloned(),
+        );
+        if !shadows {
             // Without a shadow program the pack must not read a shadow map.
             options.overrides.push(("ENABLE_SHADOWS".into(), None));
         }
-        horizon_glsl_pack::compile_kinds(files, "minecraft:overworld", &kinds, &options, &host)
+        host.max_varyings = renderer.max_varyings();
+        horizon_glsl_pack::compile(files, "minecraft:overworld", &options, &host)
             .map_err(|e| e.to_string())
-            .and_then(|compiled| renderer.set_shader_pack(Some(&compiled)).map(|()| compiled))
+            .and_then(|mut compiled| {
+                if !shadows {
+                    compiled.programs.remove(&ProgramKind::Shadow);
+                    compiled.programs.remove(&ProgramKind::ShadowEntities);
+                    compiled.plan.programs.remove(&ProgramKind::Shadow);
+                    compiled.plan.programs.remove(&ProgramKind::ShadowEntities);
+                }
+                for (kind, why) in &compiled.skipped {
+                    log::warn!("Horizon: shader pack {kind:?} skipped: {why}");
+                }
+                renderer
+                    .set_shader_pack(Some((&compiled, files)))
+                    .map(|()| compiled)
+            })
     };
-    // Shadows when the pack has a shadow program that compiles, else none.
     let shadows = std::env::var("HORIZON_SHADER_PACK_SHADOWS").map_or(true, |v| v != "0");
-    let compiled = match shadows.then(|| try_compile(true)) {
-        Some(Ok(compiled)) => Ok(compiled),
-        first => {
-            if let Some(Err(e)) = first {
-                log::warn!("Horizon: shader pack shadows off: {e}");
-            }
+    let compiled = match try_compile(shadows) {
+        Ok(compiled) => Ok(compiled),
+        Err(e) if shadows => {
+            log::warn!("Horizon: shader pack with shadows failed ({e}); trying without");
             try_compile(false)
         }
+        Err(e) => Err(e),
     };
     match compiled {
         Ok(compiled) => {
@@ -105,11 +136,13 @@ pub(super) fn install(renderer: &mut Renderer, pack: &PackResources) {
                 .set_pack_tags(horizon_client::mesher::PackTags::new(
                     pack.assets.registry,
                     &compiled.blocks,
+                    &compiled.plan,
                 ));
             log::info!(
-                "Horizon: shader pack {} ready in {} ms",
+                "Horizon: shader pack {} ready in {} ms ({} programs)",
                 path.display(),
-                started.elapsed().as_millis()
+                started.elapsed().as_millis(),
+                compiled.programs.len()
             );
         }
         Err(e) => log::warn!("Horizon: shader pack {} not used: {e}", path.display()),
@@ -136,10 +169,40 @@ impl Game<'_> {
             moon_phase: day.div_euclid(24000).rem_euclid(8) as i32,
             rain_strength: rain0 + (rain1 - rain0) * 0.5,
             eye_brightness: [i32::from(packed & 15) * 16, i32::from(packed >> 4) * 16],
-            held_light: [0, 0],
+            held_light: self.held_light_levels(),
             night_vision: self.night_vision_intensity(),
             blindness: f32::from(u8::from(self.potions.effects.get("blindness").is_some())),
             hide_gui: self.ui.hide_gui,
+            eye_in_fluid: match self.camera_fluid(eye) {
+                horizon_client::camera::CameraFluid::None => 0,
+                horizon_client::camera::CameraFluid::Water => 1,
+                horizon_client::camera::CameraFluid::Lava => 2,
+                horizon_client::camera::CameraFluid::PowderSnow => 3,
+            },
         })
+    }
+}
+
+impl Game<'_> {
+    /// The light the main and off hand's items give (`heldBlockLightValue`, `…2`).
+    fn held_light_levels(&self) -> [i32; 2] {
+        let Some(lum) = &self.luminance else {
+            return [0, 0];
+        };
+        let held = |slot| {
+            self.stack_in(slot)
+                .map_or(0, |s| i32::from(lum.of(&s.item)))
+        };
+        [held(self.selected), held(super::shield::OFFHAND_SLOT)]
+    }
+
+    /// Builds the item light table the pack's held light reads, once.
+    pub(super) fn prepare_pack_frame(&mut self) {
+        if PATH.get().is_some() && self.luminance.is_none() {
+            self.luminance = Some(horizon_client::dynamic_light::Luminance::new(
+                self.res.facts(),
+                self.pack.assets.registry,
+            ));
+        }
     }
 }

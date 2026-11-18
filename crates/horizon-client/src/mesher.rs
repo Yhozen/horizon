@@ -318,13 +318,19 @@ pub struct MeshTables {
 /// `horizon_glsl_pack::vertex_tag`.
 pub struct PackTags {
     pub states: Vec<u8>,
+    /// The fluid surfaces' materials (`mc_Entity.y` = 1).
     pub water: u8,
     pub lava: u8,
+    /// `oldLighting`: keep vanilla's face shade (else every face is 1).
+    pub old_lighting: bool,
+    /// `ambientOcclusionLevel`: brightness b becomes 1 - level × (1 - b).
+    pub ao_level: f32,
 }
 impl PackTags {
     pub fn new(
         registry: &horizon_world::registry::BlockRegistry,
         blocks: &horizon_glsl_pack::BlockIds,
+        plan: &horizon_glsl_pack::PackPlan,
     ) -> Self {
         Self {
             states: (0..registry.len() as u32)
@@ -338,7 +344,33 @@ impl PackTags {
                 .collect(),
             water: blocks.material("water", true),
             lava: blocks.material("lava", true),
+            old_lighting: plan.properties.old_lighting,
+            ao_level: plan.ambient_occlusion_level.clamp(0.0, 1.0),
         }
+    }
+}
+/// The pack's normal code of a quad: its axis, or `Other` when it is not
+/// axis-aligned (cross plants), from the winding the mesher's `facing` uses.
+fn quad_normal_code(
+    positions: &[[f32; 3]; 4],
+    facing: horizon_assets::model::Direction,
+) -> horizon_glsl_pack::NormalCode {
+    let [a, b, c] = [positions[0], positions[1], positions[2]];
+    let (u, v) = (
+        [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+        [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+    );
+    let n = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    let max = n.iter().fold(0.0f32, |m, c| m.max(c.abs()));
+    if len > 0.0 && max < 0.99 * len {
+        horizon_glsl_pack::NormalCode::Other
+    } else {
+        normal_code(facing)
     }
 }
 /// `horizon_glsl_pack::NormalCode` of a model face direction.
@@ -910,13 +942,21 @@ impl Mesher<'_> {
     ) {
         let q = &face.quad;
         let shade_face = q.shade_direction_override.unwrap_or(q.facing);
-        let directional = lighting::cardinal(self.nether_shading, shade_face);
+        let pack = material.and(self.tables.pack.get());
+        let directional = match pack {
+            Some(p) if !p.old_lighting => 1.0,
+            _ => lighting::cardinal(self.nether_shading, shade_face),
+        };
         // Grey level per vertex before tinting, and vanilla light coords.
         let (gray, coords) = if ao {
             let info = &self.tables.info;
             let (brightness, coords) =
                 lighting::ambient_occlusion(pad, info, state, pos, &q.positions, q.facing);
-            let gray = brightness.map(|b| lighting::scale(lighting::gray(b), directional));
+            let gray = brightness.map(|b| {
+                // Only with a pack: in f32, 1 - (1 - b) is not always b.
+                let b = pack.map_or(b, |p| 1.0 - p.ao_level * (1.0 - b));
+                lighting::scale(lighting::gray(b), directional)
+            });
             (gray, coords)
         } else {
             let coords = match q.cull {
@@ -948,7 +988,9 @@ impl Mesher<'_> {
                     face.layer as u16
                 },
                 match material {
-                    Some(m) => tag_color(pack_rgb(rgb), m, normal_code(q.facing)),
+                    Some(m) => {
+                        tag_color(pack_rgb(rgb), m, quad_normal_code(&q.positions, q.facing))
+                    }
                     None => pack_rgb(rgb),
                 },
                 pack_coords(lighting::with_emission(coords[i], q.light_emission)),

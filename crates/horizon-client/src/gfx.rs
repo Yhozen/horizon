@@ -69,7 +69,6 @@ mod cull;
 mod end_sky;
 mod flat;
 mod glsl_pack;
-use glsl_pack::PackUniformInputs;
 pub mod lightning;
 mod lod;
 mod occlusion;
@@ -297,6 +296,37 @@ pub struct PackFrame {
     pub night_vision: f32,
     pub blindness: f32,
     pub hide_gui: bool,
+    /// `isEyeInWater`: 1 water, 2 lava, 3 powder snow, else 0.
+    pub eye_in_fluid: i32,
+}
+
+/// What `draw_frame` worked out for the world pass, for the pack's frame
+/// (`gfx/glsl_pack/frame.rs`): matrices, fog, and how much of each buffer
+/// to draw.
+pub(crate) struct WorldCounts {
+    pub view_proj: Mat4,
+    pub hand_view_proj: Mat4,
+    pub fog_color: [f32; 4],
+    pub fog: [f32; 4],
+    pub solid_draws: u32,
+    pub translucent_draws: u32,
+    pub entity_quads: u32,
+    pub crumbling_quads: u32,
+    pub translucent_crumbling_quads: u32,
+    pub water_mask_quads: u32,
+    pub world_quads: u32,
+    pub additive_quads: u32,
+    pub hand_quads: u32,
+    pub see_through_quads: u32,
+    pub outline_edges: u32,
+    pub debug_depth: u32,
+    pub debug_top: u32,
+    pub celestial_vertices: u32,
+    /// The shadow casters' draws: `shadow_solid` from `shadow_first`, then
+    /// `shadow_translucent`.
+    pub shadow_first: u32,
+    pub shadow_solid: u32,
+    pub shadow_translucent: u32,
 }
 /// One frame of the world border wall (`WorldBorderRenderer.render`).
 #[derive(Clone, Debug)]
@@ -466,6 +496,8 @@ pub struct Renderer {
     pub multi_draw: bool,
     /// Per-frame scratch, kept to avoid allocating every frame.
     visible: Vec<resident::Visible>,
+    /// The shader pack's shadow casters this frame (every face, in the light's box).
+    shadow_visible: Vec<resident::Visible>,
     visible_lods: Vec<lod::Visible>,
     translucent_draws: Vec<(u64, usize, [u32; 5], (u32, Option<u32>))>,
     origins: Vec<[f32; 4]>,
@@ -493,8 +525,8 @@ pub struct Renderer {
     glsl_pack: Option<glsl_pack::PackRenderer>,
     /// The terrain bind group's sprite layout, for the pack's generated shaders.
     sprite_host: horizon_glsl_pack::HostParams,
-    /// Frames drawn with the shader pack (its `frameCounter`).
-    pack_frames: u32,
+    /// The entity bind group's layout (pack programs on entity geometry).
+    entity_bind_layout: wgpu::BindGroupLayout,
     pub hud: HudRenderer,
     /// Interface atlas patches (glyphs rasterized, maps drawn) of frames that
     /// were not drawn: uploaded with the next drawn frame, since nothing makes
@@ -903,7 +935,7 @@ pub async fn open_web_gpu() -> Result<()> {
     let limits = adapter.limits();
     let features = timing::GpuTimer::features(&adapter)
         | cull::Cull::features(&adapter)
-        | (adapter.features() & wgpu::Features::INDIRECT_FIRST_INSTANCE);
+        | (adapter.features() & (wgpu::Features::INDIRECT_FIRST_INSTANCE | glsl_pack::FEATURES));
     startup_step(format_args!(
         "requesting the WebGPU device with features [{features}] ({} texture layers)",
         limits.max_texture_array_layers
@@ -1005,7 +1037,8 @@ async fn open_device(
             | cull::Cull::features(&adapter)
             | (adapter.features()
                 & (wgpu::Features::INDIRECT_FIRST_INSTANCE
-                    | wgpu::Features::MAPPABLE_PRIMARY_BUFFERS));
+                    | wgpu::Features::MAPPABLE_PRIMARY_BUFFERS
+                    | glsl_pack::FEATURES));
         let driver = format!("{} {}", info.driver, info.driver_info);
         startup_step(format_args!(
             "requesting the device (driver {}) with features [{features}] and the adapter's \
@@ -2537,6 +2570,7 @@ impl Renderer {
             indirect_capacity: 1024,
             multi_draw,
             visible: Vec::new(),
+            shadow_visible: Vec::new(),
             visible_lods: Vec::new(),
             translucent_draws: Vec::new(),
             origins: Vec::new(),
@@ -2557,7 +2591,7 @@ impl Renderer {
                 sprite_grid: grid,
                 ..Default::default()
             },
-            pack_frames: 0,
+            entity_bind_layout: entity_bindings,
             hud,
             held_patches: Vec::new(),
             menu_blur: None,
@@ -3030,6 +3064,10 @@ impl Renderer {
             &self.lightmap_sampler,
         );
     }
+    /// The device's inter-stage variable limit, for packing a pack's varyings.
+    pub fn max_varyings(&self) -> u32 {
+        self.device.limits().max_inter_stage_shader_variables
+    }
     /// How the terrain bind group holds block sprites, for compiling a pack.
     pub fn shader_pack_host(&self) -> horizon_glsl_pack::HostParams {
         self.sprite_host
@@ -3038,18 +3076,26 @@ impl Renderer {
     /// (`None`: Horizon's own). Errors leave the renderer without a pack.
     pub fn set_shader_pack(
         &mut self,
-        pack: Option<&horizon_glsl_pack::CompiledPack>,
+        pack: Option<(
+            &horizon_glsl_pack::CompiledPack,
+            &horizon_glsl_pack::PackFiles,
+        )>,
     ) -> std::result::Result<(), String> {
         self.glsl_pack = None;
-        let Some(pack) = pack else {
+        let Some((pack, files)) = pack else {
             return Ok(());
         };
         let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let renderer = glsl_pack::PackRenderer::new(
             &self.device,
-            &self.terrain_layout,
+            &self.queue,
+            glsl_pack::Group0Layouts {
+                terrain: &self.terrain_layout,
+                entity: &self.entity_bind_layout,
+            },
             self.config.format.remove_srgb_suffix(),
             pack,
+            files,
         )?;
         // The browser cannot wait for the scope: its errors reach the console.
         #[cfg(not(target_arch = "wasm32"))]
@@ -3335,8 +3381,9 @@ impl Renderer {
             self.config.height.max(1) as f32,
             frame.depth_far,
         ));
+        let hand_view_proj = hand_projection * frame.bob * view;
         let hand_globals = Globals {
-            view_proj: (hand_projection * frame.bob * view).to_cols_array_2d(),
+            view_proj: hand_view_proj.to_cols_array_2d(),
             ..globals
         };
         self.uploads.buffer(
@@ -3384,6 +3431,25 @@ impl Renderer {
                 &mut visible,
             )
         });
+        // A pack's shadow casters: the sections in the light's box, wherever
+        // the camera looks.
+        let mut shadow_visible = std::mem::take(&mut self.shadow_visible);
+        shadow_visible.clear();
+        if !frame.title
+            && let Some(light) = self.glsl_pack.as_ref().and_then(|p| p.shadow_clip(frame))
+        {
+            let light = Frustum {
+                planes: frustum(light),
+            };
+            self.sections.visible(
+                camera,
+                (frame.detail_distance / 16.0) as i32,
+                &light,
+                |_| true,
+                |_, _| false,
+                &mut shadow_visible,
+            );
+        }
         let mut visible_lods = std::mem::take(&mut self.visible_lods);
         visible_lods.clear();
         if frame.title {
@@ -3397,7 +3463,7 @@ impl Renderer {
             visible_lods.sort_unstable_by_key(|v| (v.distance, v.key));
         }
         self.drawn_sections = visible.len() + visible_lods.len();
-        let instances = self.drawn_sections;
+        let instances = self.drawn_sections + shadow_visible.len();
         if instances as u64 > self.instance_capacity {
             self.instance_capacity = (instances as u64).next_power_of_two();
             self.instances = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -3414,7 +3480,8 @@ impl Renderer {
             visible
                 .iter()
                 .map(|v| section_instance(v.origin))
-                .chain(visible_lods.iter().map(|v| lod::instance(v.origin))),
+                .chain(visible_lods.iter().map(|v| lod::instance(v.origin)))
+                .chain(shadow_visible.iter().map(|v| section_instance(v.origin))),
         );
         if !self.origins.is_empty() {
             self.uploads.buffer(
@@ -3631,6 +3698,42 @@ impl Renderer {
         } else {
             self.draws.len()
         };
+        // The shadow casters' draws, after the camera's: all solid faces, then
+        // the translucent ones (blending is off in the shadow map, so their
+        // order does not matter).
+        let shadow_first = self.draws.len() as u32;
+        let shadow_instance = (visible.len() + visible_lods.len()) as u32;
+        for (j, v) in shadow_visible.iter().enumerate() {
+            let s = self.sections.get(v.slot);
+            if s.solid > 0 {
+                self.draws.push([
+                    s.solid * 6,
+                    1,
+                    0,
+                    s.start as u32,
+                    shadow_instance + j as u32,
+                ]);
+                self.draw_pages.push((s.page, None));
+            }
+        }
+        let shadow_solid = self.draws.len() as u32 - shadow_first;
+        for (j, v) in shadow_visible.iter().enumerate() {
+            let s = self.sections.get(v.slot);
+            // The shared quad indices: sorted ones are only current for
+            // sections the camera sees, and order does not matter here.
+            if s.translucent > 0 {
+                let first = s.start + u64::from(s.solid) * 4;
+                self.draws.push([
+                    s.translucent * 6,
+                    1,
+                    0,
+                    first as u32,
+                    shadow_instance + j as u32,
+                ]);
+                self.draw_pages.push((s.page, None));
+            }
+        }
+        let shadow_translucent = self.draws.len() as u32 - shadow_first - shadow_solid;
         let debug_depth = frame.debug_lines.len() as u32;
         let debug_top = frame.debug_lines_on_top.len() as u32;
         let crosshair = frame.debug_crosshair.len() as u32;
@@ -3938,7 +4041,7 @@ impl Renderer {
         let scaled = self
             .world_post
             .prepare(&self.device, [self.config.width, self.config.height]);
-        let (mut world_view, mut world_depth) = match &scaled {
+        let (world_view, world_depth) = match &scaled {
             Some((color, depth)) => (color, depth),
             None => (&view_target, &self.depth),
         };
@@ -3953,50 +4056,46 @@ impl Renderer {
                 a: 1.0,
             }
         };
-        // The pack's terrain first, into its targets; the rest of the world
-        // then draws into colortex0 over the pack's depth.
+        // With a pack, its programs draw the world into the view, then
+        // Horizon's overlays over its depth (`gfx/glsl_pack/frame.rs`).
         let pack_on = pack_on && scaled.is_none();
-        if pack_on && let (Some(pack), Some(state)) = (self.glsl_pack.as_mut(), frame.shader_pack) {
-            let size = [self.config.width, self.config.height];
-            pack.prepare(&self.device, size);
-            let uniforms = PackUniformInputs {
-                shadow: pack.shadow_settings(),
-                state: &state,
+        let pack_hand = pack_on
+            && self
+                .glsl_pack
+                .as_ref()
+                .is_some_and(|p| p.has(horizon_glsl_pack::ProgramKind::Hand));
+        if pack_on {
+            let counts = WorldCounts {
                 view_proj,
-                size,
-                gamma: self.gamma,
+                hand_view_proj,
                 fog_color,
                 fog,
-                frame_counter: self.pack_frames,
+                solid_draws,
+                translucent_draws,
+                entity_quads,
+                crumbling_quads,
+                translucent_crumbling_quads,
+                water_mask_quads,
+                world_quads,
+                additive_quads,
+                hand_quads,
+                see_through_quads,
+                outline_edges: outline_edges as u32,
+                debug_depth,
+                debug_top,
+                celestial_vertices: celestial_vertices as u32,
+                shadow_first,
+                shadow_solid,
+                shadow_translucent,
+            };
+            self.draw_pack_world(&mut encoder, frame, &counts, final_view);
+        } else {
+            if culling && let Some(cull) = &mut self.cull {
+                cull.bind_depth(&self.device, world_depth);
             }
-            .uniforms(frame);
-            pack.upload(&self.queue, &uniforms);
-            self.pack_frames = self.pack_frames.wrapping_add(1);
-        }
-        let pack = self.glsl_pack.as_ref().filter(|_| pack_on);
-        if let Some(pack) = pack {
-            // The light sees the sections the camera does (a proof of concept:
-            // casters out of view cast nothing).
-            if let Some(mut pass) = pack.shadow_pass(&mut encoder, &self.group) {
-                pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.set_vertex_buffer(1, self.instances.slice(..));
-                self.draw_sections(&mut pass, &self.indirect, 0, 0, solid_draws);
-            }
-            let mut pass = pack.terrain_pass(&mut encoder, world_clear, &self.group);
-            pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.set_vertex_buffer(1, self.instances.slice(..));
-            self.draw_sections(&mut pass, &self.indirect, 0, 0, solid_draws);
-            drop(pass);
-            (world_view, world_depth) = pack.world_targets();
-        }
-        if culling && let Some(cull) = &mut self.cull {
-            cull.bind_depth(&self.device, world_depth);
-        }
-        let cull = self.cull.as_ref().filter(|_| culling && solid_draws > 0);
-        {
-            let mut pass = match pack {
-                Some(pack) => pack.world_pass(&mut encoder),
-                None => encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let cull = self.cull.as_ref().filter(|_| culling && solid_draws > 0);
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Horizon world"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: world_view,
@@ -4021,281 +4120,261 @@ impl Renderer {
                         stencil_ops: None,
                     }),
                     ..Default::default()
-                }),
-            };
-            pass.set_bind_group(0, &self.group, &[]);
-            if frame.title {
-                self.panorama.draw(&mut pass);
+                });
                 pass.set_bind_group(0, &self.group, &[]);
-            }
-            match self.flat.as_ref().filter(|_| flat_frame) {
-                // The pack drew solid terrain already.
-                _ if pack.is_some() => {
-                    pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.set_vertex_buffer(1, self.instances.slice(..));
-                }
-                Some(flat) => {
-                    pass.set_pipeline(&flat.solid);
-                    let vertices = |p| self.arena.buffer(p);
-                    match cull {
-                        // As below: phase 1, the test, then phase 2's draws
-                        // that the test saw, copied after it.
-                        Some(cull) => {
-                            flat.draw(&mut pass, &flat.calls[..flat.phase1_calls], vertices);
-                            cull.test(&mut pass);
-                            drop(pass);
-                            cull.test_pass(&mut encoder);
-                            flat.flatten_phase2(&mut encoder);
-                            pass = world_pass_after_culling(&mut encoder, world_view, world_depth);
-                            pass.set_bind_group(0, &self.group, &[]);
-                            pass.set_pipeline(&flat.solid);
-                            flat.draw_phase2(&mut pass, vertices);
-                        }
-                        None => flat.draw(&mut pass, &flat.calls[..flat.solid_calls], vertices),
-                    }
+                if frame.title {
+                    self.panorama.draw(&mut pass);
                     pass.set_bind_group(0, &self.group, &[]);
-                    pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 }
-                None => {
-                    pass.set_pipeline(&self.solid);
-                    pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.set_vertex_buffer(1, self.instances.slice(..));
-                    match cull {
-                        Some(cull) => {
-                            // Phase 1 and the boxes against its depth (in
-                            // its pass, or one of their own on Metal), then
-                            // what they found in sight, in a pass that loads
-                            // both targets (it reads the test's results).
-                            self.draw_sections(&mut pass, &self.indirect, 0, 0, phase1_draws);
-                            cull.test(&mut pass);
-                            drop(pass);
-                            cull.test_pass(&mut encoder);
-                            pass = world_pass_after_culling(&mut encoder, world_view, world_depth);
-                            pass.set_bind_group(0, &self.group, &[]);
-                            pass.set_pipeline(&self.solid);
-                            pass.set_index_buffer(
-                                self.indices.slice(..),
-                                wgpu::IndexFormat::Uint32,
-                            );
-                            pass.set_vertex_buffer(1, self.instances.slice(..));
-                            self.draw_sections(
-                                &mut pass,
-                                &cull.phase2,
-                                phase1_draws,
-                                phase1_draws,
-                                solid_draws - phase1_draws,
-                            );
+                match self.flat.as_ref().filter(|_| flat_frame) {
+                    Some(flat) => {
+                        pass.set_pipeline(&flat.solid);
+                        let vertices = |p| self.arena.buffer(p);
+                        match cull {
+                            // As below: phase 1, the test, then phase 2's draws
+                            // that the test saw, copied after it.
+                            Some(cull) => {
+                                flat.draw(&mut pass, &flat.calls[..flat.phase1_calls], vertices);
+                                cull.test(&mut pass);
+                                drop(pass);
+                                cull.test_pass(&mut encoder);
+                                flat.flatten_phase2(&mut encoder);
+                                pass =
+                                    world_pass_after_culling(&mut encoder, world_view, world_depth);
+                                pass.set_bind_group(0, &self.group, &[]);
+                                pass.set_pipeline(&flat.solid);
+                                flat.draw_phase2(&mut pass, vertices);
+                            }
+                            None => flat.draw(&mut pass, &flat.calls[..flat.solid_calls], vertices),
                         }
-                        None => self.draw_sections(&mut pass, &self.indirect, 0, 0, solid_draws),
+                        pass.set_bind_group(0, &self.group, &[]);
+                        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    }
+                    None => {
+                        pass.set_pipeline(&self.solid);
+                        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.set_vertex_buffer(1, self.instances.slice(..));
+                        match cull {
+                            Some(cull) => {
+                                // Phase 1 and the boxes against its depth (in
+                                // its pass, or one of their own on Metal), then
+                                // what they found in sight, in a pass that loads
+                                // both targets (it reads the test's results).
+                                self.draw_sections(&mut pass, &self.indirect, 0, 0, phase1_draws);
+                                cull.test(&mut pass);
+                                drop(pass);
+                                cull.test_pass(&mut encoder);
+                                pass =
+                                    world_pass_after_culling(&mut encoder, world_view, world_depth);
+                                pass.set_bind_group(0, &self.group, &[]);
+                                pass.set_pipeline(&self.solid);
+                                pass.set_index_buffer(
+                                    self.indices.slice(..),
+                                    wgpu::IndexFormat::Uint32,
+                                );
+                                pass.set_vertex_buffer(1, self.instances.slice(..));
+                                self.draw_sections(
+                                    &mut pass,
+                                    &cull.phase2,
+                                    phase1_draws,
+                                    phase1_draws,
+                                    solid_draws - phase1_draws,
+                                );
+                            }
+                            None => {
+                                self.draw_sections(&mut pass, &self.indirect, 0, 0, solid_draws)
+                            }
+                        }
                     }
                 }
-            }
-            // LevelRenderer: no sky inside lava or powder snow (sky fog ends within 2 blocks).
-            let sky_visible = match frame.fog {
-                Some(f) => f.sky_end > 2.0,
-                None => !frame.underwater,
-            };
-            // The sky after solid terrain rather than before: at the far
-            // plane, the depth test keeps it to the pixels terrain left
-            // uncovered, which it would have drawn over, so only those shade.
-            if !frame.title && sky_visible && (frame.skybox || frame.end_sky) {
-                if frame.skybox {
-                    pass.set_pipeline(&self.sky);
-                    pass.draw(0..3, 0..1);
-                    if frame.sky.sunrise_color[3] > 0.001 {
-                        pass.set_pipeline(&self.sunrise);
-                        pass.draw(0..48, 0..1);
+                // LevelRenderer: no sky inside lava or powder snow (sky fog ends within 2 blocks).
+                let sky_visible = match frame.fog {
+                    Some(f) => f.sky_end > 2.0,
+                    None => !frame.underwater,
+                };
+                // The sky after solid terrain rather than before: at the far
+                // plane, the depth test keeps it to the pixels terrain left
+                // uncovered, which it would have drawn over, so only those shade.
+                if !frame.title && sky_visible && (frame.skybox || frame.end_sky) {
+                    if frame.skybox {
+                        pass.set_pipeline(&self.sky);
+                        pass.draw(0..3, 0..1);
+                        if frame.sky.sunrise_color[3] > 0.001 {
+                            pass.set_pipeline(&self.sunrise);
+                            pass.draw(0..48, 0..1);
+                        }
+                    }
+                    if celestial_vertices > 0 || frame.end_sky {
+                        pass.set_pipeline(&self.celestial_pipeline);
+                        pass.set_bind_group(0, &self.entity_group, &[]);
+                        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                        if frame.end_sky {
+                            self.end_sky.draw(&mut pass);
+                        }
+                        if celestial_vertices > 0 {
+                            pass.set_vertex_buffer(0, self.celestial_buffer.slice(..));
+                            pass.draw_indexed(0..(celestial_vertices as u32 / 4) * 6, 0, 0..1);
+                        }
+                        pass.set_bind_group(0, &self.group, &[]);
+                    }
+                    if frame.stars.is_some() {
+                        self.stars.draw(&mut pass);
+                        pass.set_bind_group(0, &self.group, &[]);
+                    }
+                    if frame.dark_disc {
+                        pass.set_pipeline(&self.dark_disc);
+                        pass.draw(0..3, 0..1);
                     }
                 }
-                if celestial_vertices > 0 || frame.end_sky {
-                    pass.set_pipeline(&self.celestial_pipeline);
+                if entity_quads > 0 {
                     pass.set_bind_group(0, &self.entity_group, &[]);
-                    pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    if frame.end_sky {
-                        self.end_sky.draw(&mut pass);
-                    }
-                    if celestial_vertices > 0 {
-                        pass.set_vertex_buffer(0, self.celestial_buffer.slice(..));
-                        pass.draw_indexed(0..(celestial_vertices as u32 / 4) * 6, 0, 0..1);
-                    }
+                    pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+                    let entities = &self.entity_batch.combined[..entity_quads as usize * 4];
+                    self.draw_entity_runs(&mut pass, entities, 0);
                     pass.set_bind_group(0, &self.group, &[]);
                 }
-                if frame.stars.is_some() {
-                    self.stars.draw(&mut pass);
+                self.weather.draw(&mut pass, &self.entity_group);
+                pass.set_bind_group(0, &self.group, &[]);
+                if crumbling_quads > 0 {
+                    pass.set_pipeline(&self.crumbling_pipeline);
+                    pass.set_bind_group(0, &self.entity_group, &[]);
+                    pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+                    pass.draw_indexed(0..crumbling_quads * 6, (entity_quads * 4) as i32, 0..1);
                     pass.set_bind_group(0, &self.group, &[]);
                 }
-                if frame.dark_disc {
-                    pass.set_pipeline(&self.dark_disc);
-                    pass.draw(0..3, 0..1);
-                }
-            }
-            if entity_quads > 0 {
-                pass.set_bind_group(0, &self.entity_group, &[]);
-                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                let entities = &self.entity_batch.combined[..entity_quads as usize * 4];
-                self.draw_entity_runs(&mut pass, entities, 0);
-                pass.set_bind_group(0, &self.group, &[]);
-            }
-            self.weather.draw(&mut pass, &self.entity_group);
-            pass.set_bind_group(0, &self.group, &[]);
-            if crumbling_quads > 0 {
-                pass.set_pipeline(&self.crumbling_pipeline);
-                pass.set_bind_group(0, &self.entity_group, &[]);
-                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                pass.draw_indexed(0..crumbling_quads * 6, (entity_quads * 4) as i32, 0..1);
-                pass.set_bind_group(0, &self.group, &[]);
-            }
-            if shadow_quads > 0 {
-                pass.set_pipeline(&self.shadow_blob_pipeline);
-                pass.set_bind_group(0, &self.entity_group, &[]);
-                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                pass.draw_indexed(
-                    0..shadow_quads * 6,
-                    ((world_quads - shadow_quads) * 4) as i32,
-                    0..1,
-                );
-                pass.set_bind_group(0, &self.group, &[]);
-            }
-            // BoatRenderer's water patch (RenderTypes.waterMask): depth only,
-            // before translucent terrain, so no water shows inside the boat.
-            if water_mask_quads > 0 {
-                pass.set_pipeline(&self.water_mask_pipeline);
-                pass.set_bind_group(0, &self.entity_group, &[]);
-                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                pass.draw_indexed(
-                    0..water_mask_quads * 6,
-                    ((entity_quads + crumbling_quads + translucent_crumbling_quads) * 4) as i32,
-                    0..1,
-                );
-                pass.set_bind_group(0, &self.group, &[]);
-            }
-            if !frame.lightning.bolts.is_empty() {
-                pass.set_pipeline(&self.lightning_pipeline);
-                pass.set_bind_group(0, &self.entity_group, &[]);
-                self.lightning.draw(&mut pass, &frame.lightning);
-                pass.set_bind_group(0, &self.group, &[]);
-            }
-            if additive_quads > 0 {
-                pass.set_pipeline(&self.additive_pipeline);
-                pass.set_bind_group(0, &self.entity_group, &[]);
-                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                pass.draw_indexed(0..additive_quads * 6, (world_quads * 4) as i32, 0..1);
-                pass.set_bind_group(0, &self.group, &[]);
-            }
-            if outline_edges > 0 && !frame.outline_after_terrain {
-                pass.set_pipeline(&self.lines);
-                pass.set_vertex_buffer(0, self.outline.slice(..));
-                pass.draw(0..4, 0..outline_edges as u32);
-            }
-            if debug_depth > 0 {
-                pass.set_pipeline(&self.debug_lines);
-                pass.set_vertex_buffer(0, self.debug_line_buffer.slice(..));
-                pass.draw(0..4, 0..debug_depth);
-            }
-            if debug_top > 0 {
-                pass.set_pipeline(&self.debug_lines_on_top);
-                pass.set_vertex_buffer(0, self.debug_line_buffer.slice(..));
-                pass.draw(0..4, debug_depth..debug_depth + debug_top);
-            }
-            match self.flat.as_ref().filter(|_| flat_frame) {
-                // Translucent terrain in a pass of its own over the pack's
-                // targets, then the world pass again.
-                _ if let Some(pack) = pack => {
-                    drop(pass);
-                    let mut water = pack.water_pass(&mut encoder, &self.group);
-                    water.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    water.set_vertex_buffer(1, self.instances.slice(..));
-                    self.draw_sections(
-                        &mut water,
-                        &self.indirect,
-                        0,
-                        solid_draws,
-                        translucent_draws,
+                if shadow_quads > 0 {
+                    pass.set_pipeline(&self.shadow_blob_pipeline);
+                    pass.set_bind_group(0, &self.entity_group, &[]);
+                    pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+                    pass.draw_indexed(
+                        0..shadow_quads * 6,
+                        ((world_quads - shadow_quads) * 4) as i32,
+                        0..1,
                     );
-                    drop(water);
-                    pass = pack.world_pass(&mut encoder);
                     pass.set_bind_group(0, &self.group, &[]);
-                    pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 }
-                Some(flat) => {
-                    pass.set_pipeline(&flat.translucent);
-                    flat.draw(&mut pass, &flat.calls[flat.solid_calls..], |p| {
-                        self.arena.buffer(p)
-                    });
+                // BoatRenderer's water patch (RenderTypes.waterMask): depth only,
+                // before translucent terrain, so no water shows inside the boat.
+                if water_mask_quads > 0 {
+                    pass.set_pipeline(&self.water_mask_pipeline);
+                    pass.set_bind_group(0, &self.entity_group, &[]);
+                    pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+                    pass.draw_indexed(
+                        0..water_mask_quads * 6,
+                        ((entity_quads + crumbling_quads + translucent_crumbling_quads) * 4) as i32,
+                        0..1,
+                    );
                     pass.set_bind_group(0, &self.group, &[]);
-                    pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 }
-                None => {
-                    pass.set_pipeline(&self.translucent);
+                if !frame.lightning.bolts.is_empty() {
+                    pass.set_pipeline(&self.lightning_pipeline);
+                    pass.set_bind_group(0, &self.entity_group, &[]);
+                    self.lightning.draw(&mut pass, &frame.lightning);
+                    pass.set_bind_group(0, &self.group, &[]);
+                }
+                if additive_quads > 0 {
+                    pass.set_pipeline(&self.additive_pipeline);
+                    pass.set_bind_group(0, &self.entity_group, &[]);
+                    pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+                    pass.draw_indexed(0..additive_quads * 6, (world_quads * 4) as i32, 0..1);
+                    pass.set_bind_group(0, &self.group, &[]);
+                }
+                if outline_edges > 0 && !frame.outline_after_terrain {
+                    pass.set_pipeline(&self.lines);
+                    pass.set_vertex_buffer(0, self.outline.slice(..));
+                    pass.draw(0..4, 0..outline_edges as u32);
+                }
+                if debug_depth > 0 {
+                    pass.set_pipeline(&self.debug_lines);
+                    pass.set_vertex_buffer(0, self.debug_line_buffer.slice(..));
+                    pass.draw(0..4, 0..debug_depth);
+                }
+                if debug_top > 0 {
+                    pass.set_pipeline(&self.debug_lines_on_top);
+                    pass.set_vertex_buffer(0, self.debug_line_buffer.slice(..));
+                    pass.draw(0..4, debug_depth..debug_depth + debug_top);
+                }
+                match self.flat.as_ref().filter(|_| flat_frame) {
+                    Some(flat) => {
+                        pass.set_pipeline(&flat.translucent);
+                        flat.draw(&mut pass, &flat.calls[flat.solid_calls..], |p| {
+                            self.arena.buffer(p)
+                        });
+                        pass.set_bind_group(0, &self.group, &[]);
+                        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    }
+                    None => {
+                        pass.set_pipeline(&self.translucent);
+                        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.set_vertex_buffer(1, self.instances.slice(..));
+                        self.draw_sections(
+                            &mut pass,
+                            &self.indirect,
+                            0,
+                            solid_draws,
+                            translucent_draws,
+                        );
+                    }
+                }
+                // LevelRenderer.executeClassicTransparency: translucent targets'
+                // outlines follow terrain, so its blending cannot wash them out.
+                if outline_edges > 0 && frame.outline_after_terrain {
+                    pass.set_pipeline(&self.lines);
+                    pass.set_vertex_buffer(0, self.outline.slice(..));
+                    pass.draw(0..4, 0..outline_edges as u32);
+                }
+                pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                // LevelRenderer: the world border after translucent terrain and weather.
+                if let Some(b) = frame.border.as_ref().filter(|_| !frame.title) {
+                    pass.set_pipeline(&self.border_pipeline);
+                    pass.set_bind_group(0, &self.border_group, &[]);
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.set_vertex_buffer(1, self.instances.slice(..));
-                    self.draw_sections(
-                        &mut pass,
-                        &self.indirect,
-                        0,
-                        solid_draws,
-                        translucent_draws,
+                    pass.set_vertex_buffer(0, self.border_vertices.slice(..));
+                    for &side in &b.sides {
+                        let first = side as u32 * 6;
+                        pass.draw_indexed(first..first + 6, 0, 0..1);
+                    }
+                    pass.set_bind_group(0, &self.group, &[]);
+                }
+                if translucent_crumbling_quads > 0 {
+                    pass.set_pipeline(&self.crumbling_pipeline);
+                    pass.set_bind_group(0, &self.entity_group, &[]);
+                    pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+                    pass.draw_indexed(
+                        0..translucent_crumbling_quads * 6,
+                        ((entity_quads + crumbling_quads) * 4) as i32,
+                        0..1,
                     );
                 }
-            }
-            // LevelRenderer.executeClassicTransparency: translucent targets'
-            // outlines follow terrain, so its blending cannot wash them out.
-            if outline_edges > 0 && frame.outline_after_terrain {
-                pass.set_pipeline(&self.lines);
-                pass.set_vertex_buffer(0, self.outline.slice(..));
-                pass.draw(0..4, 0..outline_edges as u32);
-            }
-            pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-            // LevelRenderer: the world border after translucent terrain and weather.
-            if let Some(b) = frame.border.as_ref().filter(|_| !frame.title) {
-                pass.set_pipeline(&self.border_pipeline);
-                pass.set_bind_group(0, &self.border_group, &[]);
-                pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.set_vertex_buffer(0, self.border_vertices.slice(..));
-                for &side in &b.sides {
-                    let first = side as u32 * 6;
-                    pass.draw_indexed(first..first + 6, 0, 0..1);
+                if cloud_quads > 0 {
+                    pass.set_pipeline(&self.cloud_pipeline);
+                    pass.set_bind_group(0, &self.entity_group, &[]);
+                    pass.set_bind_group(1, &self.cloud_group, &[]);
+                    pass.set_vertex_buffer(0, self.cloud_buffer.slice(..));
+                    pass.set_index_buffer(
+                        self.cloud_index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    pass.draw_indexed(0..cloud_quads * 6, 0, 0..1);
+                    pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 }
-                pass.set_bind_group(0, &self.group, &[]);
+                // LevelRenderer.executeSeeThrough, after the rest of the world.
+                if see_through_quads > 0 {
+                    pass.set_pipeline(&self.see_through_pipeline);
+                    pass.set_bind_group(0, &self.entity_group, &[]);
+                    pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+                    pass.draw_indexed(
+                        0..see_through_quads * 6,
+                        ((world_quads + additive_quads + hand_quads) * 4) as i32,
+                        0..1,
+                    );
+                }
             }
-            if translucent_crumbling_quads > 0 {
-                pass.set_pipeline(&self.crumbling_pipeline);
-                pass.set_bind_group(0, &self.entity_group, &[]);
-                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                pass.draw_indexed(
-                    0..translucent_crumbling_quads * 6,
-                    ((entity_quads + crumbling_quads) * 4) as i32,
-                    0..1,
-                );
-            }
-            if cloud_quads > 0 {
-                pass.set_pipeline(&self.cloud_pipeline);
-                pass.set_bind_group(0, &self.entity_group, &[]);
-                pass.set_bind_group(1, &self.cloud_group, &[]);
-                pass.set_vertex_buffer(0, self.cloud_buffer.slice(..));
-                pass.set_index_buffer(self.cloud_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..cloud_quads * 6, 0, 0..1);
-                pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-            }
-            // LevelRenderer.executeSeeThrough, after the rest of the world.
-            if see_through_quads > 0 {
-                pass.set_pipeline(&self.see_through_pipeline);
-                pass.set_bind_group(0, &self.entity_group, &[]);
-                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                pass.draw_indexed(
-                    0..see_through_quads * 6,
-                    ((world_quads + additive_quads + hand_quads) * 4) as i32,
-                    0..1,
-                );
-            }
-        }
-        if let Some(pack) = pack {
-            pack.finish(&mut encoder, final_view, &self.group);
         }
         if scaled.is_some() {
             self.world_post.finish(&mut encoder, &view_target);
         }
-        if hand_quads > 0 {
+        if hand_quads > 0 && !pack_hand {
             let attachments = [Some(wgpu::RenderPassColorAttachment {
                 view: &view_target,
                 resolve_target: None,
@@ -4498,6 +4577,7 @@ impl Renderer {
         self.last_encode = started.elapsed().saturating_sub(self.last_wait);
         let _ = self.started;
         self.visible = visible;
+        self.shadow_visible = shadow_visible;
         self.visible_lods = visible_lods;
         Ok(true)
     }
