@@ -515,6 +515,7 @@ pub fn write(
         let (image, origin) = sources.image(&destination)?;
         bundle.png(destination, &image, origin)?;
     }
+    vanilla_items(bundle, sources, &mut prototypes, &mut lang)?;
     bundle.json("items.json", &json!(prototypes), GENERATOR)?;
 
     // The creative palette: one tab per category, then search and the
@@ -679,6 +680,117 @@ fn over(top: &Rgba, bottom: &Rgba) -> Rgba {
         }
     }
     out
+}
+
+/// Minecraft's items that are not blocks (`items::vanilla`): a model on
+/// `item/generated` or `item/handheld` with the item's own texture, the item
+/// definition, a prototype with Minecraft's default components, and a name.
+/// The texture comes from an open input (an enabled pack) when one provides
+/// it, else a generated placeholder icon.
+fn vanilla_items(
+    bundle: &mut Bundle,
+    sources: &Sources,
+    prototypes: &mut BTreeMap<String, Value>,
+    lang: &mut BTreeMap<String, String>,
+) -> Result<()> {
+    for item in crate::items::vanilla() {
+        let path = format!("item/{}", item.id);
+        let parent = if item.handheld {
+            "minecraft:item/handheld"
+        } else {
+            "minecraft:item/generated"
+        };
+        bundle.json(
+            format!("assets/minecraft/models/{path}.json"),
+            &json!({"parent": parent, "textures": {"layer0": format!("minecraft:{}", item.texture)}}),
+            GENERATOR,
+        )?;
+        bundle.json(
+            format!("assets/minecraft/items/{}.json", item.id),
+            &json!({"model": {"type": "minecraft:model", "model": format!("minecraft:{path}")}}),
+            GENERATOR,
+        )?;
+        let destination = format!("assets/minecraft/textures/{}.png", item.texture);
+        if !bundle.contains(&destination) {
+            let (image, origin) = if sources.provides(&destination) {
+                sources.image(&destination)?
+            } else {
+                (placeholder_icon(item.id), Origin::Generator("art"))
+            };
+            bundle.png(destination, &image, origin)?;
+        }
+        let mut prototype = item.components.clone();
+        // Tool rules may only name block tags the bundle has.
+        if let Some(rules) = prototype
+            .get_mut("minecraft:tool")
+            .and_then(|t| t.get_mut("rules"))
+            .and_then(Value::as_array_mut)
+        {
+            rules.retain(|rule| {
+                rule["blocks"]
+                    .as_str()
+                    .and_then(|b| b.strip_prefix('#'))
+                    .is_none_or(|tag| {
+                        let (namespace, path) = tag.split_once(':').unwrap_or(("minecraft", tag));
+                        bundle.contains(&format!("data/{namespace}/tags/block/{path}.json"))
+                    })
+            });
+        }
+        prototype.insert("minecraft:item_model".into(), json!(item.key()));
+        prototype.insert(
+            "minecraft:item_name".into(),
+            json!({"translate": format!("item.minecraft.{}", item.id)}),
+        );
+        prototypes.insert(item.key(), Value::Object(prototype));
+        lang.insert(format!("item.minecraft.{}", item.id), item.name());
+    }
+    Ok(())
+}
+
+/// A flat 16x16 icon for an item no open input draws yet: a rounded tile in
+/// a colour of its own, with a darker rim and a light corner.
+fn placeholder_icon(id: &str) -> Rgba {
+    let hash = id.bytes().fold(2166136261u32, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(16777619)
+    });
+    let hue = (hash % 360) as f32;
+    // HSV with fixed saturation and value, to RGB.
+    let (s, v) = (0.55f32, 0.85f32);
+    let c = v * s;
+    let x = c * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
+    let (r, g, b) = match (hue / 60.0) as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = v - c;
+    let base = [r + m, g + m, b + m].map(|f| (f * 255.0) as u8);
+    let shade = |k: f32| [base[0], base[1], base[2]].map(|v| (f32::from(v) * k) as u8);
+    let (rim, light) = (shade(0.55), shade(1.2));
+    let mut image = Rgba::new(16, 16);
+    for y in 3..13u32 {
+        for x in 3..13u32 {
+            // Cut the corners for a rounded tile.
+            let corner = (x == 3 || x == 12) && (y == 3 || y == 12);
+            if corner {
+                continue;
+            }
+            let edge = x == 3 || x == 12 || y == 3 || y == 12;
+            let lit = (x == 5 || y == 5) && x < 8 && y < 8 && x >= 5 && y >= 5;
+            let rgb = if edge {
+                rim
+            } else if lit {
+                light
+            } else {
+                base
+            };
+            image.set(x, y, [rgb[0], rgb[1], rgb[2], 255]);
+        }
+    }
+    image
 }
 
 #[cfg(test)]

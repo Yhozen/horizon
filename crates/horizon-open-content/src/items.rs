@@ -607,3 +607,94 @@ pub fn write(bundle: &mut crate::Bundle, blocks: &[Block], items: &[Item]) -> cr
     }
     Ok(())
 }
+
+const DEFAULTS: &str = include_str!("../data/items/defaults.json");
+
+/// One of Minecraft's items that is not a block, with Minecraft's default
+/// components (`data/items/defaults.json`, written by
+/// `tools/open_item_defaults.py`).
+#[derive(Clone, Debug)]
+pub struct VanillaItem {
+    /// The path of its `minecraft:` identifier.
+    pub id: &'static str,
+    /// Drawn as a tool in the hand (`item/handheld`), else flat.
+    pub handheld: bool,
+    /// Its texture under `textures/` (`item/rotten_flesh`).
+    pub texture: String,
+    /// Its default components, without the name and model `assets` adds.
+    pub components: serde_json::Map<String, Value>,
+}
+
+impl VanillaItem {
+    pub fn key(&self) -> String {
+        format!("minecraft:{}", self.id)
+    }
+    /// Its English name, from its identifier ("Rotten Flesh").
+    pub fn name(&self) -> String {
+        self.id
+            .split('_')
+            .map(|w| {
+                let mut c = w.chars();
+                c.next()
+                    .map(|f| f.to_uppercase().chain(c).collect())
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<String>>()
+            .join(" ")
+    }
+}
+
+/// Minecraft's items that are not blocks and that [`all`] does not define,
+/// in registry order.
+pub fn vanilla() -> Vec<VanillaItem> {
+    let data: Value = serde_json::from_str(DEFAULTS).expect("data/items/defaults.json");
+    let base = data["base"].as_object().cloned().unwrap_or_default();
+    let own: std::collections::HashSet<String> = all().into_iter().map(|i| i.id).collect();
+    crate::numbering::names("item")
+        .iter()
+        .filter(|id| !own.contains(**id))
+        .filter_map(|id| {
+            let entry = data["items"].get(*id)?;
+            let mut components = base.clone();
+            for (k, v) in entry["components"].as_object()? {
+                if v.is_null() {
+                    components.remove(k);
+                } else {
+                    components.insert(k.clone(), v.clone());
+                }
+            }
+            Some(VanillaItem {
+                id,
+                handheld: entry["handheld"].as_bool().unwrap_or(false),
+                texture: entry["texture"]
+                    .as_str()
+                    .map_or_else(|| format!("item/{id}"), str::to_owned),
+                components,
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod vanilla_tests {
+    #[test]
+    fn rotten_flesh_has_minecraft_food_values() {
+        let items = super::vanilla();
+        let flesh = items.iter().find(|i| i.id == "rotten_flesh").unwrap();
+        assert_eq!(flesh.name(), "Rotten Flesh");
+        assert_eq!(flesh.texture, "item/rotten_flesh");
+        assert!(!flesh.handheld);
+        let food = &flesh.components["minecraft:food"];
+        assert_eq!(
+            (food["nutrition"].as_i64(), food["saturation"].as_f64()),
+            (Some(4), Some(0.8))
+        );
+        assert_eq!(flesh.components["minecraft:max_stack_size"], 64);
+        let sword = items.iter().find(|i| i.id == "golden_sword").unwrap();
+        assert!(sword.handheld);
+        assert_eq!(sword.components["minecraft:max_stack_size"], 1);
+        // The open edition's own items keep their definitions.
+        assert!(items.iter().all(|i| i.id != "apple" && i.id != "stick"));
+        assert!(items.len() > 450, "{}", items.len());
+    }
+}
