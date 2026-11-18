@@ -177,8 +177,8 @@ pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
     let toks = dead::drop_dead_functions(drop_unreachable(tokenize(source)))?;
     // Token passes that need new text: each yields the stage again, tokenized anew.
     let scoped = scope::rename_shadowing(&toks)?;
-    let sized = fixes::size_arrays(&tokenize(&scoped));
-    let fixed = fixes::apply(&tokenize(sized.as_deref().unwrap_or(&scoped)))?;
+    let sized = fixes::size_arrays(&tokenize(&scoped)).unwrap_or(scoped);
+    let fixed = fixes::apply(&tokenize(&sized))?;
     let (polyfilled, polyfills) =
         polyfill(&fixed).map_or((None, BTreeSet::new()), |(t, p)| (Some(t), p));
     let toks = tokenize(polyfilled.as_deref().unwrap_or(&fixed));

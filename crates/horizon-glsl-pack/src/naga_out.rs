@@ -37,6 +37,7 @@ pub fn glsl_to_wgsl(source: &str, stage: Stage) -> Result<String, String> {
     }
     let source = if patched.is_empty() { source } else { &patched };
     spill_pointer_arguments(&mut module);
+    end_terminated_cases(&mut module);
     let info = Validator::new(ValidationFlags::all(), Capabilities::empty())
         .validate(&module)
         .map_err(|e| e.emit_to_string(source))?;
@@ -201,6 +202,55 @@ void main() {
     }
 }
 
+/// Marks `switch` cases that end in `return`, `discard` or `continue` as not
+/// falling through: naga's GLSL front end only counts a final `break`, and
+/// its WGSL writer refuses fall-through cases with statements.
+fn end_terminated_cases(module: &mut naga::Module) {
+    use naga::Statement;
+    fn walk(block: &mut naga::Block) {
+        for statement in block.iter_mut() {
+            match statement {
+                Statement::Block(b) => walk(b),
+                Statement::If { accept, reject, .. } => {
+                    walk(accept);
+                    walk(reject);
+                }
+                Statement::Loop {
+                    body, continuing, ..
+                } => {
+                    walk(body);
+                    walk(continuing);
+                }
+                Statement::Switch { cases, .. } => {
+                    for c in cases {
+                        walk(&mut c.body);
+                        if c.fall_through
+                            && matches!(
+                                c.body.last(),
+                                Some(
+                                    Statement::Return { .. }
+                                        | Statement::Kill
+                                        | Statement::Continue
+                                        | Statement::Break
+                                )
+                            )
+                        {
+                            c.fall_through = false;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for (_, f) in module.functions.iter_mut() {
+        walk(&mut f.body);
+    }
+    for e in &mut module.entry_points {
+        walk(&mut e.function.body);
+    }
+}
+
 /// Where `vector % scalar` (or `scalar % vector`) sits in `source`: the
 /// scalar operand's byte range and the vector constructor to wrap it in.
 /// GLSL allows the mix; naga's GLSL front end keeps it as is and its
@@ -273,6 +323,15 @@ fn wrap_ranges(source: &str, mut patches: Vec<(std::ops::Range<usize>, String)>)
 #[cfg(test)]
 mod modulo_tests {
     use super::*;
+
+    #[test]
+    fn cases_ending_in_return_do_not_fall_through() {
+        let src = "#version 450\nlayout(location = 0) flat in int m;\nlayout(location = 0) out vec4 c;\n\
+                   float f(float x) { switch (m) { case 1: return x; case 2: case 3: \
+                   if (x > 0.0) { return 1.0; } return max(x, 2.0); default: return 0.0; } }\n\
+                   void main() { c = vec4(f(1.0)); }\n";
+        glsl_to_wgsl(src, Stage::Fragment).unwrap();
+    }
 
     #[test]
     fn vector_modulo_scalar() {
