@@ -27,11 +27,14 @@ pub(super) struct Layouts<'a> {
     pub shadow_color: &'a dyn Fn(u8) -> wgpu::TextureFormat,
     /// The world view's format (`final` draws into it).
     pub screen: wgpu::TextureFormat,
+    /// The pack has custom uniforms: every group 1 has their block at
+    /// binding 1.
+    pub custom_uniforms: bool,
 }
 
-fn uniform_entry() -> wgpu::BindGroupLayoutEntry {
+fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
-        binding: 0,
+        binding,
         visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
         ty: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
@@ -153,7 +156,12 @@ pub(super) fn build(
     layouts: &Layouts,
 ) -> Result<Program, String> {
     let geometry = kind.geometry();
-    let mut entries = vec![uniform_entry()];
+    let mut entries = vec![uniform_entry(0)];
+    if layouts.custom_uniforms {
+        entries.push(uniform_entry(
+            horizon_glsl_pack::custom_uniforms::CUSTOM_BINDING,
+        ));
+    }
     let mut samplers: Vec<SamplerKind> = Vec::new();
     for t in &program.textures {
         let compare = t.sampler == SamplerKind::Compare;

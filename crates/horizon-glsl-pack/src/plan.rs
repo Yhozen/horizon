@@ -762,6 +762,8 @@ pub struct PackPlan {
     /// The fragment outputs each slot's program declares (empty when it
     /// writes `gl_FragData`/`gl_FragColor`).
     pub outputs: BTreeMap<ProgramKind, Vec<FragOutput>>,
+    /// `uniform.*` / `variable.*` of `shaders.properties` (group 1, binding 1).
+    pub custom_uniforms: crate::custom_uniforms::CustomUniforms,
 }
 
 impl Default for PackPlan {
@@ -782,6 +784,7 @@ impl Default for PackPlan {
             options: Vec::new(),
             program_states: BTreeMap::new(),
             outputs: BTreeMap::new(),
+            custom_uniforms: Default::default(),
         }
     }
 }

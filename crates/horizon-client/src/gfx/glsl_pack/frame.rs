@@ -189,6 +189,7 @@ impl Renderer {
         .uniforms(frame, &pack.plan, &mut pack.history);
         self.queue
             .write_buffer(&pack.uniforms.main, 0, bytemuck::bytes_of(&uniforms.main));
+        pack.write_custom_uniforms(&self.queue, &uniforms.main);
         self.queue.write_buffer(
             &pack.uniforms.shadow,
             0,

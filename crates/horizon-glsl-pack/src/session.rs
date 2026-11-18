@@ -545,6 +545,7 @@ impl Session {
         let plan = PackPlan {
             properties: props.properties,
             custom_textures: props.textures.clone(),
+            custom_uniforms: crate::custom_uniforms::CustomUniforms::parse(&props.entries),
             options: defaults,
             ..PackPlan::default()
         };
@@ -723,6 +724,7 @@ impl Session {
             CompiledPack {
                 programs: st.programs.clone(),
                 shadow: ShadowSettings::from(&plan.shadow),
+                custom_uniforms: plan.custom_uniforms.clone(),
                 plan,
                 skipped: st.skipped.clone(),
                 blocks: st.blocks.clone(),

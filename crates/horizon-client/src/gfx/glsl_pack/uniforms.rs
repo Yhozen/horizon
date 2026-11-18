@@ -118,7 +118,38 @@ impl PackUniformInputs<'_> {
             .eye
             .update(s.eye_brightness, dt, plan.eye_brightness_half_life);
         let [w, h] = self.size;
+        let split = |p: [f32; 3]| {
+            let int = p.map(|c| c.floor());
+            (
+                int.map(|c| c as i32),
+                [p[0] - int[0], p[1] - int[1], p[2] - int[2]],
+            )
+        };
+        let (camera_int, camera_fract) = split(previous.camera_position);
+        let (previous_int, previous_fract) = split(previous.previous_camera_position);
+        // Where the player looks, in world space (vanilla's view vector).
+        let (yaw, pitch) = (frame.yaw.to_radians(), frame.pitch.to_radians());
+        let look = [
+            -yaw.sin() * pitch.cos(),
+            -pitch.sin(),
+            yaw.cos() * pitch.cos(),
+        ];
         let main = PackUniforms {
+            camera_position_int: camera_int,
+            camera_position_fract: camera_fract,
+            previous_camera_position_int: previous_int,
+            previous_camera_position_fract: previous_fract,
+            // The camera is the eye in first person.
+            eye_position: previous.camera_position,
+            relative_eye_position: [0.0; 3],
+            player_look_vector: look,
+            player_body_vector: [-yaw.sin(), 0.0, yaw.cos()],
+            // TODO(packs): biome, biome_category, biome_precipitation,
+            // temperature, rainfall, thunderStrength, the player's health,
+            // hunger, air and mood, isSpectator and the is_* flags,
+            // lightningBoltPosition, centerDepthSmooth, gtextureSize,
+            // darknessLightFactor: zero (or the block's defaults) until
+            // PackFrame carries them.
             hz_view_proj: m4(self.view_proj),
             gbuffer_model_view: m4(model_view),
             gbuffer_model_view_inverse: m4(model_view.inverse()),

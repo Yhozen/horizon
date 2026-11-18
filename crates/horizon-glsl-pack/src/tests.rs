@@ -668,3 +668,68 @@ fn a_3d_override_leaves_the_2d_buffer() {
     // colortex8 has no 3D texture: the default, with a note.
     assert_eq!(p.notes.len(), 1, "{:?}", p.notes);
 }
+
+#[test]
+fn custom_uniforms_reach_the_programs() {
+    let fsh = "#version 120
+uniform sampler2D colortex0;
+uniform float dayFactor;
+uniform bool isRaining;
+uniform vec3 tint;
+uniform float rainStrength;
+varying vec2 uv;
+void main() {
+    vec4 c = texture2D(colortex0, uv) * dayFactor;
+    if (isRaining) { c.rgb *= tint; }
+    gl_FragColor = c + rainStrength;
+}
+";
+    let properties = "#ifdef TINTED\nuniform.vec3.tint=vec3(1.0, 0.9, 0.8)\n#else\nuniform.vec3.tint=vec3(1.0)\n#endif\n\
+                      variable.float.day=clamp(sin(sunAngle * 2.0 * pi) * 4.0, 0.0, 1.0)\n\
+                      uniform.float.dayFactor=smooth(day, 2, 2)\nuniform.bool.isRaining=rainStrength > 0.5\n";
+    let files = pack_of(
+        &[program("final", PASS_VSH, fsh)],
+        &[
+            ("shaders/shaders.properties", properties),
+            (
+                "shaders/lib/o.glsl",
+                "//#define TINTED\n#ifdef TINTED\n#endif\n",
+            ),
+        ],
+    );
+    let mut pack = compile_all(&files, &PackOptions::default()).unwrap();
+    let program = &pack.programs[&ProgramKind::Final];
+    assert!(
+        program.unknown_uniforms.is_empty(),
+        "{:?}",
+        program.unknown_uniforms
+    );
+    assert!(program.fragment_wgsl.contains("@group(1) @binding(1)"));
+    let custom = &mut pack.custom_uniforms;
+    assert_eq!(custom.size(), 32);
+    assert!(custom.notes.is_empty(), "{:?}", custom.notes);
+    let standard = crate::PackUniforms {
+        sun_angle: 0.25,
+        rain_strength: 1.0,
+        ..crate::PackUniforms::default()
+    };
+    let mut bytes = Vec::new();
+    custom.evaluate(&|n| standard.get(n), 0.05, &mut bytes);
+    let f = |b: &[u8], o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+    // tint (vec3 at 0), dayFactor at 12, isRaining at 16.
+    assert_eq!(
+        [f(&bytes, 0), f(&bytes, 4), f(&bytes, 8), f(&bytes, 12)],
+        [1.0; 4]
+    );
+    assert_eq!(i32::from_le_bytes(bytes[16..20].try_into().unwrap()), 1);
+    // The option's macro reaches shaders.properties.
+    let options = PackOptions {
+        overrides: vec![("TINTED".into(), Some("true".into()))],
+        ..PackOptions::default()
+    };
+    let mut tinted = compile_all(&files, &options).unwrap();
+    tinted
+        .custom_uniforms
+        .evaluate(&|n| standard.get(n), 0.05, &mut bytes);
+    assert_eq!(f(&bytes, 4), 0.9);
+}

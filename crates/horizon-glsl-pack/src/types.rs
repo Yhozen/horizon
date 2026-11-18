@@ -230,6 +230,9 @@ pub struct CompiledPack {
     pub entities: crate::properties::IdMap,
     /// `item.properties`: item names to `currentRenderedItemId` ids.
     pub items: crate::properties::IdMap,
+    /// The custom uniforms to evaluate every frame (a copy of
+    /// `plan.custom_uniforms` the client keeps the per-frame state in).
+    pub custom_uniforms: crate::custom_uniforms::CustomUniforms,
     /// The shadow map's settings (derived from `plan.shadow`; kept until the
     /// client reads the plan).
     pub shadow: ShadowSettings,
