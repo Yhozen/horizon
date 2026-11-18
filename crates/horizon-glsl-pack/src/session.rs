@@ -118,7 +118,7 @@ fn read(
     let mut macros = predefined.clone();
     macros.extend(options::macros(&options::discover(files)));
     let props = directives::shaders_properties(files, &macros)?;
-    let blocks = properties::block_ids(files, &predefined)?;
+    let blocks = properties::block_ids(files, &macros)?;
     let folder = world_folder(files, dimension);
 
     // Every slot the pack has: pack-wide directives come from all of them.
@@ -255,6 +255,8 @@ fn compile_slots(
         plan,
         skipped,
         blocks,
+        entities: properties::entity_ids(files, options),
+        items: properties::item_ids(files, options),
         shadow,
     })
 }
