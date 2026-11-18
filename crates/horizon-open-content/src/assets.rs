@@ -280,7 +280,8 @@ fn models(block: &Block, tinting: Tinting) -> (Vec<(String, Value)>, Option<Valu
             )
         }
         Faces::Cube(faces) | Faces::Pillar(faces) => {
-            let model = six_model(faces);
+            let mut model = six_model(faces);
+            crate::cubes::dress(id, &mut model, TINTED.contains(&id), tinting.tint);
             let model_id = format!("minecraft:block/{id}");
             let mut models = vec![(format!("block/{id}"), model.clone())];
             let lying = if let Faces::Pillar(_) = block.faces {
@@ -298,7 +299,7 @@ fn models(block: &Block, tinting: Tinting) -> (Vec<(String, Value)>, Option<Valu
                     "axis=z": {"model": lying, "x": 90},
                 }})
             } else {
-                json!({"variants": {"": {"model": model_id}}})
+                json!({"variants": {"": crate::cubes::variants(id, &model_id)}})
             };
             (models, Some(definition))
         }
@@ -432,7 +433,7 @@ pub fn write(
                 tint: from_pack(top),
                 overlay: from_pack(GRASS_OVERLAY),
             },
-            Faces::All(t) | Faces::Cross(t) => Tinting {
+            Faces::All(t) | Faces::Cross(t) | Faces::Cube([t, ..]) => Tinting {
                 tint: from_pack(t),
                 overlay: false,
             },

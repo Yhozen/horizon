@@ -8,13 +8,17 @@ of these families, in block registry order:
 
 - every block of class `Block` with a single state (all full cubes),
 - every `RotatedPillarBlock` (logs, stems, basalt, hay: one `axis` property),
-- the furnace, blast furnace and smoker (`facing` and `lit`).
+- the furnace, blast furnace and smoker (`facing` and `lit`),
+- every other block whose states all draw one plain cube model: unturned (ores, glass, leaves,
+  copper, coral blocks: layout `cube`; `clear` when light shows through it, `leaves` when its
+  faces also carry a tint index, `glass` when its sprites are drawn translucent), turned at random as Minecraft turns sand (`spin_y`) and
+  netherrack (`spin_xy`), or turned by a horizontal `facing` alone (pumpkins, the loom).
 
 Each line is tab-separated: the name, its class chain, destroy time, explosion resistance, light
 emission (and when lit), light dampening, friction, map colour, sound type, the tool tag that
 mines it fast, the needed tool level (0 none, 1 stone, 2 iron, 3 diamond), whether it needs the
-tool to drop, the model layout (`cube`, `axis`, `pillar`: an axis whose lying models turn the top
-half a turn, or `facing`), and the texture names of its six
+tool to drop, the model layout (`cube`, `clear`, `leaves`, `glass`, `spin_y`, `spin_xy`, `axis`, `pillar`:
+an axis whose lying models turn the top half a turn, or `facing`), and the texture names of its six
 faces (down, up, north, south, west, east; the lit front last for `facing`).
 
 It also writes `data/blocks/connected.txt`: the walls, fences, fence gates, glass panes and bars
@@ -46,6 +50,11 @@ CONNECTED = OUT.with_name("connected.txt")
 OPENINGS = OUT.with_name("openings.txt")
 RESOURCES = ROOT / ".local" / "horizon-client" / "26.3"
 FURNACES = ("furnace", "blast_furnace", "smoker")
+# Blocks with a plain cube model that are not plain blocks to place.
+SKIP = ("minecraft:test_instance_block",)
+SPIN_Y = [(0, y) for y in (0, 90, 180, 270)]
+SPIN_XY = [(x, y) for y in (0, 90, 180, 270) for x in (0, 90, 180, 270)]
+HORIZONTAL = {"north": 0, "east": 90, "south": 180, "west": 270}
 FACES = ("down", "up", "north", "south", "west", "east")
 TOOLS = ("pickaxe", "axe", "shovel", "hoe")
 LEVELS = (("stone", 1), ("iron", 2), ("diamond", 3))
@@ -93,6 +102,7 @@ def resolve_tag(tags, name, seen=()):
 class Models:
     def __init__(self, root):
         self.root = root / "assets" / "minecraft"
+        self.translucent = False
 
     def load(self, name):
         return json.loads((self.root / "models" / f"{strip(name)}.json").read_text())
@@ -110,6 +120,10 @@ class Models:
 
         def value(var, depth=0):
             v = variables.get(var)
+            if isinstance(v, dict):
+                # A sprite drawn translucent (glass): its name, the flag in `self.translucent`.
+                self.translucent |= bool(v.get("force_translucent"))
+                v = v["sprite"]
             if v is None or depth > 8:
                 return None
             return value(v[1:], depth + 1) if v.startswith("#") else strip(v).removeprefix("block/")
@@ -128,6 +142,58 @@ class Models:
             names.append(strip(name).removeprefix("block/"))
             name = self.load(name).get("parent")
         return names
+
+    def tinted(self, name):
+        """Whether the model's faces carry a tint index (Minecraft's leaves model)."""
+        model = self.load(name)
+        while "elements" not in model and model.get("parent"):
+            model = self.load(model["parent"])
+        return any("tintindex" in f for f in model.get("elements", [{}])[0].get("faces", {}).values())
+
+    def plain_cube(self, name):
+        """Whether the model is one unturned full cube with all six faces."""
+        model = self.load(name)
+        while "elements" not in model and model.get("parent"):
+            model = self.load(model["parent"])
+        elements = model.get("elements", [])
+        if len(elements) != 1:
+            return False
+        e = elements[0]
+        if e["from"] != [0, 0, 0] or e["to"] != [16, 16, 16] or "rotation" in e:
+            return False
+        return set(e["faces"]) == set(FACES) and all(
+            f.get("uv", [0, 0, 16, 16]) == [0, 0, 16, 16] and "rotation" not in f and f.get("cullface") == d
+            for d, f in e["faces"].items()
+        )
+
+    def plain_layout(self, block):
+        """`cube`, `spin_y`, `spin_xy` or `facing` when every state of the block draws one plain
+        cube model as that layout does, else None."""
+        path = self.root / "blockstates" / f"{block}.json"
+        if not path.exists():
+            return None
+        variants = json.loads(path.read_text()).get("variants")
+        if not variants:
+            return None
+        models = set()
+        turns = set()
+        for key, variant in variants.items():
+            variant = variant if isinstance(variant, list) else [variant]
+            models |= {v["model"] for v in variant}
+            turns.add((key, tuple((v.get("x", 0), v.get("y", 0)) for v in variant)))
+            if any(v.get("uvlock") or "weight" in v for v in variant):
+                return None
+        if len(models) != 1 or not self.plain_cube(next(iter(models))):
+            return None
+        keys = {key for key, _ in turns}
+        if len(turns) == 1:
+            ((_, t),) = turns
+            return {((0, 0),): "cube", tuple(SPIN_Y): "spin_y", tuple(SPIN_XY): "spin_xy"}.get(t)
+        if keys == {f"facing={f}" for f in HORIZONTAL} and all(
+            t == ((0, HORIZONTAL[key.split("=")[1]]),) for key, t in turns
+        ):
+            return "facing"
+        return None
 
     def variant_model(self, block, key):
         state = json.loads((self.root / "blockstates" / f"{block}.json").read_text())
@@ -215,7 +281,10 @@ def connected_rows(resources, families=FAMILIES):
 
 def rows(resources):
     behaviours = json.loads((resources / "block-behaviours.json").read_text())
-    names = [row[0] for row in json.loads((resources / "facts.json").read_text())["states"]]
+    vanilla_facts = json.loads((resources / "facts.json").read_text())
+    names = [row[0] for row in vanilla_facts["states"]]
+    props = [row[4].get("properties", {}) for row in vanilla_facts["states"]]
+    defaults = vanilla_facts["defaults"]
     gameplay = json.loads((resources / "gameplay-facts.json").read_text())["states"]
     tags = json.loads((resources / "block-tags.json").read_text())
     counts = Counter(names)
@@ -235,35 +304,64 @@ def rows(resources):
     for block in behaviours["blocks"]:
         name, classes = block["name"], block["class"]
         short = strip(name)
+        plain = False
         if classes[0] == "Block" and counts[name] == 1:
             layout, key = "cube", ""
         elif classes[0] == "RotatedPillarBlock":
             layout, key = "axis", "axis=y"
         elif short in FURNACES:
             layout, key = "facing", "facing=north,lit=false"
+        elif name not in SKIP and (layout := models.plain_layout(short)):
+            plain, key = True, "facing=north" if layout == "facing" else ""
         else:
             continue
         states = gameplay[first[name]:first[name] + counts[name]]
+        if not all(s["full_collision"] for s in states):
+            if plain:
+                continue
+            sys.exit(f"{name}: not a full cube")
+        if not all(s["solid_render"] for s in states):
+            if not plain or layout != "cube":
+                sys.exit(f"{name}: not a full opaque cube")
+            layout = "clear"
         facts = states[0]
-        if layout == "facing":
+        lit_emission = facts["emission"]
+        if plain:
+            # Several states (leaves' distance, a lit ore): the default's facts, the same in every
+            # state but for light, which only `lit` may change.
+            facts = gameplay[defaults[name]]
+            keep = ("hardness", "explosion_resistance", "dampening", "friction", "map_color",
+                    "requires_tool", "sound", "solid_render", "emission")
+            lit_emission = facts["emission"]
+            for i, s in enumerate(states, first[name]):
+                if props[i].get("lit") == "true":
+                    lit_emission = s["emission"]
+                    s = {**s, "emission": facts["emission"]}
+                if any(s[k] != facts[k] for k in keep):
+                    sys.exit(f"{name}: its states' facts differ")
+        elif layout == "facing":
             # lit=true comes first among each facing's two states.
             lit, unlit = states[0], states[1]
             facts = unlit
             lit_emission = lit["emission"]
-        else:
-            lit_emission = facts["emission"]
-        for s in states:
-            if not (s["solid_render"] and s["full_collision"]):
-                sys.exit(f"{name}: not a full opaque cube")
         kind = sound_kind(name, facts["sound"])
+        models.translucent = False
         faces = models.textures(models.variant_model(short, key))
+        if models.translucent:
+            if layout != "clear":
+                sys.exit(f"{name}: a translucent sprite on an opaque block")
+            layout = "glass"
+        elif layout == "clear" and models.tinted(models.variant_model(short, key)):
+            layout = "leaves"
         if layout == "axis" and "cube_column_horizontal" in models.parents(models.variant_model(short, "axis=x")):
             # Lying down, its top turns half a turn (Minecraft's horizontal column).
             layout = "pillar"
         if None in faces.values():
             sys.exit(f"{name}: unresolved texture in {faces}")
         lit_north = "-"
-        if layout == "facing":
+        if layout == "facing" and short not in FURNACES:
+            lit_north = faces["north"]
+        elif layout == "facing":
             lit_north = models.textures(models.variant_model(short, "facing=north,lit=true"))["north"]
         out.append((
             short, ",".join(classes), number(facts["hardness"]), number(facts["explosion_resistance"]),

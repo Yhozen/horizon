@@ -163,16 +163,24 @@ against them.
 ### Full-cube blocks
 
 `data/blocks/cubes.txt` (written by `python3 tools/open_block_facts.py` from the prepared
-vanilla tables; `--check` fails if it is out of date) gives three families their content: the
+vanilla tables; `--check` fails if it is out of date) gives four families their content: the
 182 single-state blocks of class `Block`, the 60 `RotatedPillarBlock`s (logs, stems, basalt,
-hay) and the furnace, blast furnace and smoker. One line per block, numbers and names only:
+hay), the furnace, blast furnace and smoker, and 126 blocks of other classes whose every state
+draws one plain cube model (ores, stained glass, leaves, copper, coral blocks, concrete powder,
+sand, netherrack, magma, pumpkins). Their layout says how: unturned (`cube`; `clear` when light
+shows through, as grates; `leaves` when its faces also carry a tint index; `glass` when its
+sprites are drawn translucent), turned at
+random among the turns Minecraft picks (`spin_y` for sand, `spin_xy` for netherrack), or by a
+horizontal `facing`. Only their default state's numbers are written: the states of such a block
+differ at most in light, by `lit` (redstone ore). One line per block, numbers and names only:
 class chain, destroy time, resistance, light (and lit light), dampening, friction, map colour,
 sound type, mining tool and level, and the texture names of its six faces (the lit front last).
 `cubes.rs` reads it: a block the crate already authors keeps its name, tab and drop and takes
 these numbers and faces; the others join the palette with a model in the bundle's own format, their
 textures from the pack (a placeholder in the map colour when it has none), and an item; each
-drops itself. Logs lying down turn their top half a turn, as Minecraft's horizontal columns do;
-furnaces turn with `facing` and show their lit front when `lit`.
+drops itself (a deepslate ore what its stone ore drops; new leaves nothing yet). Logs lying
+down turn their top half a turn, as Minecraft's horizontal columns do; furnaces turn with
+`facing` and show their lit front when `lit`.
 
 ### Fluids
 

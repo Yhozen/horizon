@@ -1,11 +1,16 @@
 //! The full-cube families, from `data/blocks/cubes.txt` (written by
 //! `tools/open_block_facts.py`): every single-state block of class `Block`,
-//! every `RotatedPillarBlock` and the three furnaces, with Minecraft's
+//! every `RotatedPillarBlock`, the three furnaces, and every other block all
+//! of whose states draw one plain cube (ores, glass, leaves, copper, sand,
+//! netherrack, pumpkins), with Minecraft's
 //! numbers (destroy time, resistance, light, map colour, friction, sound
 //! type, mining tool) and the texture names of their faces. A block this
 //! crate already authors keeps its name, tab and drop and takes the numbers
 //! and faces; the others are added to the palette, dropping themselves.
 use crate::blocks::{Block, Category, Drop, Faces, Form, Layer, Mining, Sound, Tier, Tool};
+use serde_json::{Value, json};
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 const CUBES: &str = include_str!("../data/blocks/cubes.txt");
 
@@ -24,6 +29,87 @@ pub struct Cube {
     pub sound: &'static str,
     pub mining: Mining,
     pub faces: Faces,
+    /// `cube`, `clear` (light shows through), `leaves` (and its faces carry
+    /// a tint index), `glass` (and its sprites are
+    /// drawn translucent), `spin_y` / `spin_xy` (turned at random as sand
+    /// and netherrack), `axis`, `pillar` or `facing`.
+    pub layout: &'static str,
+}
+
+impl Cube {
+    /// Light shows through it (glass, leaves, ice, grates).
+    pub fn clear(&self) -> bool {
+        matches!(self.layout, "clear" | "leaves" | "glass")
+    }
+}
+
+fn layouts() -> &'static HashMap<&'static str, &'static str> {
+    static LAYOUTS: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    LAYOUTS.get_or_init(|| cubes().into_iter().map(|c| (c.id, c.layout)).collect())
+}
+
+/// The turns (x, y) of the models Minecraft picks among at random for the
+/// block, in its order; empty for a block drawn unturned.
+pub fn turns(id: &str) -> Vec<(u16, u16)> {
+    let quarter = [0, 90, 180, 270];
+    match layouts().get(id).copied() {
+        Some("spin_y") => quarter.iter().map(|&y| (0, y)).collect(),
+        Some("spin_xy") => quarter
+            .iter()
+            .flat_map(|&y| quarter.iter().map(move |&x| (x, y)))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Its sprites are drawn translucent (Minecraft's `force_translucent`).
+pub fn translucent(id: &str) -> bool {
+    layouts().get(id) == Some(&"glass")
+}
+
+/// Marks a cube model's faces tinted (leaves) and its sprites translucent
+/// (glass), as Minecraft's models of the block do. Minecraft's leaves model
+/// tints every face; the client colours only the leaves it names
+/// (`colored`), and those only when `tint` (the pack's grey art).
+pub fn dress(id: &str, model: &mut Value, colored: bool, tint: bool) {
+    let leaves = layouts().get(id) == Some(&"leaves");
+    if (tint || leaves && !colored)
+        && let Some(faces) = model["elements"][0]["faces"].as_object_mut()
+    {
+        for face in faces.values_mut() {
+            face["tintindex"] = json!(0);
+        }
+    }
+    if translucent(id)
+        && let Some(textures) = model["textures"].as_object_mut()
+    {
+        for texture in textures.values_mut() {
+            *texture = json!({"sprite": texture.clone(), "force_translucent": true});
+        }
+    }
+}
+
+/// The block-state variant of an unturned cube: its model, or the list of
+/// its turns Minecraft picks among.
+pub fn variants(id: &str, model: &str) -> Value {
+    let turns = turns(id);
+    if turns.is_empty() {
+        return json!({ "model": model });
+    }
+    let list: Vec<Value> = turns
+        .into_iter()
+        .map(|(x, y)| {
+            let mut v = json!({ "model": model });
+            if x != 0 {
+                v["x"] = json!(x);
+            }
+            if y != 0 {
+                v["y"] = json!(y);
+            }
+            v
+        })
+        .collect();
+    Value::Array(list)
 }
 
 fn leak<T>(v: Vec<T>) -> &'static [T] {
@@ -76,6 +162,7 @@ pub fn cubes() -> Vec<Cube> {
                     needs: num(11) as u8,
                 },
                 faces,
+                layout: f[13],
             }
         })
         .collect()
@@ -152,6 +239,15 @@ fn category(cube: &Cube) -> Category {
         "bedrock",
         "muddy_mangrove_roots",
         "pale_moss_block",
+        "sand",
+        "red_sand",
+        "gravel",
+        "magma_block",
+        "crimson_nylium",
+        "warped_nylium",
+        "moss_block",
+        "rooted_dirt",
+        "ice",
     ];
     if COLORS.iter().any(|c| id.starts_with(&format!("{c}_"))) {
         Category::Colored
@@ -169,7 +265,9 @@ fn category(cube: &Cube) -> Category {
         Category::Minerals
     } else if natural.contains(&id) {
         Category::Ground
-    } else if cube.classes[0] == "RotatedPillarBlock" && cube.mining.tool == Tool::Hoe {
+    } else if id.ends_with("_leaves")
+        || cube.classes[0] == "RotatedPillarBlock" && cube.mining.tool == Tool::Hoe
+    {
         Category::Plants
     } else {
         Category::Construction
@@ -206,13 +304,35 @@ pub fn add(blocks: &mut Vec<Block>) {
             drop: Drop::Itself,
             friction: 0.6,
         };
+        if let Some(base) = id_base(cube.id).and_then(|b| blocks.iter().find(|x| x.id == b)) {
+            // A deepslate ore drops what its stone ore drops.
+            block.drop = base.drop;
+        }
+        if cube.id.ends_with("_leaves") {
+            // Its sapling is not content yet.
+            block.drop = Drop::Nothing;
+        }
         set_facts(&mut block, &cube);
         blocks.push(block);
     }
 }
 
+/// `iron_ore` for `deepslate_iron_ore`.
+fn id_base(id: &str) -> Option<&str> {
+    id.strip_prefix("deepslate_")
+        .filter(|b| b.ends_with("_ore"))
+}
+
 fn set_facts(block: &mut Block, cube: &Cube) {
     block.faces = cube.faces;
+    if cube.clear() {
+        block.form = Form::SeeThroughCube;
+        block.layer = if cube.layout == "glass" {
+            Layer::Translucent
+        } else {
+            Layer::Cutout
+        };
+    }
     block.classes = cube.classes;
     block.hardness = cube.hardness;
     block.resistance = cube.resistance;
@@ -243,6 +363,21 @@ mod tests {
         assert!(furnace.classes.contains(&"BaseEntityBlock"));
         let obsidian = cubes.iter().find(|c| c.id == "obsidian").unwrap();
         assert_eq!((obsidian.resistance, obsidian.mining.needs), (1200.0, 3));
+        let layout = |l: &str| cubes.iter().filter(|c| c.layout == l).count();
+        assert_eq!(
+            [
+                layout("clear") + layout("leaves"),
+                layout("glass"),
+                layout("spin_y"),
+                layout("spin_xy")
+            ],
+            [24, 17, 19, 1]
+        );
+        let ore = cubes.iter().find(|c| c.id == "redstone_ore").unwrap();
+        assert_eq!((ore.light, ore.lit_light), (0, 9));
+        assert_eq!(turns("netherrack").len(), 16);
+        assert_eq!(turns("sand")[1], (0, 90));
+        assert!(translucent("white_stained_glass") && !translucent("oak_leaves"));
     }
 
     #[test]
@@ -251,7 +386,12 @@ mod tests {
         for cube in cubes() {
             let block = blocks.iter().find(|b| b.id == cube.id).unwrap();
             assert_eq!(block.tier, Tier::Palette, "{}", cube.id);
-            assert!(block.form == Form::Cube, "{}", cube.id);
+            let form = if cube.clear() {
+                Form::SeeThroughCube
+            } else {
+                Form::Cube
+            };
+            assert!(block.form == form, "{}", cube.id);
             assert!(!block.textures().is_empty(), "{}", cube.id);
         }
         assert_eq!(title("blast_furnace"), "Blast Furnace");

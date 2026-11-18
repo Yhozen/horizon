@@ -467,7 +467,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
                 (Form::Fluid, id) if id != "bubble_column" => "liquid",
                 (Form::Connected(Family::Pane | Family::Bars), _) => "bars",
                 (_, id) if id.ends_with("_leaves") => "leaves",
-                (_, "glass" | "tinted_glass") => "same_block",
+                _ if b.classes.contains(&"HalfTransparentBlock") => "same_block",
                 _ => "never",
             };
             (
