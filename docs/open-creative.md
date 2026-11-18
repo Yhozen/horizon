@@ -222,7 +222,10 @@ are listed as the `variants` blocks' are (any elements, turned ones too, and mul
 conditions with alternatives). `cubes.rs` gives each state Minecraft's boxes by class
 (`cubes::shape`, through the shape library), and `cubes.txt`'s last columns give the facts the
 tables cannot derive for them: piston reaction, replaceable, random ticks, lava ignition, block
-entity and item. Redstone wire is placed by redstone, so it has no item of its own. One line per block, numbers and names only:
+entity and item. Redstone wire is placed by redstone, so it has no item of its own. Candles,
+candle cakes, cauldrons (empty, water, lava and powder snow) and the pale moss carpet are
+`shaped` too. A candle's lit light is written once per candle count (`3,6,9,12` in the lit light
+column), and filled cauldrons and candle cakes, placed by other items, have no item of their own. One line per block, numbers and names only:
 class chain, destroy time, resistance, light (and lit light), dampening, friction, map colour,
 sound type, mining tool and level, and the texture names of its six faces (the lit front last).
 `cubes.rs` reads it: a block the crate already authors keeps its name, tab and drop and takes

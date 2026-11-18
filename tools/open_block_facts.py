@@ -22,7 +22,9 @@ of these families, in block registry order:
   and each model's elements (box, rotation, shade, and faces: texture, UV, rotation, tint index,
   cull face),
 - the blocks of the classes in `SHAPED` (redstone wire, rails, rods, carpets, repeaters and
-  comparators, snow, farmland, dirt paths, ladders, levers, cakes, anvils): layout `shaped`,
+  comparators, snow, farmland, dirt paths, ladders, levers, cakes, anvils, candles, candle
+  cakes, cauldrons, the pale moss carpet): layout `shaped` (a candle's lit light is one number
+  per candle count, `3,6,9,12`),
   their models listed as `variants`' are, and the default state's piston reaction,
   replaceable, random ticks, lava ignition, block entity and item in the last columns, which
   the tables cannot derive for them; `cubes.rs` writes their shapes by class.
@@ -70,7 +72,8 @@ SUNKEN = ("SoulSandBlock", "MudBlock")
 # Blocks drawn by models of any boxes, with shapes `cubes.rs` writes by class: layout `shaped`.
 SHAPED = ("RedstoneWireBlock", "LightningRodBlock", "EndRodBlock", "CarpetBlock", "RepeaterBlock",
           "ComparatorBlock", "SnowLayerBlock", "FarmlandBlock", "PathBlock", "LadderBlock",
-          "BaseRailBlock", "LeverBlock", "CakeBlock", "AnvilBlock")
+          "BaseRailBlock", "LeverBlock", "CakeBlock", "AnvilBlock", "AbstractCandleBlock",
+          "AbstractCauldronBlock", "MossyCarpetBlock")
 # Blocks with a plain cube model that are not plain blocks to place.
 # The jigsaw has a block entity without `BaseEntityBlock`, which the open tables read it from.
 SKIP = ("minecraft:test_instance_block", "minecraft:jigsaw")
@@ -488,9 +491,12 @@ def rows(resources):
                         "sound", "emission", "push", "replaceable", "random_ticks", "ignited_by_lava",
                         "block_entity", "item")
             lit_emission = facts["emission"]
+            by_count = {}
             for i, s in enumerate(states, first[name]):
                 if props[i].get("lit") == "true":
                     lit_emission = s["emission"]
+                    # Candles light by their count.
+                    by_count[props[i].get("candles")] = s["emission"]
                     s = {**s, "emission": facts["emission"]}
                 if any(s[k] != facts[k] for k in keep):
                     break
@@ -542,7 +548,10 @@ def rows(resources):
             lit_north = models.textures(models.variant_model(short, "facing=north,lit=true"))["north"]
         out.append((
             short, ",".join(classes), number(facts["hardness"]), number(facts["explosion_resistance"]),
-            str(facts["emission"]), str(lit_emission), str(facts["dampening"]), number(facts["friction"]),
+            str(facts["emission"]),
+            ",".join(str(by_count[c]) for c in sorted(by_count)) if plain and len(set(by_count.values())) > 1
+            else str(lit_emission),
+            str(facts["dampening"]), number(facts["friction"]),
             f"{facts['map_color']:06x}", kind, tagged.get(name, "-"), str(needs.get(name, 0)),
             "1" if facts["requires_tool"] else "0", layout, *(faces[f] for f in FACES), lit_north,
             number(facts["speed_factor"]), facts["push"], *("1" if facts[k] else "0" for k in (

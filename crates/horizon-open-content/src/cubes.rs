@@ -36,6 +36,8 @@ pub struct Cube {
     pub layout: &'static str,
     /// How much it slows walking (soul sand 0.4, else 1).
     pub speed_factor: f32,
+    /// Its lit light by candle count (candles), else its one lit light.
+    pub lit_by_count: &'static [u8],
     /// The default state's facts the open tables cannot derive for a
     /// `shaped` block: piston reaction, replaceable, random ticks, catches
     /// fire from lava, has a block entity, and its item.
@@ -432,7 +434,8 @@ pub fn cubes() -> Vec<Cube> {
                 hardness: num(2),
                 resistance: num(3),
                 light: num(4) as u8,
-                lit_light: num(5) as u8,
+                lit_light: f[5].split(',').next().unwrap().parse().unwrap(),
+                lit_by_count: leak(f[5].split(',').map(|v| v.parse().unwrap()).collect()),
                 opacity: num(6) as u8,
                 friction: num(7),
                 map_color: u32::from_str_radix(f[8], 16).expect("cubes.txt: map colour"),
@@ -629,7 +632,7 @@ pub fn speed_factor(id: &str) -> f32 {
 
 /// The facts of a `shaped` block's states the open tables cannot derive
 /// (Minecraft's, from `cubes.txt`).
-pub fn patch_facts(row: &mut Value, id: &str) {
+pub fn patch_facts(row: &mut Value, id: &str, properties: &[(&str, &str)]) {
     static SHAPED: OnceLock<HashMap<&'static str, Cube>> = OnceLock::new();
     let shaped = SHAPED.get_or_init(|| {
         cubes()
@@ -647,6 +650,17 @@ pub fn patch_facts(row: &mut Value, id: &str) {
     row["ignited_by_lava"] = json!(cube.ignited_by_lava);
     row["block_entity"] = json!(cube.block_entity);
     row["item"] = json!(format!("minecraft:{}", cube.item));
+    let value = |key: &str| crate::shapes::value(properties, key);
+    if cube.classes.contains(&"MossyCarpetBlock") {
+        // It lets sky light through even where its outline is a whole
+        // block (`MossyCarpetBlock.propagatesSkylightDown`).
+        row["skylight_down"] = json!(true);
+        row["dampening"] = json!(0);
+    }
+    if cube.lit_by_count.len() > 1 && value("lit") == "true" {
+        let count: usize = value("candles").parse().unwrap_or(1);
+        row["emission"] = json!(cube.lit_by_count[count - 1]);
+    }
 }
 
 /// The shapes of a `shaped` block's state, by its class (Minecraft's
@@ -758,6 +772,59 @@ pub fn shape(block: &Block, properties: &[(&str, &str)]) -> Option<crate::shapes
             ])
         };
         StateShape::solid(anvil, false, false)
+    } else if class("CandleBlock") {
+        let candles = match value(properties, "candles") {
+            "2" => cuboid(5.0, 0.0, 6.0, 11.0, 6.0, 9.0),
+            "3" => cuboid(5.0, 0.0, 6.0, 10.0, 6.0, 11.0),
+            "4" => cuboid(5.0, 0.0, 5.0, 11.0, 6.0, 10.0),
+            _ => cuboid(7.0, 0.0, 7.0, 9.0, 6.0, 9.0),
+        };
+        open(candles.clone(), candles)
+    } else if class("CandleCakeBlock") {
+        let cake = union(&[
+            cuboid(1.0, 0.0, 1.0, 15.0, 8.0, 15.0),
+            cuboid(7.0, 8.0, 7.0, 9.0, 14.0, 9.0),
+        ]);
+        StateShape::solid(cake, false, false)
+    } else if class("AbstractCauldronBlock") {
+        // A block less its feet's gaps and its inside (`AbstractCauldronBlock.SHAPE`).
+        let hollow = union(&[
+            cuboid(0.0, 0.0, 4.0, 16.0, 3.0, 12.0),
+            cuboid(4.0, 0.0, 0.0, 12.0, 3.0, 16.0),
+            cuboid(2.0, 0.0, 2.0, 14.0, 3.0, 14.0),
+            cuboid(2.0, 4.0, 2.0, 14.0, 16.0, 14.0),
+        ]);
+        let cauldron = crate::shapes::full()
+            .join(&hollow, horizon_core::geometry::ShapeOp::ONLY_FIRST)
+            .expect("a cauldron's shape");
+        open(cauldron.clone(), cauldron)
+    } else if class("MossyCarpetBlock") {
+        let bottom = value(properties, "bottom") == "true";
+        let mut boxes = Vec::new();
+        if bottom {
+            boxes.push(flat(1.0));
+        }
+        for side in ["north", "south", "west", "east"] {
+            let h = match value(properties, side) {
+                "low" => 10.0,
+                "tall" => 16.0,
+                _ => continue,
+            };
+            boxes.push(match side {
+                "north" => cuboid(0.0, 0.0, 0.0, 16.0, h, 1.0),
+                "south" => cuboid(0.0, 0.0, 15.0, 16.0, h, 16.0),
+                "west" => cuboid(0.0, 0.0, 0.0, 1.0, h, 16.0),
+                _ => cuboid(15.0, 0.0, 0.0, 16.0, h, 16.0),
+            });
+        }
+        let collision = if bottom { flat(1.0) } else { empty() };
+        // With nothing to draw, its outline is a whole block.
+        let outline = if boxes.is_empty() {
+            crate::shapes::full()
+        } else {
+            union(&boxes)
+        };
+        open(collision, outline)
     } else if class("CarpetBlock") {
         StateShape::solid(flat(1.0), false, waterlogged)
     } else if class("DiodeBlock") {
