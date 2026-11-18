@@ -126,7 +126,7 @@ impl Game<'_> {
         // tick, which has dropped them already, before `tick_lan_mount_menus` closes the window.
         if let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn)
             && !host.hub.guests[gi].spectator()
-            && self.lan_mount_valid(&host.hub.guests[gi], mob)
+            && self.mount_menu_still_valid(&host.hub.guests[gi], mob)
             && let Some(index) = self.mobs.iter().position(|m| m.id == mob)
         {
             let mut menu = self.mount_engine_menu(index, columns);
@@ -188,7 +188,7 @@ impl Game<'_> {
 
     /// `AbstractMountInventoryMenu.stillValid`: the mount is alive and the guest's eyes are
     /// within the entity interaction range plus 4 of its box.
-    fn lan_mount_valid(&self, g: &horizon_client::lan::guest::Guest, mob: u32) -> bool {
+    fn mount_menu_still_valid(&self, g: &horizon_client::lan::guest::Guest, mob: u32) -> bool {
         let eye = [g.position[0], g.position[1] + g.eye_height(), g.position[2]];
         self.mobs.iter().find(|m| m.id == mob).is_some_and(|m| {
             let (w, h) = (f64::from(m.width()) / 2.0, f64::from(m.height()));
@@ -217,7 +217,7 @@ impl Game<'_> {
             let Some(g) = host.hub.guests.iter().find(|g| g.conn == conn) else {
                 continue;
             };
-            if self.lan_mount_valid(g, mob) {
+            if self.mount_menu_still_valid(g, mob) {
                 self.lan_send_mount(host, conn);
             } else {
                 self.lan_mount_closed(host, conn, Some(window));
