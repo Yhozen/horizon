@@ -6,11 +6,14 @@ The script only downloads and runs the mods; it never opens their jars. Everythi
 `.local/iris-oracle/` (never committed). The vanilla client jar and its libraries come from an existing
 Minecraft folder (`--mcdir`, default `.context/mcdir`).
 
-    python3 -I tools/iris_oracle.py prepare
-    python3 -I tools/iris_oracle.py world --out .local/iris-oracle/worlds/scene
+    python3 -I tools/iris_oracle.py prepare      # Fabric, Sodium 0.9.2, Iris 1.11.7, assets without sounds
+    python3 -I tools/iris_oracle.py world        # Horizon builds the scene save (.local/iris-oracle/worlds/scene)
     python3 -I tools/iris_oracle.py run --pack PACK.zip [--options PACK.txt] --world SAVE --out OUT.png
+    python3 -I tools/iris_oracle.py decode --png OUT.png [--fsh tools/shader_probe_packs/macros/shaders/final.fsh]
 
-`run` writes OUT.png and OUT.log (the game log) and prints the Iris lines of the log.
+`run` writes OUT.png (hotbar and crosshair masked) and OUT.log (the game log). On Xvfb the game needs EGL
+(`SDL_VIDEO_FORCE_EGL=1`) and the OpenGL back end (`preferredGraphicsBackend:"opengl"`); both are set.
+A run takes about 3 minutes on llvmpipe (start ~1.5 min, spawn ~40 s, terrain ~30 s).
 """
 
 from __future__ import annotations
@@ -347,7 +350,7 @@ def run(args) -> int:
         "resolution_height": str(h),
         "quickPlaySingleplayer": world.name,
     }
-    jvm = [f"-Xmx{args.xmx}", f"-Xms{args.xmx}" if False else "-Xms256M"]
+    jvm = [f"-Xmx{args.xmx}", "-Xms256M"]
     jvm += flatten_args(version["arguments"]["jvm"], subst)
     jvm += profile["arguments"]["jvm"]
     game = flatten_args(version["arguments"]["game"], subst)
@@ -437,7 +440,9 @@ def run(args) -> int:
         log.close()
         shutil.rmtree(natives, ignore_errors=True)
     for line in log_path.read_text(errors="replace").splitlines():
-        if "iris" in line.lower() or "shader" in line.lower() or "ERROR" in line or "Exception" in line:
+        if "OpenGL debug message" in line or "refmap" in line:
+            continue
+        if "Using shaderpack" in line or "ERROR" in line or "Exception" in line or "compil" in line.lower():
             print(line[:300])
     print(status, out if out.exists() else "(no screenshot)")
     if not args.keep:
