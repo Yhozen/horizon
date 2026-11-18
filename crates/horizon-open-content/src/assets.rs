@@ -362,6 +362,7 @@ fn models(block: &Block, tinting: Tinting) -> (Vec<(String, Value)>, Option<Valu
             let (models, definition) = crate::slabs::models(block);
             (models, Some(definition))
         }
+        Faces::Plant => crate::plants::models(block),
         Faces::None => (Vec::new(), None),
     }
 }
@@ -543,6 +544,15 @@ pub fn write(
             block.name.to_owned(),
         );
         if !block.has_item() {
+            continue;
+        }
+        if let Some(plant) = crate::plants::plant(block.id).filter(|_| block.faces == Faces::Plant)
+        {
+            plant_item(bundle, sources, block, plant, &mut prototypes)?;
+            lang.insert(
+                format!("item.minecraft.{}", block.id),
+                block.name.to_owned(),
+            );
             continue;
         }
         // Plants, panes and bars are drawn flat in the hand and the
@@ -867,6 +877,58 @@ fn vanilla_items(
         prototypes.insert(item.key(), Value::Object(prototype));
         lang.insert(format!("item.minecraft.{}", item.id), item.name());
     }
+    Ok(())
+}
+
+/// A plant's own item ([`crate::plants`]): flat, on `item/generated`, with
+/// Minecraft's texture name (a block texture, or an item texture from an
+/// open input or a placeholder icon) and tints, and Minecraft's default
+/// components.
+fn plant_item(
+    bundle: &mut Bundle,
+    sources: &Sources,
+    block: &Block,
+    plant: &crate::plants::Plant,
+    prototypes: &mut BTreeMap<String, Value>,
+) -> Result<()> {
+    let id = block.id;
+    let (texture, tints) = plant
+        .item_model
+        .clone()
+        .unwrap_or((Box::leak(format!("block/{id}").into_boxed_str()), None));
+    let path = format!("item/{id}");
+    bundle.json(
+        format!("assets/minecraft/models/{path}.json"),
+        &json!({"parent": "minecraft:item/generated", "textures": {"layer0": format!("minecraft:{texture}")}}),
+        GENERATOR,
+    )?;
+    let destination = format!("assets/minecraft/textures/{texture}.png");
+    if !bundle.contains(&destination) {
+        let (image, origin) = if sources.provides(&destination) {
+            sources.image(&destination)?
+        } else {
+            (placeholder_icon(id), Origin::Generator("art"))
+        };
+        bundle.png(destination, &image, origin)?;
+    }
+    let mut item_model = json!({"type": "minecraft:model", "model": format!("minecraft:{path}")});
+    if let Some(tints) = tints {
+        item_model["tints"] = tints;
+    }
+    bundle.json(
+        format!("assets/minecraft/items/{id}.json"),
+        &json!({"model": item_model}),
+        GENERATOR,
+    )?;
+    let mut prototype = crate::items::base_components();
+    prototype.insert(
+        "minecraft:item_name".into(),
+        json!({"translate": format!("block.minecraft.{id}")}),
+    );
+    // Minecraft's own name key where it differs (`item.minecraft.nether_wart`).
+    prototype.extend(plant.components.clone());
+    prototype.insert("minecraft:item_model".into(), json!(block.key()));
+    prototypes.insert(block.key(), Value::Object(prototype));
     Ok(())
 }
 

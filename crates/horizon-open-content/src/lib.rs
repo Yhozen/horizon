@@ -24,6 +24,7 @@ pub mod mobs;
 pub mod network;
 pub mod numbering;
 pub mod openings;
+pub mod plants;
 pub mod screens;
 pub mod shapes;
 pub mod slabs;

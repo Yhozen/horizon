@@ -34,9 +34,9 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
     assert_eq!(assets.profile, ContentProfile::OpenCreative);
     let render = assets.reload(&root).unwrap();
     // Every palette block bakes faces, each on a sprite the bundle has:
-    // six for cubes, both sides of two planes for plants.
+    // six for cubes, at least two for plants (a lily pad's two sides).
     let palette = palette_blocks();
-    assert_eq!(palette.len(), 638);
+    assert_eq!(palette.len(), 722);
     for block in &palette {
         let name = block.id;
         let state = assets
@@ -50,7 +50,7 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
         let faces: usize = models.iter().map(|(_, m)| m.faces.len()).sum();
         use horizon_open_content::{blocks::Form, connected::Family};
         let least = match block.form {
-            Form::Cross => 4,
+            Form::Cross => 2,
             // A door's lower half has no top face.
             Form::Connected(Family::Door) => 5,
             _ => 6,

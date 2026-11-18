@@ -621,6 +621,12 @@ pub fn write(bundle: &mut crate::Bundle, blocks: &[Block], items: &[Item]) -> cr
 
 const DEFAULTS: &str = include_str!("../data/items/defaults.json");
 
+/// The components every one of Minecraft's items has by default.
+pub fn base_components() -> serde_json::Map<String, Value> {
+    let data: Value = serde_json::from_str(DEFAULTS).expect("data/items/defaults.json");
+    data["base"].as_object().cloned().unwrap_or_default()
+}
+
 /// One of Minecraft's items that is not a block, with Minecraft's default
 /// components (`data/items/defaults.json`, written by
 /// `tools/open_item_defaults.py`).

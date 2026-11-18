@@ -101,6 +101,8 @@ pub enum Faces {
         top: &'static str,
         side: &'static str,
     },
+    /// Models drawn by [`crate::plants`] from its facts file.
+    Plant,
     Fluid {
         still: &'static str,
         flow: &'static str,
@@ -558,6 +560,7 @@ pub fn defined() -> Vec<Block> {
     crate::cubes::add(&mut blocks);
     crate::slabs::add(&mut blocks);
     crate::connected::add(&mut blocks);
+    crate::plants::add(&mut blocks);
     blocks
         .into_iter()
         .map(|mut block| {
@@ -1179,6 +1182,7 @@ impl Block {
             Faces::Stairs { bottom, top, side } => unique(&[bottom, top, side]),
             Faces::Fluid { still, flow } => vec![still, flow],
             Faces::Connected { texture, edge } => unique(&[texture, edge]),
+            Faces::Plant => crate::plants::textures(self.id),
         }
     }
 }
@@ -1258,7 +1262,7 @@ mod tests {
     }
 
     /// The number of palette blocks (checked again by the client's test).
-    pub const PALETTE_BLOCKS: usize = 638;
+    pub const PALETTE_BLOCKS: usize = 722;
 
     #[test]
     fn states_vary_the_last_property_fastest_and_have_a_default() {
