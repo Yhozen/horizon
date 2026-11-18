@@ -139,6 +139,11 @@ pub fn write(bundle: &mut Bundle) -> Result<()> {
     let (mobs, types) = crate::mobs::write(bundle)?;
     let mut models = entity_models();
     models.as_object_mut().expect("an object").extend(mobs);
+    // The chests the block-entity renderer draws (crate::chests).
+    models
+        .as_object_mut()
+        .expect("an object")
+        .extend(crate::chests::layers());
     bundle.json("entity-models.json", &models, GENERATOR)?;
     bundle.json(
         "entity-types.json",

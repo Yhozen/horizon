@@ -322,6 +322,11 @@ impl Table {
         let i = self.intern(shape, None);
         self.cached.push(i);
     }
+    /// The next state's shape is computed in code (-1), as a shulker box's
+    /// is from its lid.
+    pub fn push_dynamic(&mut self) {
+        self.cached.push(-1);
+    }
     /// The table's tag: `DataVersion`, the states, the shapes and each
     /// state's shape.
     pub fn tag(self, states: Vec<Tag>) -> Tag {

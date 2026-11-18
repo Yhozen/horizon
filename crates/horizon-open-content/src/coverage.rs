@@ -97,6 +97,17 @@ fn content(
                 .map(|n| n.to_string())
                 .collect()
         }
+        // The block entities the bundle draws: a type has content when its
+        // block does (chests through the block-entity renderer).
+        "block_entity_type" => names
+            .filter(|n| {
+                matches!(
+                    **n,
+                    "chest" | "trapped_chest" | "ender_chest" | "shulker_box"
+                ) && blocks.iter().any(|b| b.id == **n && block_content(b))
+            })
+            .map(|n| n.to_string())
+            .collect(),
         "item" => names
             .filter(|n| items.contains(&network::full(n)))
             .map(|n| n.to_string())

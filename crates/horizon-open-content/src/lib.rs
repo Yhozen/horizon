@@ -15,6 +15,7 @@ pub mod art_advancements;
 pub mod art_survival;
 pub mod assets;
 pub mod blocks;
+pub mod chests;
 pub mod connected;
 pub mod coverage;
 pub mod cubes;
