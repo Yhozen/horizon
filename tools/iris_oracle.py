@@ -253,6 +253,23 @@ def offline_uuid(name: str) -> str:
     return str(uuid.UUID(bytes=bytes(h)))
 
 
+def has_loading_bar(png: Path) -> bool:
+    """Whether the picture shows the "Loading terrain..." screen: a long run of pure green pixels on one row
+    in the upper half (the progress bar)."""
+    w, h, raw = read_png_rgb(png)
+    for y in range(h // 6, h // 2):
+        run = 0
+        for x in range(w // 6, w - w // 6):
+            i = (y * w + x) * 3
+            if raw[i] < 60 and raw[i + 1] > 200 and raw[i + 2] < 60:
+                run += 1
+                if run > w // 4:
+                    return True
+            else:
+                run = 0
+    return False
+
+
 def free_display() -> int:
     for n in range(91, 140):
         if not Path(f"/tmp/.X11-unix/X{n}").exists() and not Path(f"/tmp/.X{n}-lock").exists():
@@ -351,28 +368,43 @@ def run(args) -> int:
     game_proc = subprocess.Popen(cmd, cwd=game_dir, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     print(f"game pid {game_proc.pid} on :{display}, log {log_path}")
 
+    def grab(path: Path) -> bool:
+        r = subprocess.run(
+            ["ffmpeg", "-loglevel", "error", "-y", "-f", "x11grab", "-video_size", f"{w}x{h}", "-i", f":{display}",
+             "-frames:v", "1", str(path)],
+            check=False, env=env,
+        )
+        return r.returncode == 0 and path.exists()
+
     status = "timeout"
     try:
         deadline = time.time() + args.timeout
         loaded_at = None
+        ready_at = None
+        probe = out.with_suffix(".probe.png")
         while time.time() < deadline:
             if game_proc.poll() is not None:
                 status = f"exited {game_proc.returncode}"
                 break
-            text = log_path.read_text(errors="replace")
-            if loaded_at is None and ("joined the game" in text or "Loaded 0 advancements" in text and "Preparing spawn area" in text):
+            if loaded_at is None and "joined the game" in log_path.read_text(errors="replace"):
                 loaded_at = time.time()
-                print("world loaded")
-            if loaded_at and time.time() - loaded_at > args.wait:
+                print("player joined")
+            now = time.time()
+            # After the join the game shows "Loading terrain..." until the chunks around the player are
+            # drawn (slow on llvmpipe); the screen has a bright green progress bar until then.
+            if loaded_at and ready_at is None and now - loaded_at > 10:
+                if grab(probe) and not has_loading_bar(probe):
+                    ready_at = now
+                    print(f"terrain shown {now - loaded_at:.0f}s after the join")
+                else:
+                    time.sleep(4)
+            if ready_at and now - ready_at > args.wait:
                 status = "ok"
                 break
             time.sleep(1)
+        probe.unlink(missing_ok=True)
         if status in ("ok", "timeout"):
-            subprocess.run(
-                ["ffmpeg", "-loglevel", "error", "-y", "-f", "x11grab", "-video_size", f"{w}x{h}", "-i", f":{display}", "-frames:v", "1", str(out)],
-                check=False,
-                env=env,
-            )
+            grab(out)
     finally:
         try:
             os.killpg(game_proc.pid, signal.SIGTERM)
@@ -519,7 +551,7 @@ def decode_rows(png: Path, fsh: Path, cell: int = 8, bits: int = 24) -> list[tup
 def decode(args) -> int:
     for name, scale, defined, value in decode_rows(Path(args.png), Path(args.fsh)):
         shown = "undefined" if not defined else (str(value) if scale == 1 else f"{value / scale:g}")
-        print(f"{name:42} {shown}")
+        print(f"{name:60} {shown}")
     return 0
 
 
@@ -530,7 +562,7 @@ def main() -> int:
     sub.add_parser("prepare")
     de = sub.add_parser("decode", help="read the value rows a probe pack painted")
     de.add_argument("--png", required=True)
-    de.add_argument("--fsh", default=str(ROOT / "tools" / "shader_probe_packs" / "macros" / "shaders" / "final.fsh"))
+    de.add_argument("--fsh", default=str(ROOT / "tools" / "shader_probe_packs" / "macros" / "shaders" / "final.fsh"), help="the probe pack's final.fsh (its `// row` comments)")
     wo = sub.add_parser("world", help="build the scene save with Horizon")
     wo.add_argument("--out", default=str(HOME / "worlds" / "scene"))
     wo.add_argument("--resources", default=str(MAIN / ".context" / "wt" / "prep" / ".local" / "horizon-client" / MC))
@@ -543,7 +575,7 @@ def main() -> int:
     r.add_argument("--world", required=True, help="save folder (copied)")
     r.add_argument("--out", required=True, help="screenshot path; the log goes beside it as .log")
     r.add_argument("--size", default="854x480")
-    r.add_argument("--wait", type=float, default=90, help="seconds after the world loaded")
+    r.add_argument("--wait", type=float, default=15, help="seconds after the terrain is shown")
     r.add_argument("--timeout", type=float, default=600)
     r.add_argument("--name", help="run folder name under .local/iris-oracle/runs/")
     r.add_argument("--xmx", default="2G")

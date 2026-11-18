@@ -1,9 +1,8 @@
 #version 120
-// Probe pack (Horizon, MIT): paints predefined macros and a few uniforms as rows of bits so one
-// screenshot measures them. Row r starts at the top-left: a marker cell (green = defined, red = not),
-// then 24 cells, most significant bit first (white = 1). Values are round(value * scale); a macro
-// defined empty reads 0 (`NAME + 0` is `+0`).
-// tools/iris_oracle.py decode reads the rows back using the `// row` comments below.
+// Probe pack (Horizon, MIT; written by tools/shader_probe_packs/gen_macros.py): paints predefined macros,
+// preprocessor conditions and a few uniforms as rows of bits so one screenshot measures them. Row r starts
+// at the top-left: a marker cell (green = defined, red = not), then 24 cells, most significant bit first
+// (white = 1). Values are round(value * scale); a macro defined empty reads 0 (`NAME + 0` is `+0`).
 
 uniform sampler2D colortex0;
 uniform float viewWidth;
@@ -13,7 +12,7 @@ uniform int frameCounter;
 varying vec2 texcoord;
 
 const float CELL = 8.0;
-const int ROWS = 38;
+const int ROWS = 42;
 
 void value(int row, out bool def, out float v) {
     def = false;
@@ -222,14 +221,42 @@ void value(int row, out bool def, out float v) {
         def = true; v = float(IRIS_FEATURE_TEXTURE_SHAPED_SAMPLERS + 0);
 #endif
     }
-    // row 34: uniform viewWidth x1
-    if (row == 34) { def = true; v = float(viewWidth); }
-    // row 35: uniform viewHeight x1
-    if (row == 35) { def = true; v = float(viewHeight); }
-    // row 36: uniform worldTime x1
-    if (row == 36) { def = true; v = float(worldTime); }
-    // row 37: uniform frameCounter>0 x1
-    if (row == 37) { def = true; v = float(frameCounter > 0); }
+    // row 34: #if MC_GL_VERSION >= 320 x1
+    if (row == 34) {
+        def = true;
+#if MC_GL_VERSION >= 320
+        v = 1.0;
+#endif
+    }
+    // row 35: #if MC_GL_VERSION >= 45 x1
+    if (row == 35) {
+        def = true;
+#if MC_GL_VERSION >= 45
+        v = 1.0;
+#endif
+    }
+    // row 36: #if MC_VERSION >= 12111 x1
+    if (row == 36) {
+        def = true;
+#if MC_VERSION >= 12111
+        v = 1.0;
+#endif
+    }
+    // row 37: #if defined(MC_GL_VENDOR_MESA) || defined(MC_GL_VENDOR_OTHER) x1
+    if (row == 37) {
+        def = true;
+#if defined(MC_GL_VENDOR_MESA) || defined(MC_GL_VENDOR_OTHER)
+        v = 1.0;
+#endif
+    }
+    // row 38: uniform viewWidth x1
+    if (row == 38) { def = true; v = float(viewWidth); }
+    // row 39: uniform viewHeight x1
+    if (row == 39) { def = true; v = float(viewHeight); }
+    // row 40: uniform worldTime x1
+    if (row == 40) { def = true; v = float(worldTime); }
+    // row 41: uniform frameCounter>0 x1
+    if (row == 41) { def = true; v = float(frameCounter > 0); }
 }
 
 void main() {
@@ -254,8 +281,7 @@ void main() {
     if (col == 0) {
         c = def ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
     } else {
-        float bit = mod(floor(v / exp2(float(24 - col))), 2.0);
-        c = vec3(bit);
+        c = vec3(mod(floor(v / exp2(float(24 - col))), 2.0));
     }
     gl_FragData[0] = vec4(c, 1.0);
 }
