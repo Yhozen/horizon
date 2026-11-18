@@ -145,6 +145,10 @@ transformed (re-encoded RGBA; the grass side is composited over dirt and the ore
 stone, as Minetest Game layers them).
 The fonts come from `crates/horizon-theme/fonts` (Pixelify Sans, OFL).
 
+Licences: each input keeps its own (CC BY-SA 3.0 and CC0 1.0 today), the generated bundle is
+distributed under CC BY-SA 4.0 as a whole, and the generator stays MIT
+([legal/LICENSING.md](../legal/LICENSING.md#horizon-open-content)).
+
 Every bundle file is listed in `horizon-open-provenance.json` with its SHA-256 and either the
 input it came from or the generator that wrote it. `horizon-prepare open --check`, the web
 packaging and the game itself refuse a bundle that disagrees with it. The credits reach players
