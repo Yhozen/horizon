@@ -245,23 +245,20 @@ fn is_8bit(format: BufferFormat) -> bool {
 
 /// Whether WebGPU can filter the client's texture for this format.
 fn filterable(format: BufferFormat) -> bool {
-    buffer_sample(format) == SampleKind::Float
+    use crate::plan::StorageFormat as S;
+    !format.is_integer()
         && !matches!(
-            format,
-            BufferFormat::R32F | BufferFormat::Rg32F | BufferFormat::Rgb32F | BufferFormat::Rgba32F
+            format.storage(),
+            S::R32Float | S::Rg32Float | S::Rgba32Float
         )
 }
 
-/// The texel type of a buffer format: integer formats (`…UI`, `…I`, by their
-/// names) read as integers.
+/// The texel type of a buffer format.
 fn buffer_sample(format: BufferFormat) -> SampleKind {
-    let name = format!("{format:?}").to_ascii_uppercase();
-    if name.ends_with("UI") {
-        SampleKind::Uint
-    } else if name.ends_with('I') {
-        SampleKind::Sint
-    } else {
-        SampleKind::Float
+    match format.kind() {
+        crate::plan::FormatKind::Sint => SampleKind::Sint,
+        crate::plan::FormatKind::Uint => SampleKind::Uint,
+        _ => SampleKind::Float,
     }
 }
 
@@ -501,11 +498,11 @@ fn depth2_is_1(calls: &BTreeSet<String>, spec: &ProgramSpec, watershadow: bool) 
 }
 
 /// Textures of Horizon's own group 0 that every stage of this geometry's
-/// layout counts: terrain's sprite arrays and lightmap, the entity atlas and
-/// lightmap.
+/// layout counts: terrain's sprite arrays and lightmap (as many as its layout
+/// declares), the entity atlas and lightmap.
 fn horizon_textures(spec: &ProgramSpec) -> u32 {
     match spec.geometry {
-        Geometry::Terrain => spec.host.sprite_arrays + 1,
+        Geometry::Terrain => spec.host.terrain_textures.max(spec.host.sprite_arrays + 1),
         Geometry::Entity => 2,
         Geometry::Fullscreen => 0,
     }
