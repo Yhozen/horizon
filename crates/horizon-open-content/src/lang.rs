@@ -2031,6 +2031,19 @@ pub fn registry_keys() -> Vec<(String, String)> {
     out
 }
 
+/// A block's or item's English name by its id (`minecraft:` optional), as `registry_keys`
+/// writes it: for the creative palette's search lines.
+pub fn display_name(id: &str) -> String {
+    let id = id.strip_prefix("minecraft:").unwrap_or(id);
+    let block = format!("block.minecraft.{id}");
+    let item = format!("item.minecraft.{id}");
+    NAMES
+        .iter()
+        .find(|(k, _)| *k == block || *k == item)
+        .map(|(_, v)| (*v).to_owned())
+        .unwrap_or_else(|| title_case(id))
+}
+
 /// Every other key and its English.
 pub fn other_keys() -> impl Iterator<Item = (String, String)> {
     KEYS.lines().filter(|l| !l.is_empty()).map(|line| {

@@ -584,7 +584,7 @@ pub fn write(
         "title": "Search",
         "icon": stack("minecraft:glass"),
         "items": palette.iter().map(|(_, id, _)| stack(id)).collect::<Vec<_>>(),
-        "lines": palette.iter().map(|(_, _, name)| vec![name.clone()]).collect::<Vec<_>>(),
+        "lines": palette.iter().map(|(_, id, _)| vec![crate::lang::display_name(id)]).collect::<Vec<_>>(),
         "tags": palette.iter().map(|_| Vec::<String>::new()).collect::<Vec<_>>(),
     }));
     tabs.push(json!({
