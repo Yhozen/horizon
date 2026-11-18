@@ -53,14 +53,16 @@ Survival rules, all data the shared survival code reads:
 
 The bundle has the common creatures of a survival world (`crates/horizon-open-content/src/mobs.rs`):
 zombie, husk, drowned, skeleton, stray, creeper, spider, cave spider, enderman, cow, pig, sheep (its
-wool dyed by the client) and chicken, with each climate variant and the young. Each is a model of
-boxes under the part names the client's animations drive, and a skin painted by the generator,
-Horizon's own: a shelf packer lays every box out on its texture and a painter colours each face. The
-young are the same boxes scaled about the feet, the head less, on the same skin layout. Open
-players see these on any server they reach through the relay; the shared world's own server spawns
-no mobs (the open profile turns spawning off). The private preview keeps these skins when it plays
-on the open bundle (`web.rs`'s overlay skips `textures/entity/`, but the player's skin), as its own
-art wouldn't fit their layouts.
+wool dyed by the client) and chicken, with each climate variant and the young. Each adult is a
+model in Minecraft's standard box layout: the same part names (`hat` included), boxes, pivots,
+texture origins and mirrored boxes as the Java model, on a skin of the Java texture's size, so a
+skin from a Minecraft-layout resource pack fits it. The skins are painted by the generator,
+Horizon's own: a painter colours each face of each box. The young are the adults' boxes scaled about
+the feet, the head less, on the adult skin layout (Minecraft's young have models and skins of their
+own). Open players see these on any server they reach through the relay; the shared world's own
+server spawns no mobs (the open profile turns spawning off). The private preview lays its own mob
+skins over these when it plays on the open bundle, but for the young (`web.rs`'s overlay skips
+`textures/entity/**/*_baby.png`), whose layouts wouldn't fit.
 
 ## The content profile
 
