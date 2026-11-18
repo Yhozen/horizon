@@ -18,6 +18,7 @@ pub mod blocks;
 pub mod chests;
 pub mod connected;
 pub mod coverage;
+pub mod creatures;
 pub mod cubes;
 pub mod image;
 pub mod items;
@@ -161,7 +162,7 @@ pub fn build(inputs: &Inputs) -> Result<Bundle> {
     tables::health(&mut bundle, &blocks)?;
     assets::write(&mut bundle, &blocks, &items, &sources)?;
     items::write(&mut bundle, &blocks, &items)?;
-    art::write(&mut bundle)?;
+    art::write(&mut bundle, &sources)?;
     network::write(&mut bundle)?;
     coverage::write(&mut bundle, &blocks)?;
     sources.write_notices(&mut bundle)?;

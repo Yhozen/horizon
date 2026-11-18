@@ -1349,14 +1349,26 @@ fn leak_attrs(health: f64) -> &'static [(&'static str, f64)] {
     Box::leak(vec![("max_health", health), ("movement_speed", 0.25)].into_boxed_slice())
 }
 
-/// The entity types' names, for the network registry.
+/// The entity types' names, for the network registry: these mobs', then
+/// [`crate::creatures`]'.
 pub fn names() -> Vec<&'static str> {
+    own_names()
+        .into_iter()
+        .chain(crate::creatures::names().into_iter().map(leak))
+        .collect()
+}
+
+/// The names of the mobs built here.
+pub fn own_names() -> Vec<&'static str> {
     mobs().into_iter().map(|m| m.name).collect()
 }
 
 /// Writes every mob's skins and returns its models and types, for `entity-models.json`
-/// and `entity-types.json`.
-pub fn write(bundle: &mut Bundle) -> Result<(Map<String, Value>, Map<String, Value>)> {
+/// and `entity-types.json`, [`crate::creatures`]' included.
+pub fn write(
+    bundle: &mut Bundle,
+    sources: &crate::sources::Sources,
+) -> Result<(Map<String, Value>, Map<String, Value>)> {
     let mut models = Map::new();
     let mut types = Map::new();
     for mob in mobs() {
@@ -1397,6 +1409,10 @@ pub fn write(bundle: &mut Bundle) -> Result<(Map<String, Value>, Map<String, Val
             }),
         );
     }
+    // The creatures after these mobs: a giant wears the zombie's skin.
+    let (more_models, more_types) = crate::creatures::write(bundle, sources)?;
+    models.extend(more_models);
+    types.extend(more_types);
     Ok((models, types))
 }
 

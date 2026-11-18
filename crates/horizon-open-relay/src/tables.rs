@@ -645,7 +645,7 @@ pub(crate) mod fixture {
                 "falling_block",
                 "player",
                 "experience_orb",
-                "wither_skeleton",
+                "parched",
             ]),
         );
         vanilla.registries.insert(
@@ -684,7 +684,7 @@ pub(crate) mod fixture {
                     "falling_block",
                     "skeleton",
                     "zombie",
-                    "wither_skeleton",
+                    "parched",
                 ][..if every_mob { 7 } else { 5 }],
             ),
         );
