@@ -4,7 +4,11 @@
 The probe `crates/horizon-client/examples/open_parity_probe.rs` loads a resource folder
 through the game's own loaders and writes every table keyed by name: registries (entry
 to network id), blocks (properties, values in order, default state), block states (global
-id and facts). It runs on the prepared vanilla resources (.local/horizon-client/26.3) and
+id and facts), shapes (collision, outline, occlusion boxes per state), items (default
+components), entity types (width, height, eye height), entity model layers (part names),
+attributes (id, default, range) and their entity defaults, the container screen textures,
+every texture with its pixel size, and baked block models (a digest of each state's quads:
+positions, UVs, facing, cull face, tint index, texture name; never pixels). It runs on the prepared vanilla resources (.local/horizon-client/26.3) and
 on the open bundle, which it builds from this checkout's generator.
 
 A name matches when its facts are equal, numbers included: a block state matches only if
@@ -36,6 +40,14 @@ GAPS = ROOT / 'tools' / 'open_parity' / 'gaps'
 PROBE = 'open_parity_probe'
 # The parity runner's probe settings (tools/parity.py PROFILE) are those of the fast profile.
 BUILD = ['cargo', 'build', '--quiet', '--locked', '--profile', 'fast', '-p', 'horizon-client', '--example', PROBE]
+
+
+def read_open_content():
+    """Read the generator's content files, so the parity runner counts them as inputs (the probe
+    reads them from Rust, which its tracer does not see)."""
+    for path in sorted((ROOT / 'content' / 'open').rglob('*')):
+        if path.is_file():
+            path.read_bytes()
 
 
 def run_probes(binary, out):
@@ -128,6 +140,7 @@ def main():
     if not (RESOURCES / 'facts.json').exists():
         sys.exit(f'{RESOURCES} is missing: prepare the vanilla resources first (docs/parity-workflow.md)')
     started = time.monotonic()
+    read_open_content()
     if args.bin_dir:
         binary = Path(args.bin_dir).resolve() / 'examples' / PROBE
     else:
