@@ -132,7 +132,10 @@ impl PackReport {
                     (None, None) => {}
                 }
                 for (file, e) in &p.failed {
-                    let _ = writeln!(out, "    {file} failed: {e}");
+                    // The slot's error is its first candidate's: said once.
+                    if p.error.as_deref() != Some(&format!("{file}: {e}")) {
+                        let _ = writeln!(out, "    {file} failed: {e}");
+                    }
                 }
             }
         }
