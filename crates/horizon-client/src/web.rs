@@ -167,12 +167,19 @@ pub async fn start_overlaid(
     crate::game::run().map_err(|e| JsValue::from_str(&format!("Horizon: {e}")))
 }
 
-/// Puts one file into the game's file system before `start` or `start_overlaid`: a
-/// relative `path` starts from the game folder (`/horizon`), as the game's own do. The
-/// page drops a shader pack (`?shaderpack=`) at `shaderpacks/pack.zip` this way.
+/// Puts one file into the game's file system, before `start` or while the game
+/// runs: a relative `path` starts from the game folder (`/horizon`), as the
+/// game's own do. The page restores the files it keeps (shader packs, their
+/// settings) this way, and adds the packs the player picks or drops.
 #[wasm_bindgen]
 pub fn install_file(path: String, bytes: Vec<u8>) {
     horizon_core::fs::install(std::path::Path::new(&path), bytes);
+}
+
+/// The page added shader packs: the Shader Packs screen lists them again.
+#[wasm_bindgen]
+pub fn shader_packs_changed() {
+    crate::game::shader_packs_changed();
 }
 
 /// Mounts `archive` (tools/web/pack.py) as the prepared resources, opens WebGPU and

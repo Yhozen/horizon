@@ -3069,8 +3069,20 @@ impl Renderer {
         self.device.limits().max_inter_stage_shader_variables
     }
     /// How the terrain bind group holds block sprites, for compiling a pack.
+    /// and the device's limits a pack's programs must fit.
     pub fn shader_pack_host(&self) -> horizon_glsl_pack::HostParams {
-        self.sprite_host
+        let limits = self.device.limits();
+        horizon_glsl_pack::HostParams {
+            max_varyings: limits.max_inter_stage_shader_variables,
+            max_textures: limits.max_sampled_textures_per_shader_stage,
+            max_draw_buffers: limits.max_color_attachments,
+            max_attachment_bytes: limits.max_color_attachment_bytes_per_sample,
+            ..self.sprite_host
+        }
+    }
+    /// Whether a shader pack is installed.
+    pub fn has_shader_pack(&self) -> bool {
+        self.glsl_pack.is_some()
     }
     /// Draws the overworld with a compiled shader pack's programs from now on
     /// (`None`: Horizon's own). Errors leave the renderer without a pack.
