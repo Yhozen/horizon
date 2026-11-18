@@ -371,40 +371,39 @@ pub fn add(blocks: &mut Vec<Block>) {
             },
             None => Drop::Nothing,
         };
-        let mut block = Block {
-            id: plant.id,
-            name: title(plant.id),
-            tier: if own { Tier::Palette } else { Tier::Terrain },
-            form: Form::Cross,
-            layer: Layer::Cutout,
-            faces: Faces::Plant,
-            properties: &[],
-            defaults: &[],
-            hardness: 0.0,
-            resistance: 0.0,
-            light: 0,
-            lit_light: 0,
-            opacity: 0,
-            sound: Sound::Grass,
-            classes: &[],
-            map_color: 0,
-            category: own.then(|| {
-                if plant.classes[0] == "AmethystClusterBlock" {
-                    Category::Minerals
-                } else if plant
-                    .classes
-                    .iter()
-                    .any(|c| c.contains("Torch") || c.contains("Lantern"))
-                {
-                    Category::Construction
-                } else {
-                    Category::Plants
-                }
-            }),
-            mining: plant.mining,
-            drop,
-            friction: 0.6,
-        };
+        let mut block =
+            Block {
+                id: plant.id,
+                name: title(plant.id),
+                tier: if own { Tier::Palette } else { Tier::Terrain },
+                form: Form::Cross,
+                layer: Layer::Cutout,
+                faces: Faces::Plant,
+                properties: &[],
+                defaults: &[],
+                hardness: 0.0,
+                resistance: 0.0,
+                light: 0,
+                lit_light: 0,
+                opacity: 0,
+                sound: Sound::Grass,
+                classes: &[],
+                map_color: 0,
+                category: own.then(|| {
+                    if plant.classes[0] == "AmethystClusterBlock" {
+                        Category::Minerals
+                    } else if plant.classes.iter().any(|c| {
+                        c.contains("Torch") || c.contains("Lantern") || c.contains("Chain")
+                    }) {
+                        Category::Construction
+                    } else {
+                        Category::Plants
+                    }
+                }),
+                mining: plant.mining,
+                drop,
+                friction: 0.6,
+            };
         set_facts(&mut block, plant);
         blocks.push(block);
     }
@@ -848,6 +847,59 @@ fn layout(name: &str) -> Option<(Vec<Value>, bool)> {
             ],
             true,
         ),
+        // A chain: two narrow strips of its texture crossed at 45 degrees.
+        "template_chain" => {
+            let turn = Some(([8.0, 8.0, 8.0], "y", 45.0, false));
+            (
+                vec![
+                    plain(
+                        "#all",
+                        [6.5, 0.0, 8.0],
+                        [9.5, 16.0, 8.0],
+                        turn,
+                        &[
+                            ("north", [3.0, 0.0, 0.0, 16.0], None),
+                            ("south", [0.0, 0.0, 3.0, 16.0], None),
+                        ],
+                        true,
+                    ),
+                    plain(
+                        "#all",
+                        [8.0, 0.0, 6.5],
+                        [8.0, 16.0, 9.5],
+                        turn,
+                        &[
+                            ("west", [6.0, 0.0, 3.0, 16.0], None),
+                            ("east", [3.0, 0.0, 6.0, 16.0], None),
+                        ],
+                        true,
+                    ),
+                ],
+                false,
+            )
+        }
+        // Leaf litter: a tinted sheet just above the ground, over the
+        // north-west quarter, the west half, the south-east quarter or the
+        // whole block; the block state's cases combine and turn them.
+        _ if name.starts_with("template_leaf_litter_") => {
+            let (from, to): ([f64; 2], [f64; 2]) = match name.as_bytes()[name.len() - 1] {
+                b'1' => ([0.0, 0.0], [8.0, 8.0]),
+                b'2' => ([0.0, 0.0], [8.0, 16.0]),
+                b'3' => ([8.0, 8.0], [16.0, 16.0]),
+                _ => ([0.0, 0.0], [16.0, 16.0]),
+            };
+            let up = [from[0], from[1], to[0], to[1]];
+            let down = [from[0], to[1], to[0], from[1]];
+            (
+                vec![
+                    json!({"from": [from[0], 0.25, from[1]], "to": [to[0], 0.25, to[1]], "faces": {
+                        "up": {"uv": up, "texture": "#texture", "tintindex": 0},
+                        "down": {"uv": down, "texture": "#texture", "tintindex": 0},
+                    }}),
+                ],
+                true,
+            )
+        }
         // One face of a vine or lichen, against the north side.
         "vine" | "glow_lichen" | "sculk_vein" => {
             let (z, tint) = if name == "vine" {

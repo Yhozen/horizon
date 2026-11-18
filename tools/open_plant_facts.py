@@ -59,7 +59,8 @@ FAMILIES = {
     "WeepingVinesPlantBlock", "TwistingVinesBlock", "TwistingVinesPlantBlock", "CaveVinesBlock",
     "CaveVinesPlantBlock", "HangingMossBlock", "AmethystClusterBlock", "TorchBlock", "WallTorchBlock", "RedstoneTorchBlock",
     "RedstoneWallTorchBlock", "LanternBlock", "WeatheringLanternBlock", "LilyPadBlock",
-    "SeaPickleBlock", "VineBlock", "GlowLichenBlock", "SculkVeinBlock",
+    "SeaPickleBlock", "VineBlock", "GlowLichenBlock", "SculkVeinBlock", "ChainBlock",
+    "WeatheringCopperChainBlock", "LeafLitterBlock",
 }
 # The geometries plants.rs draws, by the name of the model that holds the elements.
 LAYOUTS = {
@@ -69,7 +70,8 @@ LAYOUTS = {
     "template_redstone_torch_wall", "template_lantern", "template_hanging_lantern", "lily_pad",
     "vine", "glow_lichen", "sculk_vein", "sea_pickle", "two_sea_pickles", "three_sea_pickles",
     "four_sea_pickles", "dead_sea_pickle", "two_dead_sea_pickles", "three_dead_sea_pickles",
-    "four_dead_sea_pickles",
+    "four_dead_sea_pickles", "template_chain", "template_leaf_litter_1", "template_leaf_litter_2",
+    "template_leaf_litter_3", "template_leaf_litter_4",
 }
 # Gameplay facts kept per state; the others are the block's.
 ROW_FIELDS = (
