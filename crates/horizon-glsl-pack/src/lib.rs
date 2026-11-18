@@ -12,6 +12,7 @@
 //! WGSL text). Nothing here touches wgpu or the file system.
 
 pub mod directives;
+pub mod features;
 pub mod frame_math;
 pub mod host;
 pub mod legacy_ids;
@@ -35,10 +36,12 @@ pub use naga_out::Stage;
 pub use plan::PackPlan;
 pub use program::{ProgramKind, find_program, world_folder};
 pub use properties::BlockIds;
-pub use report::PackReport;
-pub use session::{compile, compile_kinds, read_plan};
+pub use report::{Feature, PackReport, PackStatus, ProgramOutcome};
+pub use session::{Session, compile, compile_kinds, compile_report, read_plan};
 pub use types::*;
 pub use uniforms::PackUniforms;
 
+#[cfg(test)]
+mod session_tests;
 #[cfg(test)]
 mod tests;
