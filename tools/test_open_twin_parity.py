@@ -2,11 +2,18 @@
 """Twin clients: an open player on a Java server against a Horizon player in the same place.
 
 One vanilla 26.3 server (flat world, offline mode, normal difficulty, `spawn_mobs` off, ticks frozen
-while the clients are read) serves one player name, Twin, an operator. The Horizon client (the
+from the start: players still tick) serves one player name, Twin, an operator. The Horizon client (the
 vanilla resources) joins it directly; the open client (a bundle from `horizon-prepare open`) joins
 it through `horizon-open-relay`, never both at once. The console sets each scenario up while the
 first Horizon login is in the world, then each client logs in again and is read with `horizon-ctl`
 (`state`, `inventory`, ...). Their replies are compared by name, item by item.
+
+Scenarios: `attributes` (every attribute the player has, given a non-default base, then a relog:
+eye height, dimensions, health and the values); `blocks` (every block of blocks.json in its default
+state, set with `setblock ... strict` from a datapack function in a layer above the spawn: the
+state each client shows there); `items` (every item, 36 at a time in the inventory: item, count
+and components each client shows); `entities` (every summonable entity type, without AI or
+gravity, on a grid around the spawn: the types each client lists there).
 
 Each scenario lists what it compares as `scenario:item` keys. `tools/open_parity/twin_gaps.txt`
 lists the keys that still differ (one per line, sorted): a difference outside it fails, and so
@@ -58,6 +65,8 @@ PROPERTIES = {
     'pause-when-empty-seconds': '-1',
 }
 LAVAPIPE = Path('/run/opengl-driver/share/vulkan/icd.d/lvp_icd.x86_64.json')
+# Half the side of the square around the spawn the scenarios use (whole chunks).
+AREA = 32
 # Floats closer than this are the same (the open client reads the same packets).
 EPSILON = 1e-6
 
@@ -104,10 +113,22 @@ def phase(started, what):
     print(f'{time.time() - started:6.1f} s  {what}', flush=True)
 
 
-def launch_server(build, jars, libraries):
+def write_datapack(directory, functions):
+    """The scenarios' functions as the world's datapack `twin` (twin:NAME)."""
+    pack = directory / 'world/datapacks/twin'
+    data = lab.version_info()['pack_version']['data_major']
+    (pack / 'data/twin/function').mkdir(parents=True)
+    (pack / 'pack.mcmeta').write_text(json.dumps({'pack': {'description': 'open_twin scenarios',
+                                                           'min_format': data, 'max_format': data}}))
+    for name, lines in functions.items():
+        (pack / f'data/twin/function/{name}.mcfunction').write_text(''.join(f'{l}\n' for l in lines))
+
+
+def launch_server(build, jars, libraries, functions):
     directory = build / 'server'
     shutil.rmtree(directory, ignore_errors=True)
     directory.mkdir(parents=True)
+    write_datapack(directory, functions)
     port = lab.free_port()
     props = dict(PROPERTIES, **{'server-port': str(port)})
     (directory / 'server.properties').write_text(''.join(f'{k}={v}\n' for k, v in props.items()), encoding='iso-8859-1')
@@ -124,7 +145,11 @@ def launch_server(build, jars, libraries):
 def configure_server(server):
     server.wait_for(r'Done \(')
     console = Console(server)
-    for command, reply in [('gamerule spawn_mobs false', 'spawn_mobs'),
+    # Frozen from the start: placed sand stays up, summoned arrows stay put; players still tick.
+    for command, reply in [('tick freeze', 'freeze|frozen'),
+                           ('gamerule spawn_mobs false', 'spawn_mobs'),
+                           # The console's commands are not echoed to the operator's chat.
+                           ('gamerule log_admin_commands false', 'log_admin_commands'),
                            ('gamerule respawn_radius 0', 'respawn_radius'),
                            ('gamerule advance_time false', 'advance_time'),
                            ('gamerule advance_weather false', 'advance_weather'),
@@ -186,13 +211,18 @@ class Client:
         self.pid = None
 
     def ctl(self, *words, timeout=300, check=True):
-        result = subprocess.run([str(self.bins / 'horizon-ctl'), '--socket', str(self.socket), *map(str, words)],
-                                cwd=self.home, env=self.env, capture_output=True, text=True, timeout=timeout)
-        out = result.stdout.strip().splitlines()
-        try:
-            reply = json.loads(out[-1]) if out else {'error': result.stderr.strip()}
-        except json.JSONDecodeError:
-            reply = {'error': result.stdout[-2000:] + result.stderr[-2000:]}
+        for attempt in range(50):
+            result = subprocess.run([str(self.bins / 'horizon-ctl'), '--socket', str(self.socket), *map(str, words)],
+                                    cwd=self.home, env=self.env, capture_output=True, text=True, timeout=timeout)
+            out = result.stdout.strip().splitlines()
+            try:
+                reply = json.loads(out[-1]) if out else {'error': result.stderr.strip()}
+            except json.JSONDecodeError:
+                reply = {'error': result.stdout[-2000:] + result.stderr[-2000:]}
+            # A busy game can refuse a connection for a moment (a full accept queue).
+            if reply.get('kind') != 'connection' or words[0] == 'launch' or not self.pid:
+                break
+            time.sleep(0.2)
         if check and (result.returncode or 'error' in reply):
             raise AssertionError(f'{self.label}: horizon-ctl {" ".join(map(str, words))}: {reply}\n{self.log_tail()}')
         return reply
@@ -216,6 +246,20 @@ class Client:
             time.sleep(0.2)
         self.ctl('connect', address, PLAYER)
         self.ctl('wait-ready', 120, timeout=180)
+        # Every chunk the scenarios use has arrived: the flat world's bedrock is under all of them.
+        low, high = -AREA, AREA - 1
+        while self.ctl('blocks', low, -64, low, high, -64, high)['counts'].get('minecraft:bedrock', 0) < (2 * AREA) ** 2:
+            if time.time() > deadline:
+                raise AssertionError(f'{self.label}: the chunks around the spawn did not arrive')
+            time.sleep(0.2)
+
+    def wait_chat(self, text, timeout=30):
+        """Waits until a chat line with `text` has arrived (and so everything the server sent before it)."""
+        deadline = time.time() + timeout
+        while text not in json.dumps(self.ctl('messages', 5)):
+            if time.time() > deadline:
+                raise AssertionError(f'{self.label}: no chat line {text!r} in {timeout} s')
+            time.sleep(0.05)
 
     def logout(self):
         self.ctl('disconnect')
@@ -266,7 +310,7 @@ class Attributes:
             console.run(f'attribute {PLAYER} {attribute} base set {value}',
                         r'(?i)base value for attribute|has no attribute|cannot|can.t')
 
-    def read(self, client):
+    def read(self, client, console):
         state = client.ctl('state')
         player = state['player']
         items = {
@@ -283,7 +327,133 @@ class Attributes:
         return items
 
 
-SCENARIOS = [Attributes()]
+def registry(name):
+    """A vanilla registry's names, in its order (the server's own report)."""
+    return list(json.loads((REPORTS / 'registries.json').read_text())[name]['entries'])
+
+
+def run_function(console, name):
+    reply = console.run(f'function twin:{name}', r'Running function|Executed \d+ command|Unknown function')
+    if 'Unknown' in reply:
+        raise AssertionError(f'the datapack was not loaded: {reply}')
+
+
+def grid(count, y, spacing=1, skip=()):
+    """`count` positions in a square around the spawn, x fastest."""
+    side = 1
+    while (side * side - len(skip)) < count:
+        side += 1
+    low = -(side // 2) * spacing
+    spots = [(low + i * spacing, y, low + j * spacing) for j in range(side) for i in range(side)]
+    return [p for p in spots if (p[0], p[2]) not in skip][:count]
+
+
+class Blocks:
+    """Every block in its default state, set (`strict`: no updates) in a layer above the spawn."""
+    name = 'blocks'
+    Y = -50
+
+    def __init__(self):
+        report = json.loads((REPORTS / 'blocks.json').read_text())
+        self.blocks = {}
+        for block, info in report.items():
+            if block in ('minecraft:air', 'minecraft:cave_air', 'minecraft:void_air'):
+                continue
+            default = next(s for s in info['states'] if s.get('default'))
+            props = ','.join(f'{k}={v}' for k, v in sorted(default.get('properties', {}).items()))
+            self.blocks[block] = f'{block}[{props}]' if props else block
+        self.at = dict(zip(self.blocks, grid(len(self.blocks), self.Y)))
+
+    def function(self):
+        return [f'setblock {x} {y} {z} {state} strict' for block, state in self.blocks.items()
+                for x, y, z in [self.at[block]]]
+
+    def setup(self, console):
+        run_function(console, self.name)
+
+    def read(self, client, console):
+        xs = [p[0] for p in self.at.values()]
+        zs = [p[2] for p in self.at.values()]
+        reply = client.ctl('blocks', min(xs), self.Y, min(zs), max(xs), self.Y, max(zs))
+        found = {(x, y, z): state for x, y, z, state in reply['blocks']}
+        return {block: found.get(pos, '<air>') for block, pos in self.at.items()}
+
+
+class Items:
+    """Every item, 36 at a time in the inventory (one of each), read live."""
+    name = 'items'
+
+    def __init__(self):
+        self.items = [i for i in registry('minecraft:item') if i != 'minecraft:air']
+
+    def setup(self, console):
+        pass
+
+    def read(self, client, console):
+        out = {}
+        for batch_index, start in enumerate(range(0, len(self.items), 36)):
+            batch = self.items[start:start + 36]
+            for slot in range(36):
+                item = batch[slot] if slot < len(batch) else 'minecraft:air'
+                console.server.console(f'item replace entity {PLAYER} container.{slot} with {item}')
+            # The off hand last, as a counter: once it shows this batch, the slots set before it have arrived.
+            marker = batch_index % 63 + 1
+            console.server.console(f'item replace entity {PLAYER} weapon.offhand with minecraft:stone {marker}')
+            deadline = time.time() + 30
+            while (inventory := client.ctl('inventory'))['offhand'].get('count') != marker:
+                if time.time() > deadline:
+                    raise AssertionError(f'{client.label}: items batch {batch_index} did not arrive in 30 s')
+                time.sleep(0.05)
+            slots = {s['slot']: s for s in inventory['hotbar'] + inventory['main']}
+            for slot, item in enumerate(batch):
+                got = slots.get(slot) or {}
+                out[item] = {k: got[k] for k in ('item', 'count', 'components') if got.get(k) is not None}
+        console.run(f'clear {PLAYER}', r'Removed|No items')
+        return out
+
+
+class Entities:
+    """Every entity type a command can summon, without AI, on the ground around the spawn."""
+    name = 'entities'
+    # Not summonable, or gone at once: the player, a bobber needs its angler, an item its stack.
+    SKIP = {'minecraft:player', 'minecraft:fishing_bobber', 'minecraft:item', 'minecraft:lightning_bolt'}
+    SPACING = 3
+
+    def __init__(self):
+        self.types = [t for t in registry('minecraft:entity_type') if t not in self.SKIP]
+        # The player stands at 0 0.
+        self.at = dict(zip(self.types, grid(len(self.types), -60, self.SPACING, skip={(0, 0)})))
+
+    def function(self):
+        return [f'summon {kind} {x + 0.5} {y} {z + 0.5} {{NoAI:1b,NoGravity:1b,PersistenceRequired:1b}}'
+                for kind, (x, y, z) in self.at.items()]
+
+    def setup(self, console):
+        run_function(console, self.name)
+        # What the server has: a type it does not keep (a marker never leaves the server) is not compared.
+        self.on_server = set()
+        for kind, (x, y, z) in self.at.items():
+            reply = console.run(f'execute if entity @e[type={kind},x={x + 0.5},y={y},z={z + 0.5},distance=..1]',
+                                r'Test (passed|failed)')
+            if 'passed' in reply:
+                self.on_server.add(kind)
+        if missing := sorted(set(self.at) - self.on_server):
+            print(f'entities: the server did not keep {" ".join(missing)}')
+
+    def read(self, client, console):
+        reach = max(max(abs(x), abs(z)) for x, _, z in self.at.values()) * 1.5 + 4
+        listed = client.ctl('entities', reach)['entities']
+        lab.write_json(client.build / f'{client.label}-entities.json', listed)
+        out = {}
+        for kind, (x, y, z) in self.at.items():
+            near = sorted(e['type'] for e in listed
+                          if abs(e['pos'][0] - x - 0.5) < 1 and abs(e['pos'][2] - z - 0.5) < 1)
+            out[kind] = near
+        # A type the server did not keep is not compared.
+        return {kind: types for kind, types in out.items() if kind in self.on_server}
+
+
+SCENARIOS = [Attributes(), Blocks(), Items(), Entities()]
 
 
 # ---------------------------------------------------------------- comparison
@@ -307,9 +477,10 @@ def compare(horizon, open_, gaps):
             differing.add(key)
             if key not in gaps:
                 failures.append(f'{key}: horizon {json.dumps(a)[:200]}, open {json.dumps(b)[:200]}')
-    for key in sorted(gaps):
-        if key.split(':', 1)[0] in {s.name for s in SCENARIOS} and key not in differing:
-            failures.append(f'{key}: matches now; remove it from {GAPS.relative_to(lab.ROOT)}')
+    # A listed key neither client reports (a horizon-ctl field this build lacks) is not measured.
+    measured = set(horizon) | set(open_)
+    for key in sorted(gaps & measured - differing):
+        failures.append(f'{key}: matches now; remove it from {GAPS.relative_to(lab.ROOT)}')
     return failures, differing
 
 
@@ -343,7 +514,8 @@ def main():
     if not (REPORTS / 'blocks.json').exists():
         raise AssertionError(f'no vanilla reports in {REPORTS}: run tools/lab.py prepare')
     bins = binaries(args.bin_dir)
-    build = lab.LOCAL / NAME
+    # One folder per checkout: worktrees share .local.
+    build = lab.LOCAL / 'open-twin' / lab.ROOT.name
     shutil.rmtree(build, ignore_errors=True)
     build.mkdir(parents=True)
     bundle = build / 'open'
@@ -356,7 +528,8 @@ def main():
     server = relay = None
     try:
         # Everything starts at once: the server, the relay (it derives its tables), both games.
-        server = launch_server(build, jars, libraries)
+        server = launch_server(build, jars, libraries,
+                               {s.name: s.function() for s in SCENARIOS if hasattr(s, 'function')})
         relay, relay_port = start_relay(build, bins / 'horizon-open-relay', bundle, server.port)
         for client in (horizon, open_):
             client.start()
@@ -371,12 +544,11 @@ def main():
         console.sync()
         horizon.logout()
         console.wait_offline()
-        console.run('tick freeze', 'freeze|frozen')
         phase(started, 'scenarios set up')
         seen = {}
         for client in (open_, horizon):
             client.login(address[client.label])
-            seen[client.label] = {f'{s.name}:{k}': v for s in SCENARIOS for k, v in s.read(client).items()}
+            seen[client.label] = {f'{s.name}:{k}': v for s in SCENARIOS for k, v in s.read(client, console).items()}
             client.logout()
             console.wait_offline()
             phase(started, f'{client.label} read')
