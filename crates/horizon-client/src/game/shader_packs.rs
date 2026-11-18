@@ -416,18 +416,30 @@ impl ShaderPacks {
         }
         self.loaded = true;
         let (cli, options) = super::glsl_pack::cli_pack();
-        if let Some(path) = cli {
-            let file = path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.display().to_string());
-            self.cli = Some(LibraryPack { file, path });
-        }
         self.cli_options = options;
         if let Ok(text) = fs::read_to_string(Self::selection_path()) {
             self.selection = Selection::parse(&text);
         }
         self.rescan();
+        if let Some(path) = cli {
+            let file = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string());
+            let in_folder = path
+                .parent()
+                .is_some_and(|p| p.ends_with(FOLDER) || p == Self::folder());
+            if in_folder && self.library.iter().any(|p| p.file == file) {
+                // A pack the page put in the folder (`?shaderpack=`): chosen and kept.
+                self.selection = Selection {
+                    enabled: true,
+                    pack: Some(file),
+                };
+                self.save_selection();
+            } else {
+                self.cli = Some(LibraryPack { file, path });
+            }
+        }
     }
 
     pub fn rescan(&mut self) {
