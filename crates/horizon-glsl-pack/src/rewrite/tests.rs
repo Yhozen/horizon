@@ -356,7 +356,8 @@ fn unsupported_input_is_an_error() {
             "uniform sampler2D s;\nvoid main() { texture3D(s, vec3(0.0)); }",
             "passed to `texture3D`",
         ),
-        ("void main() { gl_TexCoord[0] = vec4(0.0); }", "gl_TexCoord"),
+        // Literal indices are supported (compat.rs), computed ones are not.
+        ("void main() { int i = 0; gl_TexCoord[i] = vec4(0.0); }", "gl_TexCoord"),
         ("uniform sampler2D s[2];", "sampler array"),
         ("void main() { {", "unbalanced"),
     ];

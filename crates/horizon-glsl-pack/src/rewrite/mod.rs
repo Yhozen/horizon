@@ -144,6 +144,7 @@ fn polyfill(text: &str) -> Option<(String, BTreeSet<String>)> {
     Some((out, used.iter().map(|(_, defs)| defs.to_string()).collect()))
 }
 
+mod compat;
 mod dead;
 mod decl;
 mod emit;
@@ -172,6 +173,8 @@ struct Ctx<'a> {
 
 /// Rewrites one preprocessed stage. See the module doc and the spec, section 3.
 pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
+    let compat = compat::apply(source, stage);
+    let source = compat.as_deref().unwrap_or(source);
     let mono = mono::monomorphise(source)?;
     let source = mono.as_deref().unwrap_or(source);
     let toks = dead::drop_dead_functions(drop_unreachable(tokenize(source)))?;
