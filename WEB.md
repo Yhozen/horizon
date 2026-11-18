@@ -218,8 +218,9 @@ takes the browser's `/connect` there. Both sites' players must number blocks and
 this page plays multiplayer on the open bundle, which the release carries as `sharedResources`
 (`horizon-open-data.bin`, packed from `web/.build-open/horizon-data.bin`: run `pnpm package:open`
 before `pnpm build`), wearing this preview's own art: `start_overlaid` (`crates/horizon-client/src/web.rs`)
-lays every texture the open bundle also has, and the English text, over it, tinting vanilla's grey
-grass and foliage with plains colours. Single player is unchanged. Deploy the open site first when
+lays every texture the open bundle also has (the grass and foliage colormaps too), and the English
+text, over it. Vanilla's grey grass and foliage stay grey: the open bundle's models tint them, as
+vanilla's do. Single player is unchanged. Deploy the open site first when
 the open bundle changes, so the server and both pages share it (an open player or server with other
 content refuses the join by brand).
 
