@@ -9,7 +9,9 @@
 //! the uniform block at binding 0, a non-filtering sampler at 1 and textures at
 //! `horizon_glsl_pack::host::sampler_binding`.
 
-use horizon_glsl_pack::{CompiledPack, CompiledProgram, PackUniforms, ProgramKind, host};
+use horizon_glsl_pack::{
+    CompiledPack, CompiledProgram, PackUniforms, ProgramKind, ShadowSettings, host,
+};
 use std::collections::BTreeMap;
 
 use super::TERRAIN_ATTRIBUTES;
@@ -40,6 +42,19 @@ pub(crate) struct PackRenderer {
     point: wgpu::Sampler,
     color_format: wgpu::TextureFormat,
     targets: Option<Targets>,
+    shadow: Option<Shadow>,
+}
+
+/// The pack's `shadow` program and its map: sections drawn from the sun (or
+/// moon) into `shadowtex0/1`, which the gbuffers programs then read.
+struct Shadow {
+    pipeline: wgpu::RenderPipeline,
+    /// The uniforms again, with the light's matrices as the camera's.
+    uniforms: wgpu::Buffer,
+    group: wgpu::BindGroup,
+    depth: wgpu::TextureView,
+    color: wgpu::TextureView,
+    settings: ShadowSettings,
 }
 
 fn uniform_entry() -> wgpu::BindGroupLayoutEntry {
@@ -55,18 +70,51 @@ fn uniform_entry() -> wgpu::BindGroupLayoutEntry {
     }
 }
 
-/// The program's group 1 textures, by binding: only colour targets and
-/// depthtex0 exist in this proof of concept.
-fn textures(program: &CompiledProgram) -> Result<Vec<(String, u32)>, String> {
-    program
+/// The program's group 1 textures, by binding, among `allowed` bindings:
+/// colour targets and depthtex0 for `final`, the shadow map for gbuffers.
+fn textures(
+    program: &CompiledProgram,
+    allowed: impl Fn(u32) -> bool,
+) -> Result<Vec<(String, u32)>, String> {
+    let mut out: Vec<(String, u32)> = program
         .samplers
         .iter()
-        .filter(|s| !matches!(s.as_str(), "gtexture" | "texture" | "tex" | "lightmap"))
+        .filter(|s| {
+            !matches!(
+                s.as_str(),
+                "gtexture" | "texture" | "tex" | "hz_u_texture" | "lightmap"
+            )
+        })
         .map(|s| match host::sampler_binding(s) {
-            Some(b) if (2..18).contains(&b) || b == 18 => Ok((s.clone(), b)),
+            Some(b) if allowed(b) => Ok((s.clone(), b)),
             _ => Err(format!("{}: sampler {s} is not supported", program.source)),
         })
-        .collect()
+        .collect::<Result<_, _>>()?;
+    out.sort_by_key(|t| t.1);
+    out.dedup_by_key(|t| t.1);
+    Ok(out)
+}
+
+fn texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+fn point_entry() -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding: 1,
+        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+        count: None,
+    }
 }
 
 impl PackRenderer {
@@ -86,39 +134,26 @@ impl PackRenderer {
             program(ProgramKind::Water)?,
             program(ProgramKind::Final)?,
         );
-        for p in [terrain, water] {
-            if let Some(t) = textures(p)?.first() {
-                return Err(format!("{}: reads {} while it draws", p.source, t.0));
-            }
+        let shadow_program = pack.programs.get(&ProgramKind::Shadow);
+        // shadowtex0/1 (21, 22): the one depth map, as only opaque terrain
+        // draws into it.
+        let shadow_reads = |p| textures(p, |b| shadow_program.is_some() && (b == 21 || b == 22));
+        let mut gbuffer_textures = shadow_reads(terrain)?;
+        gbuffer_textures.extend(shadow_reads(water)?);
+        gbuffer_textures.sort_by_key(|t| t.1);
+        gbuffer_textures.dedup_by_key(|t| t.1);
+        let mut gbuffer_entries = vec![uniform_entry()];
+        if !gbuffer_textures.is_empty() {
+            gbuffer_entries.push(point_entry());
+            gbuffer_entries.extend(gbuffer_textures.iter().map(|t| texture_entry(t.1)));
         }
         let gbuffer_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Shader pack gbuffers"),
-            entries: &[uniform_entry()],
+            entries: &gbuffer_entries,
         });
-        let final_samplers = textures(fin)?;
-        let mut entries = vec![
-            uniform_entry(),
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                count: None,
-            },
-        ];
-        entries.extend(
-            final_samplers
-                .iter()
-                .map(|&(_, binding)| wgpu::BindGroupLayoutEntry {
-                    binding,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                }),
-        );
+        let final_samplers = textures(fin, |b| (2..=18).contains(&b))?;
+        let mut entries = vec![uniform_entry(), point_entry()];
+        entries.extend(final_samplers.iter().map(|t| texture_entry(t.1)));
         let final_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Shader pack final"),
             entries: &entries,
@@ -129,17 +164,60 @@ impl PackRenderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let gbuffer_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Shader pack gbuffers"),
-            layout: &gbuffer_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniforms.as_entire_binding(),
-            }],
-        });
         let point = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Shader pack point"),
             ..Default::default()
+        });
+        let map_texture = |label: &str, size: u32, format| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d {
+                        width: size,
+                        height: size,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        };
+        let resolution = pack
+            .shadow
+            .resolution
+            .clamp(16, device.limits().max_texture_dimension_2d);
+        let shadow_maps = shadow_program.map(|_| {
+            (
+                map_texture("shadowtex", resolution, wgpu::TextureFormat::Depth32Float),
+                map_texture("shadowcolor0", resolution, AUX_FORMAT),
+            )
+        });
+        let mut gbuffer_resources = vec![wgpu::BindGroupEntry {
+            binding: 0,
+            resource: uniforms.as_entire_binding(),
+        }];
+        if !gbuffer_textures.is_empty() {
+            let (depth, _) = shadow_maps.as_ref().expect("shadow reads need the map");
+            gbuffer_resources.push(wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&point),
+            });
+            for t in &gbuffer_textures {
+                gbuffer_resources.push(wgpu::BindGroupEntry {
+                    binding: t.1,
+                    resource: wgpu::BindingResource::TextureView(depth),
+                });
+            }
+        }
+        let gbuffer_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Shader pack gbuffers"),
+            layout: &gbuffer_layout,
+            entries: &gbuffer_resources,
         });
         let gbuffers = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Shader pack gbuffers"),
@@ -169,7 +247,8 @@ impl PackRenderer {
                      layout: &wgpu::PipelineLayout,
                      buffers: &[Option<wgpu::VertexBufferLayout<'_>>],
                      targets: &[Option<wgpu::ColorTargetState>],
-                     depth: Option<wgpu::DepthStencilState>| {
+                     depth: Option<wgpu::DepthStencilState>,
+                     cull: Option<wgpu::Face>| {
             let module = |label: &str, wgsl: &str| {
                 device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: Some(label),
@@ -188,7 +267,7 @@ impl PackRenderer {
                     buffers,
                 },
                 primitive: wgpu::PrimitiveState {
-                    cull_mode: depth.as_ref().map(|_| wgpu::Face::Back),
+                    cull_mode: cull,
                     ..Default::default()
                 },
                 depth_stencil: depth,
@@ -228,6 +307,7 @@ impl PackRenderer {
             &terrain_buffers,
             &gbuffer_targets(terrain, None),
             Some(depth()),
+            Some(wgpu::Face::Back),
         );
         let water_pipeline = build(
             water,
@@ -235,6 +315,7 @@ impl PackRenderer {
             &terrain_buffers,
             &gbuffer_targets(water, Some(wgpu::BlendState::ALPHA_BLENDING)),
             Some(depth()),
+            Some(wgpu::Face::Back),
         );
         if fin.draw_buffers.first() != Some(&0) {
             return Err(format!("{}: final must write colortex0", fin.source));
@@ -249,7 +330,64 @@ impl PackRenderer {
                 write_mask: wgpu::ColorWrites::ALL,
             })],
             None,
+            None,
         );
+        let shadow = match (shadow_program, shadow_maps) {
+            (Some(p), Some((map, color))) => {
+                let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Shader pack shadow"),
+                    entries: &[uniform_entry()],
+                });
+                let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Shader pack shadow uniforms"),
+                    size: std::mem::size_of::<PackUniforms>() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Shader pack shadow"),
+                    layout: &layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniforms.as_entire_binding(),
+                    }],
+                });
+                let pipeline_layout =
+                    device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("Shader pack shadow"),
+                        bind_group_layouts: &[Some(terrain_layout), Some(&layout)],
+                        ..Default::default()
+                    });
+                let pipeline = build(
+                    p,
+                    &pipeline_layout,
+                    &terrain_buffers,
+                    &p.draw_buffers
+                        .iter()
+                        .take(1)
+                        .map(|_| {
+                            Some(wgpu::ColorTargetState {
+                                format: AUX_FORMAT,
+                                blend: None,
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                    Some(depth()),
+                    // Both faces: the light sees the backs of what the camera sees.
+                    None,
+                );
+                Some(Shadow {
+                    pipeline,
+                    uniforms,
+                    group,
+                    depth: map,
+                    color,
+                    settings: pack.shadow,
+                })
+            }
+            _ => None,
+        };
         Ok(Self {
             terrain: terrain_pipeline,
             water: water_pipeline,
@@ -263,7 +401,48 @@ impl PackRenderer {
             point,
             color_format,
             targets: None,
+            shadow,
         })
+    }
+
+    /// The shadow map's settings, when the pack has a shadow pass.
+    pub fn shadow_settings(&self) -> Option<ShadowSettings> {
+        self.shadow.as_ref().map(|s| s.settings)
+    }
+
+    /// The shadow pass, when the pack has one: clears the map and binds the
+    /// pack's shadow program; the caller draws the sections.
+    pub fn shadow_pass<'e>(
+        &self,
+        encoder: &'e mut wgpu::CommandEncoder,
+        group: &wgpu::BindGroup,
+    ) -> Option<wgpu::RenderPass<'e>> {
+        let shadow = self.shadow.as_ref()?;
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("shadow"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &shadow.color,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &shadow.depth,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(0.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+        pass.set_pipeline(&shadow.pipeline);
+        pass.set_bind_group(0, group, &[]);
+        pass.set_bind_group(1, &shadow.group, &[]);
+        Some(pass)
     }
 
     /// (Re)creates the targets for a world of `size`.
@@ -353,6 +532,10 @@ impl PackRenderer {
 
     pub fn upload(&self, queue: &wgpu::Queue, uniforms: &PackUniforms) {
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(uniforms));
+        if let Some(shadow) = &self.shadow {
+            let light = shadow_pass_uniforms(uniforms);
+            queue.write_buffer(&shadow.uniforms, 0, bytemuck::bytes_of(&light));
+        }
     }
 
     fn targets(&self) -> &Targets {
@@ -481,6 +664,8 @@ impl PackRenderer {
 
 /// What `uniforms` reads besides the frame (worked out in `draw_frame`).
 pub(crate) struct PackUniformInputs<'a> {
+    /// The pack's shadow map, for the light's matrices.
+    pub shadow: Option<ShadowSettings>,
     pub state: &'a super::PackFrame,
     /// Horizon's clip matrix (projection × bob × view), camera-relative.
     pub view_proj: glam::Mat4,
@@ -515,14 +700,24 @@ impl PackUniformInputs<'_> {
         let projection = gl_clip() * self.view_proj * model_view.inverse();
         let rotate = |v: Vec3| model_view.transform_vector3(v);
         let sun_angle = frame.sky.sun_angle.to_radians();
-        let sun_world = Vec3::new(0.0, sun_angle.cos(), -sun_angle.sin()) * 100.0;
+        // LevelRenderer: the sun at (0, 100, 0) turned by the angle around X,
+        // then by -90 degrees around Y: it rises in the east.
+        let sun_world = Vec3::new(-sun_angle.sin(), sun_angle.cos(), 0.0) * 100.0;
+        let light_world = if sun_world.y >= 0.0 {
+            sun_world
+        } else {
+            -sun_world
+        };
+        let (shadow_model_view, shadow_projection) = match self.shadow {
+            Some(settings) => shadow_matrices(frame.camera, light_world.normalize(), settings),
+            None => (Mat4::IDENTITY, Mat4::IDENTITY),
+        };
         let sun = rotate(sun_world);
         let moon = -sun;
         // OptiFine's celestial angle: 0 at sunrise, 0.25 at noon.
         let sun_fraction = (frame.sky.sun_angle / 360.0 + 0.25).rem_euclid(1.0);
         let mat = |m: Mat4| m.to_cols_array_2d();
         let v3 = |v: Vec3| v.to_array();
-        let identity = Mat4::IDENTITY.to_cols_array_2d();
         let [w, h] = self.size;
         PackUniforms {
             hz_view_proj: mat(self.view_proj),
@@ -532,10 +727,10 @@ impl PackUniformInputs<'_> {
             gbuffer_projection_inverse: mat(projection.inverse()),
             gbuffer_previous_model_view: mat(model_view),
             gbuffer_previous_projection: mat(projection),
-            shadow_model_view: identity,
-            shadow_model_view_inverse: identity,
-            shadow_projection: identity,
-            shadow_projection_inverse: identity,
+            shadow_model_view: mat(shadow_model_view),
+            shadow_model_view_inverse: mat(shadow_model_view.inverse()),
+            shadow_projection: mat(shadow_projection),
+            shadow_projection_inverse: mat(shadow_projection.inverse()),
             model_view_matrix: mat(model_view),
             projection_matrix: mat(projection),
             camera_position: frame.camera.as_vec3().to_array(),
@@ -583,4 +778,42 @@ impl PackUniformInputs<'_> {
             ..Default::default()
         }
     }
+}
+
+/// OptiFine's shadow camera: an orthographic view of `distance` blocks around
+/// the player from the light's direction, its centre snapped to the interval
+/// so the map stays still while the player walks. Player space (camera-relative).
+fn shadow_matrices(
+    camera: glam::DVec3,
+    light: glam::Vec3,
+    settings: ShadowSettings,
+) -> (glam::Mat4, glam::Mat4) {
+    let interval = f64::from(settings.interval.max(0.0));
+    let centre = if interval > 0.0 {
+        -(camera - (camera / interval).floor() * interval).as_vec3()
+    } else {
+        glam::Vec3::ZERO
+    };
+    let view = glam::Mat4::look_at_rh(centre + light * 100.0, centre, glam::Vec3::Z);
+    let d = settings.distance;
+    (
+        view,
+        glam::Mat4::orthographic_rh_gl(-d, d, -d, d, 0.05, 256.0),
+    )
+}
+
+/// The uniforms of the shadow pass: the light's matrices as the camera's,
+/// and Horizon's clip matrix the one that gives GL's after `gl_clip`.
+fn shadow_pass_uniforms(main: &PackUniforms) -> PackUniforms {
+    let m = |a: [[f32; 4]; 4]| glam::Mat4::from_cols_array_2d(&a);
+    let (view, projection) = (m(main.shadow_model_view), m(main.shadow_projection));
+    let mut light = *main;
+    light.hz_view_proj = (gl_clip().inverse() * projection * view).to_cols_array_2d();
+    light.gbuffer_model_view = main.shadow_model_view;
+    light.gbuffer_model_view_inverse = main.shadow_model_view_inverse;
+    light.gbuffer_projection = main.shadow_projection;
+    light.gbuffer_projection_inverse = main.shadow_projection_inverse;
+    light.model_view_matrix = main.shadow_model_view;
+    light.projection_matrix = main.shadow_projection;
+    light
 }

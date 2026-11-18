@@ -3959,6 +3959,7 @@ impl Renderer {
             let size = [self.config.width, self.config.height];
             pack.prepare(&self.device, size);
             let uniforms = PackUniformInputs {
+                shadow: pack.shadow_settings(),
                 state: &state,
                 view_proj,
                 size,
@@ -3973,6 +3974,13 @@ impl Renderer {
         }
         let pack = self.glsl_pack.as_ref().filter(|_| pack_on);
         if let Some(pack) = pack {
+            // The light sees the sections the camera does (a proof of concept:
+            // casters out of view cast nothing).
+            if let Some(mut pass) = pack.shadow_pass(&mut encoder, &self.group) {
+                pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.set_vertex_buffer(1, self.instances.slice(..));
+                self.draw_sections(&mut pass, &self.indirect, 0, 0, solid_draws);
+            }
             let mut pass = pack.terrain_pass(&mut encoder, world_clear, &self.group);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.set_vertex_buffer(1, self.instances.slice(..));

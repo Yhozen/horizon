@@ -23,19 +23,31 @@ fn read_dir(root: &Path, dir: &Path, files: &mut PackFiles) {
 }
 
 #[test]
-#[ignore = "needs HORIZON_TEST_SHADERPACK and the preprocessor and rewriter"]
+#[ignore = "needs HORIZON_TEST_SHADERPACK"]
 fn compiles_terrain_water_and_final() {
+    compiles(false);
+}
+
+#[test]
+#[ignore = "needs HORIZON_TEST_SHADERPACK"]
+fn compiles_with_shadows() {
+    compiles(true);
+}
+
+fn compiles(shadows: bool) {
     let Some(dir) = std::env::var_os("HORIZON_TEST_SHADERPACK") else {
         eprintln!("HORIZON_TEST_SHADERPACK is not set: skipped");
         return;
     };
     let mut files = PackFiles::default();
     read_dir(Path::new(&dir), Path::new(&dir), &mut files);
-    let options = PackOptions {
-        overrides: vec![("ENABLE_SHADOWS".into(), None)],
-        ..Default::default()
-    };
-    let kinds = [ProgramKind::Terrain, ProgramKind::Water, ProgramKind::Final];
+    let mut options = PackOptions::default();
+    let mut kinds = vec![ProgramKind::Terrain, ProgramKind::Water, ProgramKind::Final];
+    if shadows {
+        kinds.push(ProgramKind::Shadow);
+    } else {
+        options.overrides.push(("ENABLE_SHADOWS".into(), None));
+    }
     let pack = compile(
         &files,
         "minecraft:overworld",
@@ -45,8 +57,10 @@ fn compiles_terrain_water_and_final() {
     )
     .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(pack.programs.len(), kinds.len());
+    eprintln!("{:?}", pack.shadow);
     if let Some(out) = std::env::var_os("HORIZON_TEST_SHADERPACK_DUMP") {
-        let out = Path::new(&out);
+        let out = Path::new(&out).join(if shadows { "shadows" } else { "plain" });
+        let out = out.as_path();
         std::fs::create_dir_all(out).unwrap();
         for (kind, program) in &pack.programs {
             let name = format!("{kind:?}").to_lowercase();

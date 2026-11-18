@@ -148,6 +148,60 @@ pub struct CompiledPack {
     pub programs: BTreeMap<ProgramKind, CompiledProgram>,
     /// `block.properties`: block names to `mc_Entity.x` ids.
     pub blocks: BlockIds,
+    /// The shadow map's settings, from the programs' constants.
+    pub shadow: ShadowSettings,
+}
+
+/// The shadow map constants a pack declares (`const int shadowMapResolution
+/// = 1024;` …), with OptiFine's defaults for the ones it does not.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShadowSettings {
+    pub resolution: u32,
+    /// Half the width of the shadow map's square, in blocks.
+    pub distance: f32,
+    /// The light's position snaps to this many blocks, so the map does not
+    /// shimmer as the player moves.
+    pub interval: f32,
+    /// `sunPathRotation`, in degrees.
+    pub sun_path_rotation: f32,
+}
+
+impl Default for ShadowSettings {
+    fn default() -> Self {
+        Self {
+            resolution: 1024,
+            distance: 160.0,
+            interval: 2.0,
+            sun_path_rotation: 0.0,
+        }
+    }
+}
+
+impl ShadowSettings {
+    /// Reads the constants from preprocessed sources.
+    fn read(sources: &[String]) -> Self {
+        let value = |name: &str| {
+            sources.iter().find_map(|text| {
+                let at = text
+                    .find(&format!(" {name} "))
+                    .or_else(|| text.find(&format!(" {name}=")))?;
+                let rest = text[at + name.len() + 1..].trim_start().strip_prefix('=')?;
+                let end = rest.find(';')?;
+                rest[..end]
+                    .trim()
+                    .trim_end_matches(['f', 'F'])
+                    .parse::<f32>()
+                    .ok()
+            })
+        };
+        let d = Self::default();
+        Self {
+            resolution: value("shadowMapResolution").map_or(d.resolution, |v| v as u32),
+            distance: value("shadowDistance").unwrap_or(d.distance),
+            interval: value("shadowIntervalSize").unwrap_or(d.interval),
+            sun_path_rotation: value("sunPathRotation").unwrap_or(d.sun_path_rotation),
+        }
+    }
 }
 
 /// What went wrong, with the pack file it happened in.
@@ -218,6 +272,7 @@ pub fn compile(
     let blocks = properties::block_ids(files, &predefined)?;
     let folder = world_folder(files, dimension);
     let mut programs = BTreeMap::new();
+    let mut sources = Vec::new();
     for &kind in kinds {
         let program = find_program(files, &folder, kind).ok_or_else(|| {
             PackError::new(
@@ -225,12 +280,17 @@ pub fn compile(
                 format!("no program for {kind:?}"),
             )
         })?;
-        programs.insert(
-            kind,
-            compile_program(files, &program, kind, options, host, &blocks, &predefined)?,
-        );
+        let (compiled, text) =
+            compile_program(files, &program, kind, options, host, &blocks, &predefined)?;
+        programs.insert(kind, compiled);
+        sources.push(text);
     }
-    Ok(CompiledPack { programs, blocks })
+    let shadow = ShadowSettings::read(&sources);
+    Ok(CompiledPack {
+        programs,
+        blocks,
+        shadow,
+    })
 }
 
 /// The pack path (without extension) of the program `kind` runs, looking in
@@ -255,7 +315,7 @@ fn compile_program(
     host: &HostParams,
     blocks: &BlockIds,
     predefined: &BTreeMap<String, String>,
-) -> Result<CompiledProgram, PackError> {
+) -> Result<(CompiledProgram, String), PackError> {
     let vsh_path = format!("{program}.vsh");
     let fsh_path = format!("{program}.fsh");
     let vsh = preprocess::preprocess(files, &vsh_path, predefined, &options.overrides)?;
@@ -279,12 +339,30 @@ fn compile_program(
         .map_err(|m| PackError::new(&vsh_path, m))?;
     let fragment_wgsl = naga_out::glsl_to_wgsl(&fs_glsl, Stage::Fragment)
         .map_err(|m| PackError::new(&fsh_path, m))?;
-    let samplers = vertex.samplers.union(&fragment.samplers).cloned().collect();
-    Ok(CompiledProgram {
+    // The samplers the program reads (a pack may declare more than it uses).
+    let samplers = vertex
+        .sample_calls
+        .iter()
+        .chain(&fragment.sample_calls)
+        .filter_map(|call| {
+            [
+                "hz_sampleLod_",
+                "hz_sample_",
+                "hz_fetch_",
+                "hz_size_",
+                "hz_shadow_",
+            ]
+            .iter()
+            .find_map(|prefix| call.strip_prefix(prefix))
+            .map(str::to_string)
+        })
+        .collect();
+    let program = CompiledProgram {
         source: program.to_string(),
         vertex_wgsl,
         fragment_wgsl,
         draw_buffers,
         samplers,
-    })
+    };
+    Ok((program, format!("{vsh}\n{fsh}")))
 }

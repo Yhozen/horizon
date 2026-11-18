@@ -72,22 +72,32 @@ pub(super) fn install(renderer: &mut Renderer, pack: &PackResources) {
             return;
         }
     };
-    let options = PackOptions {
-        // Shadows need a shadow pass this proof of concept does not have yet.
-        overrides: vec![("ENABLE_SHADOWS".into(), None)],
-        ..Default::default()
-    };
-    let kinds = [ProgramKind::Terrain, ProgramKind::Water, ProgramKind::Final];
     let started = web_time::Instant::now();
-    let compiled = horizon_glsl_pack::compile(
-        files,
-        "minecraft:overworld",
-        &kinds,
-        &options,
-        &renderer.shader_pack_host(),
-    )
-    .map_err(|e| e.to_string())
-    .and_then(|compiled| renderer.set_shader_pack(Some(&compiled)).map(|()| compiled));
+    let host = renderer.shader_pack_host();
+    let mut try_compile = |shadows: bool| {
+        let mut options = PackOptions::default();
+        let mut kinds = vec![ProgramKind::Terrain, ProgramKind::Water, ProgramKind::Final];
+        if shadows {
+            kinds.push(ProgramKind::Shadow);
+        } else {
+            // Without a shadow program the pack must not read a shadow map.
+            options.overrides.push(("ENABLE_SHADOWS".into(), None));
+        }
+        horizon_glsl_pack::compile(files, "minecraft:overworld", &kinds, &options, &host)
+            .map_err(|e| e.to_string())
+            .and_then(|compiled| renderer.set_shader_pack(Some(&compiled)).map(|()| compiled))
+    };
+    // Shadows when the pack has a shadow program that compiles, else none.
+    let shadows = std::env::var("HORIZON_SHADER_PACK_SHADOWS").map_or(true, |v| v != "0");
+    let compiled = match shadows.then(|| try_compile(true)) {
+        Some(Ok(compiled)) => Ok(compiled),
+        first => {
+            if let Some(Err(e)) = first {
+                log::warn!("Horizon: shader pack shadows off: {e}");
+            }
+            try_compile(false)
+        }
+    };
     match compiled {
         Ok(compiled) => {
             pack.context
