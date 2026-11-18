@@ -366,3 +366,19 @@ fn compile_program(
     };
     Ok((program, format!("{vsh}\n{fsh}")))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ShadowSettings;
+
+    #[test]
+    fn shadow_settings_come_from_the_constants() {
+        let source = "const int shadowMapResolution = 2048;\nconst float shadowDistance=96.0;\nvoid f() {}\n";
+        let s = ShadowSettings::read(&[String::new(), source.to_string()]);
+        assert_eq!(s.resolution, 2048);
+        assert_eq!(s.distance, 96.0);
+        // Not declared: OptiFine's defaults.
+        assert_eq!(s.interval, 2.0);
+        assert_eq!(s.sun_path_rotation, 0.0);
+    }
+}
