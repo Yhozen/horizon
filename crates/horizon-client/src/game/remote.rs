@@ -137,6 +137,9 @@ pub(super) struct Remote {
     pub(super) menu: Option<(i32, String)>,
     /// The open menu's title as the server named it.
     pub(super) menu_title: Option<String>,
+    /// The crafting result slot as the server last set it: (window id,
+    /// stack). See `server_craft_result`.
+    craft_result: Option<(i32, Option<ItemStack>)>,
     state_id: i32,
     use_target: Option<[i32; 3]>,
     entities: HashMap<i32, Tracked>,
@@ -406,6 +409,7 @@ impl Game<'_> {
             predictions: HashMap::new(),
             menu: None,
             menu_title: None,
+            craft_result: None,
             state_id: 0,
             use_target: None,
             entities: HashMap::new(),
@@ -1639,6 +1643,22 @@ impl Game<'_> {
             _ => "inventory".into(),
         }
     }
+    /// The crafting result the server sent for the open window, when the
+    /// result slot is the server's alone: an open bundle has its own few
+    /// recipes, not the Java server's, so its grid would make nothing
+    /// (`CraftingMenu.slotChangedCraftingGrid` runs on the server only).
+    /// `None` when the grid is matched here.
+    pub(super) fn server_craft_result(&self) -> Option<Option<ItemStack>> {
+        let r = self.remote.as_ref()?;
+        if !self.options.profile.is_open() {
+            return None;
+        }
+        let open = r.menu.as_ref().map_or(0, |m| m.0);
+        Some(match &r.craft_result {
+            Some((container, item)) if *container == open => item.clone(),
+            _ => None,
+        })
+    }
     fn set_menu_slot(&mut self, container: i32, slot: i32, item: Option<ItemStack>) {
         let menu = self.open_menu_name(container);
         if menu == "minecraft:lectern" {
@@ -1654,7 +1674,16 @@ impl Game<'_> {
             return;
         };
         if internal == 200 {
-            return; // the result slot is recomputed from the grid
+            // Kept for `server_craft_result`; otherwise the result slot is
+            // recomputed from the grid.
+            // The inventory's own result while another window is open is not
+            // the one shown.
+            if let Some(r) = self.remote.as_mut()
+                && r.menu.as_ref().map_or(0, |m| m.0) == container
+            {
+                r.craft_result = Some((container, item));
+            }
+            return;
         }
         *self.slot_mut(internal) = item;
         if internal >= super::stations::INPUT && self.station.is_some() {
@@ -4735,6 +4764,9 @@ impl Game<'_> {
             r.menu_title = None;
         }
         self.mount_menu_reset();
+        if let Some(r) = self.remote.as_mut() {
+            r.craft_result = None;
+        }
         // The client's menu has no level access: what it holds is the server's.
         self.station = None;
         // AbstractContainerMenu.removed: the server gives the grid and the

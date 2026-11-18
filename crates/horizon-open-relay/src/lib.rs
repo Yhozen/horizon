@@ -4,6 +4,7 @@
 //! Java server through the relay").
 #![forbid(unsafe_code)]
 pub mod policy;
+pub mod recipes;
 pub mod relay;
 pub mod rules;
 pub mod tables;
