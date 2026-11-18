@@ -253,7 +253,8 @@ translates every packet:
 - **Items**: every stack (inventories, containers, the cursor, equipment, dropped items). A
   stand-in keeps the vanilla name as its `item_name` ("Golden Apple" on an apple); tools map by
   tier and kind, food to the apple, everything else to a stick. Components the bundle lacks are
-  dropped. Clicks and creative slots go back as the vanilla item of the same name.
+  dropped. Clicks and creative slots go back as the vanilla item of the same name, with
+  vanilla component ids.
 - **Entities**: players, dropped items, experience orbs, falling blocks and the bundle's own mobs
   (below) are shown. A creature the bundle lacks shows as the bundle's mob nearest in shape
   (`rules::stand_in`: a pillager or witch as a zombie, a wither skeleton as a skeleton, a horse as a
@@ -268,6 +269,12 @@ translates every packet:
   hunger and experience pass unchanged.
 - **Brand**: the server's `minecraft:brand` becomes the bundle's open brand, so open clients stay.
   The relay derives it from the bundle it is given: it must be the bundle the players run.
+
+`policy.rs` holds what happens to each packet, in both directions: passed, passed unless its entity
+is hidden, translated, or dropped. Its test walks every packet id of the protocol: the dropped
+packets must equal `src/dropped.txt`, and every built-in registry a forwarded packet still holds in
+vanilla numbers must be listed in `src/gaps.txt` (beacon effects, villager data). Change a packet's
+handling and update the list in the same change.
 
 Limits: the world looks approximate (stairs and slabs are full blocks, so the open client predicts
 collisions that differ a little from the server's), creatures without a model or stand-in are

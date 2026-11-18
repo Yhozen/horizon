@@ -1,17 +1,20 @@
 //! Packet translation between a vanilla server and an open player, one
-//! direction each. Every clientbound packet is either passed as it came
-//! (only packets with no built-in registry ids in them), rewritten into the
-//! open numbering, or dropped: nothing the open client would misread reaches
-//! it. Serverbound packets carry few ids (item stacks); the rest pass.
+//! direction each. `policy.rs` says what happens to each packet: passed as it
+//! came (only packets with no built-in registry ids in them, or a known gap),
+//! rewritten into the open numbering here, or dropped: nothing the open
+//! client would misread reaches it. Serverbound packets carry few ids (item
+//! stacks); the rest pass.
 //!
 //! What changes (see docs/open-creative.md, "Joining a Java server through
 //! the relay"): block states in chunks and block updates, items everywhere a
 //! stack travels, entity types (a creature the bundle lacks shows as its
 //! stand-in, `rules::stand_in`, or is never spawned, its later packets dropped
 //! too), menu types, attributes, and the server brand.
+use crate::policy::{EntityId, Policy, policy};
 use crate::rules;
 use crate::tables::Tables;
 use horizon_protocol::{
+    Direction,
     buf::{Reader, Writer},
     chunk::{ChunkData, Paletted, Section, Strategy},
     entity_data::{Value, serializer},
@@ -77,107 +80,6 @@ pub struct Clientbound<'t> {
     pub counts: Counts,
 }
 
-/// Clientbound play packets passed unchanged: none of them holds a built-in
-/// registry id (dynamic registry ids are fine: the server's own registries
-/// reach the client).
-const PLAY_PASS: &[i32] = &[
-    cb::BUNDLE_DELIMITER,
-    cb::BLOCK_CHANGED_ACK,
-    cb::BLOCK_DESTRUCTION,
-    cb::CHANGE_DIFFICULTY,
-    cb::CHUNK_BATCH_FINISHED,
-    cb::CHUNK_BATCH_START,
-    cb::CHUNKS_BIOMES,
-    cb::CLEAR_TITLES,
-    cb::COMMAND_SUGGESTIONS,
-    cb::CONTAINER_CLOSE,
-    cb::CONTAINER_SET_DATA,
-    cb::DISCONNECT,
-    cb::DISGUISED_CHAT,
-    cb::FORGET_LEVEL_CHUNK,
-    cb::GAME_EVENT,
-    cb::GAME_RULE_VALUES,
-    cb::INITIALIZE_BORDER,
-    cb::KEEP_ALIVE,
-    cb::LIGHT_UPDATE,
-    cb::OPEN_BOOK,
-    cb::OPEN_SIGN_EDITOR,
-    cb::PING,
-    cb::PONG_RESPONSE,
-    cb::PLAYER_ABILITIES,
-    cb::PLAYER_CHAT,
-    cb::PLAYER_COMBAT_KILL,
-    cb::PLAYER_INFO_REMOVE,
-    cb::PLAYER_INFO_UPDATE,
-    cb::PLAYER_POSITION,
-    cb::PLAYER_ROTATION,
-    cb::RESET_SCORE,
-    cb::RESOURCE_PACK_PUSH,
-    cb::SERVER_DATA,
-    cb::SET_ACTION_BAR_TEXT,
-    cb::SET_BORDER_CENTER,
-    cb::SET_BORDER_LERP_SIZE,
-    cb::SET_BORDER_SIZE,
-    cb::SET_BORDER_WARNING_DELAY,
-    cb::SET_BORDER_WARNING_DISTANCE,
-    cb::SET_CHUNK_CACHE_CENTER,
-    cb::SET_CHUNK_CACHE_RADIUS,
-    cb::SET_DEFAULT_SPAWN_POSITION,
-    cb::SET_DISPLAY_OBJECTIVE,
-    cb::SET_EXPERIENCE,
-    cb::SET_HEALTH,
-    cb::SET_HELD_SLOT,
-    cb::SET_OBJECTIVE,
-    cb::MOVE_VEHICLE,
-    cb::SET_PLAYER_TEAM,
-    cb::SET_SCORE,
-    cb::SET_SIMULATION_DISTANCE,
-    cb::SET_SUBTITLE_TEXT,
-    cb::SET_TIME,
-    cb::SET_TITLE_TEXT,
-    cb::SET_TITLES_ANIMATION,
-    cb::SYSTEM_CHAT,
-    cb::TAB_LIST,
-    cb::TICKING_STATE,
-    cb::TICKING_STEP,
-];
-
-/// Play packets about one entity whose id is their first VarInt: dropped when
-/// that entity is hidden.
-const ENTITY_FIRST_VARINT: &[i32] = &[
-    cb::ANIMATE,
-    cb::ENTITY_POSITION_SYNC,
-    cb::HURT_ANIMATION,
-    cb::DAMAGE_EVENT,
-    cb::MOVE_ENTITY_POS,
-    cb::MOVE_ENTITY_POS_ROT,
-    cb::MOVE_ENTITY_ROT,
-    cb::ROTATE_HEAD,
-    cb::SET_ENTITY_MOTION,
-    cb::TAKE_ITEM_ENTITY,
-    cb::TELEPORT_ENTITY,
-    cb::PROJECTILE_POWER,
-    cb::SWING_ANIMATION,
-    cb::SET_PASSENGERS,
-];
-/// The same, with the entity id as a 32-bit Int.
-const ENTITY_FIRST_INT: &[i32] = &[cb::ENTITY_EVENT, cb::SET_ENTITY_LINK];
-
-/// Configuration packets passed unchanged.
-const CONFIG_PASS: &[i32] = &[
-    cfg_cb::COOKIE_REQUEST,
-    cfg_cb::DISCONNECT,
-    cfg_cb::KEEP_ALIVE,
-    cfg_cb::PING,
-    cfg_cb::RESET_CHAT,
-    cfg_cb::RESOURCE_PACK_POP,
-    cfg_cb::RESOURCE_PACK_PUSH,
-    cfg_cb::UPDATE_ENABLED_FEATURES,
-    cfg_cb::SELECT_KNOWN_PACKS,
-    cfg_cb::CLEAR_DIALOG,
-    cfg_cb::CODE_OF_CONDUCT,
-];
-
 /// LevelEvent 2001: a block broke (particles and sound); its data is a state.
 const PARTICLES_AND_SOUND_FOR_BLOCK_DESTROYED: i32 = 2001;
 
@@ -212,6 +114,11 @@ impl<'t> Clientbound<'t> {
 
     fn configuration(&mut self, id: i32, payload: &[u8]) -> Result<Option<Vec<u8>>, String> {
         let e = |e: horizon_protocol::Error| e.to_string();
+        match policy(Phase::Configuration, Direction::Clientbound, id).policy {
+            Policy::Pass | Policy::PassUnlessHidden(_) => return Ok(Some(body(id, payload))),
+            Policy::Drop => return Ok(None),
+            Policy::Translate => {}
+        }
         Ok(match id {
             cfg_cb::CUSTOM_PAYLOAD => match cfg::Clientbound::decode(id, payload).map_err(e)? {
                 cfg::Clientbound::CustomPayload(p) if p.channel == "minecraft:brand" => {
@@ -232,9 +139,6 @@ impl<'t> Clientbound<'t> {
                 self.phase = Phase::Play;
                 Some(body(id, payload))
             }
-            id if CONFIG_PASS.contains(&id) => Some(body(id, payload)),
-            // Tags (vanilla ids), transfers to other servers, cookies, report
-            // details, server links, dialogs and post effects.
             _ => None,
         })
     }
@@ -249,18 +153,19 @@ impl<'t> Clientbound<'t> {
     }
 
     fn play(&mut self, id: i32, payload: &[u8]) -> Result<Option<Vec<u8>>, String> {
-        if PLAY_PASS.contains(&id) {
-            return Ok(Some(body(id, payload)));
-        }
-        if ENTITY_FIRST_VARINT.contains(&id) || ENTITY_FIRST_INT.contains(&id) {
-            let mut r = Reader::new(payload);
-            let entity = if ENTITY_FIRST_INT.contains(&id) {
-                r.i32()
-            } else {
-                r.varint()
+        match policy(Phase::Play, Direction::Clientbound, id).policy {
+            Policy::Pass => return Ok(Some(body(id, payload))),
+            Policy::PassUnlessHidden(kind) => {
+                let mut r = Reader::new(payload);
+                let entity = match kind {
+                    EntityId::Int => r.i32(),
+                    EntityId::VarInt => r.varint(),
+                }
+                .map_err(|e| e.to_string())?;
+                return Ok((!self.hidden.contains(&entity)).then(|| body(id, payload)));
             }
-            .map_err(|e| e.to_string())?;
-            return Ok((!self.hidden.contains(&entity)).then(|| body(id, payload)));
+            Policy::Drop => return Ok(None),
+            Policy::Translate => {}
         }
         let typed = || play::Clientbound::decode(id, payload).map_err(|e| e.to_string());
         use play::Clientbound as C;
@@ -438,11 +343,6 @@ impl<'t> Clientbound<'t> {
                 _ => None,
             },
             cb::COMMANDS if self.t.commands_compatible => Some(body(id, payload)),
-            // Everything else names something by a vanilla number the open
-            // client would misread (sounds, particles, block entities, mob
-            // effects, recipes, advancements, tags, statistics, maps, trades,
-            // explosions, waypoints, debug data) or is a packet it does not
-            // decode at all.
             _ => None,
         })
     }
@@ -588,6 +488,11 @@ impl<'t> Serverbound<'t> {
     }
 
     pub fn translate(&mut self, id: i32, payload: &[u8]) -> Option<Vec<u8>> {
+        match policy(self.phase, Direction::Serverbound, id).policy {
+            Policy::Pass | Policy::PassUnlessHidden(_) => return Some(body(id, payload)),
+            Policy::Drop => return None,
+            Policy::Translate => {}
+        }
         match self.phase {
             Phase::Configuration => {
                 if id == horizon_protocol::ids::configuration::serverbound::FINISH_CONFIGURATION {
@@ -623,15 +528,23 @@ impl<'t> Serverbound<'t> {
                 }
                 _ => None,
             },
-            _ => Some(body(id, payload)),
+            _ => None,
         }
     }
 
-    /// What the client believes a slot holds, in vanilla numbering. Hashes
-    /// of components cannot be translated; the client sends none.
+    /// What the client believes a slot holds, in vanilla numbering. The
+    /// component hashes stay as they are (a component keeps its number on
+    /// both sides or is dropped); their ids go back to vanilla's.
     fn hashed(&self, h: Option<Hashed>) -> Option<Hashed> {
         let mut h = h?;
         h.item = self.t.item_back(h.item)?;
+        let back = |k: i32| self.t.component_back(k);
+        h.added = h
+            .added
+            .into_iter()
+            .filter_map(|(k, hash)| Some((back(k)?, hash)))
+            .collect();
+        h.removed = h.removed.into_iter().filter_map(back).collect();
         Some(h)
     }
 
