@@ -1353,6 +1353,14 @@ entities:minecraft:zombie_horse
 entities:minecraft:zombie_nautilus
 entities:minecraft:zombie_villager
 entities:minecraft:zombified_piglin
+furnace:crafted
+furnace:furnace screen
+furnace:grid
+furnace:held
+furnace:lit
+furnace:placed
+furnace:placed on server
+furnace:recipe book
 items:minecraft:abandoned_camp_map
 items:minecraft:acacia_boat
 items:minecraft:acacia_button
@@ -2896,3 +2904,4 @@ items:minecraft:zombie_nautilus_spawn_egg
 items:minecraft:zombie_spawn_egg
 items:minecraft:zombie_villager_spawn_egg
 items:minecraft:zombified_piglin_spawn_egg
+rotten_flesh:held
