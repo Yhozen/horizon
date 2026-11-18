@@ -36,6 +36,7 @@ the world pass when the pack draws:
 
 | Pass | Targets | Draws |
 |---|---|---|
+| `shadow` | shadowtex (the pack's `shadowMapResolution`) | solid sections from the sun or moon, with the pack's program |
 | `gbuffers_terrain` | colortex0/6/7 + depth (cleared) | solid and cutout sections, with the pack's program |
 | Horizon world | colortex0 + depth | sky, entities, particles, weather… with Horizon's pipelines |
 | `gbuffers_water` | colortex0/6/7 + depth | translucent sections, with the pack's program |
@@ -55,6 +56,10 @@ top row; packs expect OpenGL's. The host converts at the edges so the pack's mat
 - `gbufferProjection` is that conversion times Horizon's projection, so `gbufferProjectionInverse` takes the
   pack's `(uv, depth)` back to view space.
 - Depth reads return `1 - d`; screen UVs are y-down, as wgpu's textures are.
+- The shadow pass goes through the same conversion, so its map is reversed-Z too and shadow reads are
+  `1 - d` as well. `shadowModelView` looks at the player from 100 blocks along the light, its centre
+  snapped to `shadowIntervalSize`; `shadowProjection` is a GL orthographic box of `shadowDistance`
+  (`gfx/glsl_pack.rs`, `shadow_matrices`).
 
 ### Block ids and normals
 
@@ -67,13 +72,23 @@ the pack's distinct ids (at most 31). The mesher writes it only when a pack comp
 
 - Only `gbuffers_terrain`, `gbuffers_water` and `final` run, in the overworld. Entities, the hand, sky,
   clouds and particles keep Horizon's shaders; other dimensions and the title screen draw as usual.
-- No shadow pass: packs are compiled with `ENABLE_SHADOWS` off.
+- The shadow pass draws the sections the camera draws, so casters out of view cast no shadow, and only
+  solid terrain casts (no entities). If the shadow program does not compile, the pack runs with
+  `ENABLE_SHADOWS` off; `HORIZON_SHADER_PACK_SHADOWS=0` forces that.
 - Only colour targets, `depthtex0`, `gtexture` and `lightmap` can be sampled; no `noisetex`, no custom
   textures, no `composite` or `deferred` passes.
 - No options screen: a pack runs with its defaults.
 - Ambient occlusion and face shade stay baked into the vertex colour (`gl_Color.a` is 1).
 - Reflections can show on entities in front of reflective blocks, since entities do not write colortex6/7.
 - With resolution scaling or FXAA on, the pack is skipped for that frame.
+
+## Performance
+
+On this proof of concept's test machine (no GPU: lavapipe natively, SwiftShader in Chrome) the browser
+build drew a 4-chunk world at about 1.9 frames per second with Miniature and shadows, against 7.4 without
+the pack: the shadow pass draws the terrain a second time and the reflections step through the screen per
+pixel, both on a CPU rasterizer there. Compiling the pack takes about 0.1 s natively and 0.3–0.6 s in the
+page.
 
 ## Tests
 
