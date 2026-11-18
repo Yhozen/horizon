@@ -200,6 +200,19 @@ holds a water source. The models are the bundle's own, with the boxes, UVs and c
 Minecraft's slab and stairs templates have; stairs have a straight, an inner and an outer
 model, turned per state with `uvlock` as Minecraft's block states do. A double slab drops two.
 
+### Walls, fences, gates, panes and bars
+
+`data/blocks/connected.txt` (written by `tools/open_block_facts.py`) lists the 32 walls, 13 fences, 12 fence gates,
+17 glass panes and 9 bars, with the same numbers and the names of their textures (a pane's
+glass and edge). The bamboo fence and gate, drawn with their own templates, are not in it yet.
+`connected.rs` gives each of their states Minecraft's collision, outline and light occlusion
+boxes: fences, walls and closed gates collide 1.5 blocks high, an open gate not at all, and a
+waterlogged state holds water and dims light by one. Their models are templates in the bundle's
+own format (`block/open_fence_post`, `open_wall_side`, `open_glass_pane_noside`...), a child per
+block naming its textures, and a multipart block state that draws a post and an arm for each
+connection, as Minecraft's do. Fences and walls have an inventory model; panes and bars are flat
+items. The `fences`, `wooden_fences`, `walls`, `fence_gates` and `bars` tags list them.
+
 ### Support blocks
 
 Every Minecraft block the bundle does not define is an inert support block: all of Minecraft's

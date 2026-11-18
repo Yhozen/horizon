@@ -335,6 +335,13 @@ fn models(block: &Block, tinting: Tinting) -> (Vec<(String, Value)>, Option<Valu
                 Some(json!({"variants": variants})),
             )
         }
+        Faces::Connected { .. } => {
+            let Form::Connected(family) = block.form else {
+                unreachable!("{id} has connected faces")
+            };
+            let (models, definition) = crate::connected::models(block, family);
+            (models, Some(definition))
+        }
         Faces::Fluid { still, .. } => {
             // Fluids draw through the fluid renderer; the model, one per
             // fluid as Minecraft's `block/water` and `block/lava`, gives
@@ -390,6 +397,13 @@ pub fn write(
     )?;
     // Flat items: the built-in extrusion with this edition's transforms;
     // tools are held along the hand.
+    for (name, model) in crate::connected::templates() {
+        bundle.json(
+            format!("assets/minecraft/models/block/open_{name}.json"),
+            &model,
+            GENERATOR,
+        )?;
+    }
     bundle.json(
         "assets/minecraft/models/item/generated.json",
         &generated_model(),
@@ -531,8 +545,24 @@ pub fn write(
         if !block.has_item() {
             continue;
         }
-        // Plants are drawn flat in the hand and the inventory.
-        let model = if let Faces::Cross(texture) = block.faces {
+        // Plants, panes and bars are drawn flat in the hand and the
+        // inventory; fences and walls have an inventory model.
+        let flat = match (block.form, block.faces) {
+            (_, Faces::Cross(texture)) => Some(texture),
+            (Form::Connected(family), Faces::Connected { texture, .. }) => {
+                crate::connected::item_model(block, family)
+                    .is_none()
+                    .then_some(texture)
+            }
+            _ => None,
+        };
+        let connected = match block.form {
+            Form::Connected(family) => crate::connected::item_model(block, family),
+            _ => None,
+        };
+        let model = if let Some(model) = connected {
+            model
+        } else if let Some(texture) = flat {
             let path = format!("item/{}", block.id);
             bundle.json(
                 format!("assets/minecraft/models/{path}.json"),
@@ -705,7 +735,7 @@ pub fn write(
     lang.extend(crate::lang::key_names());
     crate::lang::fill(&mut lang);
     bundle.json("assets/minecraft/lang/en_us.json", &json!(lang), GENERATOR)?;
-    let _ = (Form::Air, Layer::Solid);
+    let _ = Layer::Solid;
     Ok(())
 }
 

@@ -14,6 +14,7 @@ pub mod art;
 pub mod art_survival;
 pub mod assets;
 pub mod blocks;
+pub mod connected;
 pub mod coverage;
 pub mod cubes;
 pub mod image;
@@ -207,36 +208,11 @@ fn validate(bundle: &Bundle, blocks: &[blocks::Block]) -> Result<()> {
             if !bundle.contains(&path) {
                 return Err(format!("{} has no block state definition", block.id));
             }
-            // Every state picks a variant, as Minecraft matches them: a
-            // variant's `key=value` pairs all hold in the state ("" holds
-            // in every state).
             let definition: Value = serde_json::from_slice(bundle.get(&path).unwrap())
                 .map_err(|e| format!("{path}: {e}"))?;
-            let variants = definition["variants"]
-                .as_object()
-                .ok_or_else(|| format!("{path} has no variants"))?;
-            let predicates: Vec<Vec<(&str, &str)>> = variants
-                .keys()
-                .map(|key| {
-                    key.split(',')
-                        .filter(|p| !p.is_empty())
-                        .map(|p| p.split_once('=').unwrap_or((p, "")))
-                        .collect()
-                })
-                .collect();
-            for state in block.states() {
-                let matched = predicates.iter().any(|predicate| {
-                    predicate
-                        .iter()
-                        .all(|(k, v)| state.iter().any(|(sk, sv)| sk == k && sv == v))
-                });
-                if !matched {
-                    let key: Vec<String> = state.iter().map(|(k, v)| format!("{k}={v}")).collect();
-                    return Err(format!(
-                        "{path} has no variant for state [{}]",
-                        key.join(",")
-                    ));
-                }
+            match definition["multipart"].as_array() {
+                Some(parts) => validate_multipart(&path, parts, block)?,
+                None => validate_variants(&path, &definition, block)?,
             }
         }
         for texture in block.textures() {
@@ -271,7 +247,8 @@ fn validate(bundle: &Bundle, blocks: &[blocks::Block]) -> Result<()> {
             .as_object()
             .into_iter()
             .flatten()
-            .filter_map(|(_, v)| v.as_str())
+            // A name, or a sprite object (`{"sprite": ..., "force_translucent": true}`).
+            .filter_map(|(_, v)| v.as_str().or(v["sprite"].as_str()))
         {
             if texture.starts_with('#') {
                 continue;
@@ -372,6 +349,108 @@ fn validate(bundle: &Bundle, blocks: &[blocks::Block]) -> Result<()> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+/// `key=value` pairs, as a variant key or a part's condition writes them.
+fn predicate(key: &str) -> Vec<(&str, &str)> {
+    key.split(',')
+        .filter(|p| !p.is_empty())
+        .map(|p| p.split_once('=').unwrap_or((p, "")))
+        .collect()
+}
+
+fn state_key(state: &[(&str, &str)]) -> String {
+    let pairs: Vec<String> = state.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    pairs.join(",")
+}
+
+/// Every state picks a variant, as Minecraft matches them: a variant's
+/// `key=value` pairs all hold in the state ("" holds in every state).
+fn validate_variants(path: &str, definition: &Value, block: &blocks::Block) -> Result<()> {
+    let variants = definition["variants"]
+        .as_object()
+        .ok_or_else(|| format!("{path} has no variants"))?;
+    let predicates: Vec<Vec<(&str, &str)>> = variants.keys().map(|k| predicate(k)).collect();
+    for state in block.states() {
+        let matched = predicates.iter().any(|predicate| {
+            predicate
+                .iter()
+                .all(|(k, v)| state.iter().any(|(sk, sv)| sk == k && sv == v))
+        });
+        if !matched {
+            return Err(format!(
+                "{path} has no variant for state [{}]",
+                state_key(&state)
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// A multipart definition: each part's condition (`when`, every key one
+/// of the block's properties with `|`-separated values it has, or an `OR`
+/// or `AND` list of such conditions) names only real properties and values,
+/// and the default state draws at least one part (others may draw none, as
+/// a wall standing alone without its post does).
+fn validate_multipart(path: &str, parts: &[Value], block: &blocks::Block) -> Result<()> {
+    fn holds(when: &Value, state: &[(&str, &str)], block: &blocks::Block) -> Result<bool> {
+        let map = when.as_object().ok_or("a condition is not an object")?;
+        for (list, all) in [("OR", false), ("AND", true)] {
+            if let Some(terms) = map.get(list) {
+                let terms = terms.as_array().ok_or("OR and AND take a list")?;
+                let mut held = terms.iter().map(|t| holds(t, state, block));
+                return if all {
+                    held.try_fold(true, |acc, h| h.map(|h| acc && h))
+                } else {
+                    held.try_fold(false, |acc, h| h.map(|h| acc || h))
+                };
+            }
+        }
+        let mut all = true;
+        for (key, values) in map {
+            let values = values
+                .as_str()
+                .ok_or("a condition's value is not a string")?;
+            let (_, allowed) = block
+                .properties
+                .iter()
+                .find(|(k, _)| k == key)
+                .ok_or_else(|| format!("names the missing property {key}"))?;
+            let (negate, values) = match values.strip_prefix('!') {
+                Some(rest) => (true, rest),
+                None => (false, values),
+            };
+            for value in values.split('|') {
+                if !allowed.contains(&value) {
+                    return Err(format!("names the missing value {key}={value}"));
+                }
+            }
+            let current = state.iter().find(|(k, _)| k == key).map_or("", |(_, v)| v);
+            all &= values.split('|').any(|v| v == current) != negate;
+        }
+        Ok(all)
+    }
+    let states = block.states();
+    let mut drawn = vec![false; states.len()];
+    for part in parts {
+        if part["apply"].is_null() {
+            return Err(format!("{path}: a part applies no model"));
+        }
+        for (state, drawn) in states.iter().zip(&mut drawn) {
+            let applies = match part.get("when") {
+                None => true,
+                Some(when) => holds(when, state, block).map_err(|e| format!("{path}: {e}"))?,
+            };
+            *drawn |= applies;
+        }
+    }
+    if !drawn[block.default_index()] {
+        return Err(format!(
+            "{path} draws nothing in its default state [{}]",
+            state_key(&states[block.default_index()])
+        ));
     }
     Ok(())
 }

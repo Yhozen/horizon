@@ -109,7 +109,7 @@ pub(crate) fn title(id: &str) -> &'static str {
     Box::leak(words.join(" ").into_boxed_str())
 }
 
-const COLORS: &[&str] = &[
+pub(crate) const COLORS: &[&str] = &[
     "white",
     "orange",
     "magenta",
