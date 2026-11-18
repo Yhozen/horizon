@@ -130,6 +130,9 @@ fn item_tint(id: &str) -> Value {
 /// definition.
 fn models(block: &Block, tinting: Tinting) -> (Vec<(String, Value)>, Option<Value>) {
     let id = block.id;
+    if let Some(models) = crate::cubes::variant_models(block) {
+        return models;
+    }
     let all = ["down", "up", "north", "south", "west", "east"];
     match block.faces {
         Faces::All(t) => {
@@ -443,7 +446,11 @@ pub fn write(
     let mut textures = BTreeMap::new();
     let mut colors = BTreeMap::new();
     for block in blocks.iter().filter(|b| b.tier != Tier::Support) {
-        for texture in block.textures() {
+        for texture in block
+            .textures()
+            .into_iter()
+            .chain(crate::cubes::variant_textures(block.id))
+        {
             textures.insert(texture, block.layer);
             colors.entry(texture).or_insert(block.map_color);
         }
@@ -502,10 +509,19 @@ pub fn write(
         } else if let Some(image) = crate::art::block_texture(texture) {
             bundle.png(destination, &image, Origin::Generator("art"))?;
         } else {
-            // A placeholder in the block's map colour until there is art.
+            // A placeholder in the block's map colour until there is art,
+            // speckled by its name: two placeholders are never the same
+            // image (an atlas would draw both with one sprite).
             let rgb = colors.get(texture).copied().unwrap_or(0x808080);
             let color = [(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, 255];
-            bundle.png(destination, &speckle(color), Origin::Generator("art"))?;
+            let seed = texture
+                .bytes()
+                .fold(7u32, |h, b| h.wrapping_mul(31) ^ u32::from(b));
+            bundle.png(
+                destination,
+                &speckle_seeded(color, seed),
+                Origin::Generator("art"),
+            )?;
         }
     }
     // Breaking overlays: original art.
@@ -791,10 +807,14 @@ fn handheld_model() -> Value {
 }
 
 fn speckle(color: [u8; 4]) -> Rgba {
+    speckle_seeded(color, 7)
+}
+
+fn speckle_seeded(color: [u8; 4], seed: u32) -> Rgba {
     let mut image = Rgba::new(16, 16);
     for y in 0..16 {
         for x in 0..16 {
-            let n = (noise(x, y, 7) % 24) as i32 - 12;
+            let n = (noise(x, y, seed) % 24) as i32 - 12;
             let c = |v: u8| (v as i32 + n).clamp(0, 255) as u8;
             image.set(x, y, [c(color[0]), c(color[1]), c(color[2]), color[3]]);
         }

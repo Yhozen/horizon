@@ -11,15 +11,23 @@ of these families, in block registry order:
 - the furnace, blast furnace and smoker (`facing` and `lit`),
 - every other block whose states all draw one plain cube model: unturned (ores, glass, leaves,
   copper, coral blocks: layout `cube`; `clear` when light shows through it, `leaves` when its
-  faces also carry a tint index, `glass` when its sprites are drawn translucent), turned at random as Minecraft turns sand (`spin_y`) and
-  netherrack (`spin_xy`), or turned by a horizontal `facing` alone (pumpkins, the loom).
+  faces also carry a tint index, `glass` when its sprites are drawn translucent), turned at
+  random as Minecraft turns sand (`spin_y`) and netherrack (`spin_xy`), or turned by a
+  horizontal `facing` alone (pumpkins, the loom); soul sand and mud too (`sunken`: their
+  collision box is 14 sixteenths tall),
+- every other block whose states all draw full-cube models, whatever their faces' UVs and
+  turns (glazed terracotta, observers, dispensers, barrels, copper bulbs, mycelium), or a
+  multipart of single boxes (mushroom blocks): layout `variants`. `cube_variants.txt` then
+  lists its block-state variants or parts (state or condition, model, x and y turns, uvlock)
+  and each model's box and faces (texture, UV, rotation, tint index, cull face).
 
 Each line is tab-separated: the name, its class chain, destroy time, explosion resistance, light
 emission (and when lit), light dampening, friction, map colour, sound type, the tool tag that
 mines it fast, the needed tool level (0 none, 1 stone, 2 iron, 3 diamond), whether it needs the
 tool to drop, the model layout (`cube`, `clear`, `leaves`, `glass`, `spin_y`, `spin_xy`, `axis`, `pillar`:
 an axis whose lying models turn the top half a turn, or `facing`), and the texture names of its six
-faces (down, up, north, south, west, east; the lit front last for `facing`).
+faces (down, up, north, south, west, east; the lit front last for `facing`), and the speed
+factor (soul sand's 0.4).
 
 It also writes `data/blocks/connected.txt`: the walls, fences, fence gates, glass panes and bars
 (classes `WallBlock`, `FenceBlock`, `FenceGateBlock`, `IronBarsBlock`) whose models use
@@ -48,10 +56,14 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "crates" / "horizon-open-content" / "data" / "blocks" / "cubes.txt"
 CONNECTED = OUT.with_name("connected.txt")
 OPENINGS = OUT.with_name("openings.txt")
+VARIANTS_OUT = OUT.with_name("cube_variants.txt")
 RESOURCES = ROOT / ".local" / "horizon-client" / "26.3"
 FURNACES = ("furnace", "blast_furnace", "smoker")
+# Cubes whose collision box is 14 sixteenths tall (`SoulSandBlock`, `MudBlock`): layout `sunken`.
+SUNKEN = ("SoulSandBlock", "MudBlock")
 # Blocks with a plain cube model that are not plain blocks to place.
-SKIP = ("minecraft:test_instance_block",)
+# The jigsaw has a block entity without `BaseEntityBlock`, which the open tables read it from.
+SKIP = ("minecraft:test_instance_block", "minecraft:jigsaw")
 SPIN_Y = [(0, y) for y in (0, 90, 180, 270)]
 SPIN_XY = [(x, y) for y in (0, 90, 180, 270) for x in (0, 90, 180, 270)]
 HORIZONTAL = {"north": 0, "east": 90, "south": 180, "west": 270}
@@ -71,7 +83,7 @@ OPENING_FAMILIES = (("DoorBlock", "door", "door_bottom_left", ("top", "bottom"))
                     ("WeightedPressurePlateBlock", "weighted_plate", "pressure_plate_up", ("texture",)),
                     ("PressurePlateBlock", "plate", "pressure_plate_up", ("texture",)))
 HEADER = ("name", "classes", "hardness", "resistance", "emission", "lit_emission", "opacity",
-          "friction", "map_color", "sound", "tool", "needs", "requires_tool", "layout") + FACES + ("lit_north",)
+          "friction", "map_color", "sound", "tool", "needs", "requires_tool", "layout") + FACES + ("lit_north", "speed_factor")
 
 
 def strip(name):
@@ -149,6 +161,90 @@ class Models:
         while "elements" not in model and model.get("parent"):
             model = self.load(model["parent"])
         return any("tintindex" in f for f in model.get("elements", [{}])[0].get("faces", {}).values())
+
+    def element(self, name, whole=True):
+        """The model's one unturned element, when it has one: a full cube with six faces when
+        `whole`, else any box with any faces (a mushroom block's single face)."""
+        model = self.load(name)
+        while "elements" not in model and model.get("parent"):
+            model = self.load(model["parent"])
+        elements = model.get("elements", [])
+        if len(elements) != 1 or "rotation" in elements[0]:
+            return None
+        e = elements[0]
+        if whole and (e["from"] != [0, 0, 0] or e["to"] != [16, 16, 16] or set(e["faces"]) != set(FACES)):
+            return None
+        return e
+
+    def full_cube(self, name):
+        return self.element(name)
+
+    def face_specs(self, name):
+        """The element's corners (`x,y,z`), then each face as
+        `texture/u1,v1,u2,v2/rotation/tintindex/cullface` (`-` for a face it lacks, and for an
+        unset UV or cull face)."""
+        e = self.element(name, whole=False)
+        variables = {}
+        for model in reversed(self.chain(name)):
+            variables.update(model.get("textures", {}))
+        out = [",".join(number(v) for v in e["from"]), ",".join(number(v) for v in e["to"])]
+        for d in FACES:
+            f = e["faces"].get(d)
+            if f is None:
+                out.append("-")
+                continue
+            texture = self.resolve(variables, f["texture"][1:])
+            uv = ",".join(number(v) for v in f["uv"]) if "uv" in f else "-"
+            out.append(f"{texture}/{uv}/{f.get('rotation', 0)}/{f.get('tintindex', -1)}/{f.get('cullface', '-')}")
+        return out
+
+    def chain(self, name):
+        models = []
+        while name:
+            model = self.load(name)
+            models.append(model)
+            name = model.get("parent")
+        return models
+
+    def resolve(self, variables, var, depth=0):
+        v = variables.get(var)
+        if isinstance(v, dict):
+            v = v["sprite"]
+        if v is None or depth > 8:
+            sys.exit(f"unresolved texture #{var}")
+        return self.resolve(variables, v[1:], depth + 1) if v.startswith("#") else strip(v).removeprefix("block/")
+
+    def variant_cubes(self, block):
+        """The block-state variants as (key, [(model, x, y, uvlock)]) when every model is one
+        full cube, else None."""
+        path = self.root / "blockstates" / f"{block}.json"
+        if not path.exists():
+            return None
+        definition = json.loads(path.read_text())
+        variants = definition.get("variants")
+        out = []
+
+        def apply(v):
+            return (strip(v["model"]).removeprefix("block/"), v.get("x", 0), v.get("y", 0), bool(v.get("uvlock")))
+        if not variants:
+            # A multipart of single boxes whose conditions are plain values (mushroom blocks).
+            for part in definition.get("multipart", []):
+                when, v = part.get("when", {}), part["apply"]
+                if isinstance(v, list) or not self.element(v["model"], whole=False):
+                    return None
+                if any(not isinstance(value, str) or "|" in value for value in when.values()) or "OR" in when:
+                    return None
+                out.append(("part", ",".join(f"{k}={value}" for k, value in when.items()), [apply(v)]))
+            return out or None
+        for key, variant in variants.items():
+            variant = variant if isinstance(variant, list) else [variant]
+            if any("weight" in v for v in variant):
+                return None
+            for v in variant:
+                if not self.full_cube(v["model"]):
+                    return None
+            out.append(("variant", key, [apply(v) for v in variant]))
+        return out
 
     def plain_cube(self, name):
         """Whether the model is one unturned full cube with all six faces."""
@@ -301,6 +397,7 @@ def rows(resources):
             needs[name] = max(needs.get(name, 0), n)
     models = Models(resources)
     out = []
+    variant_rows, model_rows = [], {}
     for block in behaviours["blocks"]:
         name, classes = block["name"], block["class"]
         short = strip(name)
@@ -313,13 +410,25 @@ def rows(resources):
             layout, key = "facing", "facing=north,lit=false"
         elif name not in SKIP and (layout := models.plain_layout(short)):
             plain, key = True, "facing=north" if layout == "facing" else ""
+        elif name not in SKIP and (found := models.variant_cubes(short)):
+            layout, plain = "variants", True
+            state = props[defaults[name]]
+            key = next((k for kind, k, _ in found if kind == "variant" and all(
+                state.get(p) == v for p, v in (c.split("=") for c in k.split(",") if c))), None)
         else:
             continue
         states = gameplay[first[name]:first[name] + counts[name]]
-        if not all(s["full_collision"] for s in states):
+        if layout == "cube" and classes[0] in SUNKEN:
+            # The outline stays a full cube; the collision box is checked by open_tables.
+            if not all(s["outline"] == [[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]] for s in states):
+                sys.exit(f"{name}: not a sunken cube")
+            layout = "sunken"
+        elif not all(s["full_collision"] for s in states):
             if plain:
                 continue
             sys.exit(f"{name}: not a full cube")
+        if layout == "variants" and not all(s["solid_render"] for s in states):
+            continue
         if not all(s["solid_render"] for s in states):
             if not plain or layout != "cube":
                 sys.exit(f"{name}: not a full opaque cube")
@@ -338,7 +447,14 @@ def rows(resources):
                     lit_emission = s["emission"]
                     s = {**s, "emission": facts["emission"]}
                 if any(s[k] != facts[k] for k in keep):
-                    sys.exit(f"{name}: its states' facts differ")
+                    break
+            else:
+                keep = None
+            if keep:
+                if layout == "variants":
+                    # Light by charge or level (respawn anchor): not a family of this file.
+                    continue
+                sys.exit(f"{name}: its states' facts differ")
         elif layout == "facing":
             # lit=true comes first among each facing's two states.
             lit, unlit = states[0], states[1]
@@ -346,7 +462,8 @@ def rows(resources):
             lit_emission = lit["emission"]
         kind = sound_kind(name, facts["sound"])
         models.translucent = False
-        faces = models.textures(models.variant_model(short, key))
+        model = models.variant_model(short, key) if key is not None else f"block/{short}_inventory"
+        faces = models.textures(model)
         if models.translucent:
             if layout != "clear":
                 sys.exit(f"{name}: a translucent sprite on an opaque block")
@@ -358,6 +475,11 @@ def rows(resources):
             layout = "pillar"
         if None in faces.values():
             sys.exit(f"{name}: unresolved texture in {faces}")
+        if layout == "variants":
+            for kind, k, variant in found:
+                for model, x, y, uvlock in variant:
+                    variant_rows.append((kind, short, k or "-", model, str(x), str(y), "1" if uvlock else "0"))
+                    model_rows.setdefault(model, ("model", model, *models.face_specs(f"block/{model}")))
         lit_north = "-"
         if layout == "facing" and short not in FURNACES:
             lit_north = faces["north"]
@@ -368,8 +490,9 @@ def rows(resources):
             str(facts["emission"]), str(lit_emission), str(facts["dampening"]), number(facts["friction"]),
             f"{facts['map_color']:06x}", kind, tagged.get(name, "-"), str(needs.get(name, 0)),
             "1" if facts["requires_tool"] else "0", layout, *(faces[f] for f in FACES), lit_north,
+            number(facts["speed_factor"]),
         ))
-    return out
+    return out, [*sorted(model_rows.values()), *variant_rows]
 
 
 def main():
@@ -377,20 +500,22 @@ def main():
     parser.add_argument("--resources", type=Path, default=RESOURCES)
     parser.add_argument("--check", action="store_true", help="fail if the committed file differs")
     args = parser.parse_args()
+    cubes, variants = rows(args.resources)
     files = (
-        (OUT, [HEADER, *rows(args.resources)]),
+        (OUT, [HEADER, *cubes]),
+        (VARIANTS_OUT, variants),
         (CONNECTED, [CONNECTED_HEADER, *connected_rows(args.resources)]),
         (OPENINGS, [CONNECTED_HEADER, *connected_rows(args.resources, OPENING_FAMILIES)]),
     )
     for out, lines in files:
         text = "".join("\t".join(row) + "\n" for row in lines)
         if args.check:
-            if out.read_text() != text:
+            if not out.exists() or out.read_text() != text:
                 sys.exit(f"{out.relative_to(ROOT)} is stale: run tools/open_block_facts.py")
             print(f"{out.relative_to(ROOT)} is up to date")
             continue
         out.write_text(text)
-        print(f"wrote {out.relative_to(ROOT)}: {text.count(chr(10)) - 1} blocks")
+        print(f"wrote {out.relative_to(ROOT)}: {text.count(chr(10))} lines")
 
 
 if __name__ == "__main__":

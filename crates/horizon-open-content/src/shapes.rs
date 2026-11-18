@@ -265,6 +265,8 @@ pub fn of(block: &Block, properties: &[(&str, &str)]) -> Option<StateShape> {
         Some(crate::slabs::slab(properties))
     } else if class("StairBlock") {
         Some(crate::slabs::stairs(properties))
+    } else if class("SoulSandBlock") || class("MudBlock") {
+        Some(crate::cubes::sunken())
     } else {
         None
     }

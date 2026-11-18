@@ -1,0 +1,457 @@
+model	barrel	0,0,0	16,16,16	barrel_bottom/-/0/-1/down	barrel_top/-/0/-1/up	barrel_side/-/0/-1/north	barrel_side/-/0/-1/south	barrel_side/-/0/-1/west	barrel_side/-/0/-1/east
+model	barrel_open	0,0,0	16,16,16	barrel_bottom/-/0/-1/down	barrel_top_open/-/0/-1/up	barrel_side/-/0/-1/north	barrel_side/-/0/-1/south	barrel_side/-/0/-1/west	barrel_side/-/0/-1/east
+model	bee_nest_empty	0,0,0	16,16,16	bee_nest_bottom/-/0/-1/down	bee_nest_top/-/0/-1/up	bee_nest_front/-/0/-1/north	bee_nest_side/-/0/-1/south	bee_nest_side/-/0/-1/west	bee_nest_side/-/0/-1/east
+model	bee_nest_honey	0,0,0	16,16,16	bee_nest_bottom/-/0/-1/down	bee_nest_top/-/0/-1/up	bee_nest_front_honey/-/0/-1/north	bee_nest_side/-/0/-1/south	bee_nest_side/-/0/-1/west	bee_nest_side/-/0/-1/east
+model	beehive_empty	0,0,0	16,16,16	beehive_end/-/0/-1/down	beehive_end/-/0/-1/up	beehive_front/-/0/-1/north	beehive_side/-/0/-1/south	beehive_side/-/0/-1/west	beehive_side/-/0/-1/east
+model	beehive_honey	0,0,0	16,16,16	beehive_end/-/0/-1/down	beehive_end/-/0/-1/up	beehive_front_honey/-/0/-1/north	beehive_side/-/0/-1/south	beehive_side/-/0/-1/west	beehive_side/-/0/-1/east
+model	black_glazed_terracotta	0,0,0	16,16,16	black_glazed_terracotta/0,0,16,16/0/-1/down	black_glazed_terracotta/0,0,16,16/0/-1/up	black_glazed_terracotta/0,0,16,16/90/-1/north	black_glazed_terracotta/0,0,16,16/270/-1/south	black_glazed_terracotta/0,0,16,16/0/-1/west	black_glazed_terracotta/0,0,16,16/180/-1/east
+model	blue_glazed_terracotta	0,0,0	16,16,16	blue_glazed_terracotta/0,0,16,16/0/-1/down	blue_glazed_terracotta/0,0,16,16/0/-1/up	blue_glazed_terracotta/0,0,16,16/90/-1/north	blue_glazed_terracotta/0,0,16,16/270/-1/south	blue_glazed_terracotta/0,0,16,16/0/-1/west	blue_glazed_terracotta/0,0,16,16/180/-1/east
+model	brown_glazed_terracotta	0,0,0	16,16,16	brown_glazed_terracotta/0,0,16,16/0/-1/down	brown_glazed_terracotta/0,0,16,16/0/-1/up	brown_glazed_terracotta/0,0,16,16/90/-1/north	brown_glazed_terracotta/0,0,16,16/270/-1/south	brown_glazed_terracotta/0,0,16,16/0/-1/west	brown_glazed_terracotta/0,0,16,16/180/-1/east
+model	brown_mushroom_block	0,0,0	16,16,0	-	-	brown_mushroom_block/-/0/-1/north	-	-	-
+model	chain_command_block	0,0,0	16,16,16	chain_command_block_side/-/180/-1/down	chain_command_block_side/-/0/-1/up	chain_command_block_front/-/0/-1/north	chain_command_block_back/-/0/-1/south	chain_command_block_side/-/270/-1/west	chain_command_block_side/-/90/-1/east
+model	chain_command_block_conditional	0,0,0	16,16,16	chain_command_block_conditional/-/180/-1/down	chain_command_block_conditional/-/0/-1/up	chain_command_block_front/-/0/-1/north	chain_command_block_back/-/0/-1/south	chain_command_block_conditional/-/270/-1/west	chain_command_block_conditional/-/90/-1/east
+model	command_block	0,0,0	16,16,16	command_block_side/-/180/-1/down	command_block_side/-/0/-1/up	command_block_front/-/0/-1/north	command_block_back/-/0/-1/south	command_block_side/-/270/-1/west	command_block_side/-/90/-1/east
+model	command_block_conditional	0,0,0	16,16,16	command_block_conditional/-/180/-1/down	command_block_conditional/-/0/-1/up	command_block_front/-/0/-1/north	command_block_back/-/0/-1/south	command_block_conditional/-/270/-1/west	command_block_conditional/-/90/-1/east
+model	copper_bulb	0,0,0	16,16,16	copper_bulb/-/0/-1/down	copper_bulb/-/0/-1/up	copper_bulb/-/0/-1/north	copper_bulb/-/0/-1/south	copper_bulb/-/0/-1/west	copper_bulb/-/0/-1/east
+model	copper_bulb_lit	0,0,0	16,16,16	copper_bulb_lit/-/0/-1/down	copper_bulb_lit/-/0/-1/up	copper_bulb_lit/-/0/-1/north	copper_bulb_lit/-/0/-1/south	copper_bulb_lit/-/0/-1/west	copper_bulb_lit/-/0/-1/east
+model	copper_bulb_lit_powered	0,0,0	16,16,16	copper_bulb_lit_powered/-/0/-1/down	copper_bulb_lit_powered/-/0/-1/up	copper_bulb_lit_powered/-/0/-1/north	copper_bulb_lit_powered/-/0/-1/south	copper_bulb_lit_powered/-/0/-1/west	copper_bulb_lit_powered/-/0/-1/east
+model	copper_bulb_powered	0,0,0	16,16,16	copper_bulb_powered/-/0/-1/down	copper_bulb_powered/-/0/-1/up	copper_bulb_powered/-/0/-1/north	copper_bulb_powered/-/0/-1/south	copper_bulb_powered/-/0/-1/west	copper_bulb_powered/-/0/-1/east
+model	crafter	0,0,0	16,16,16	crafter_bottom/0,0,16,16/0/-1/down	crafter_top/0,0,16,16/180/-1/up	crafter_north/0,0,16,16/0/-1/north	crafter_south/0,0,16,16/0/-1/south	crafter_west/0,0,16,16/0/-1/west	crafter_east/0,0,16,16/0/-1/east
+model	crafter_crafting	0,0,0	16,16,16	crafter_bottom/0,0,16,16/0/-1/down	crafter_top_crafting/0,0,16,16/180/-1/up	crafter_north_crafting/0,0,16,16/0/-1/north	crafter_south_triggered/0,0,16,16/0/-1/south	crafter_west_crafting/0,0,16,16/0/-1/west	crafter_east_crafting/0,0,16,16/0/-1/east
+model	crafter_crafting_triggered	0,0,0	16,16,16	crafter_bottom/0,0,16,16/0/-1/down	crafter_top_crafting/0,0,16,16/180/-1/up	crafter_north_crafting/0,0,16,16/0/-1/north	crafter_south_triggered/0,0,16,16/0/-1/south	crafter_west_crafting/0,0,16,16/0/-1/west	crafter_east_crafting/0,0,16,16/0/-1/east
+model	crafter_triggered	0,0,0	16,16,16	crafter_bottom/0,0,16,16/0/-1/down	crafter_top_triggered/0,0,16,16/180/-1/up	crafter_north/0,0,16,16/0/-1/north	crafter_south_triggered/0,0,16,16/0/-1/south	crafter_west_triggered/0,0,16,16/0/-1/west	crafter_east_triggered/0,0,16,16/0/-1/east
+model	creaking_heart	0,0,0	16,16,16	creaking_heart_top/-/0/-1/down	creaking_heart_top/-/0/-1/up	creaking_heart/-/0/-1/north	creaking_heart/-/0/-1/south	creaking_heart/-/0/-1/west	creaking_heart/-/0/-1/east
+model	creaking_heart_awake	0,0,0	16,16,16	creaking_heart_top_awake/-/0/-1/down	creaking_heart_top_awake/-/0/-1/up	creaking_heart_awake/-/0/-1/north	creaking_heart_awake/-/0/-1/south	creaking_heart_awake/-/0/-1/west	creaking_heart_awake/-/0/-1/east
+model	creaking_heart_awake_horizontal	0,0,0	16,16,16	creaking_heart_top_awake/-/0/-1/down	creaking_heart_top_awake/-/180/-1/up	creaking_heart_awake/-/0/-1/north	creaking_heart_awake/-/0/-1/south	creaking_heart_awake/-/0/-1/west	creaking_heart_awake/-/0/-1/east
+model	creaking_heart_dormant	0,0,0	16,16,16	creaking_heart_top_dormant/-/0/-1/down	creaking_heart_top_dormant/-/0/-1/up	creaking_heart_dormant/-/0/-1/north	creaking_heart_dormant/-/0/-1/south	creaking_heart_dormant/-/0/-1/west	creaking_heart_dormant/-/0/-1/east
+model	creaking_heart_dormant_horizontal	0,0,0	16,16,16	creaking_heart_top_dormant/-/0/-1/down	creaking_heart_top_dormant/-/180/-1/up	creaking_heart_dormant/-/0/-1/north	creaking_heart_dormant/-/0/-1/south	creaking_heart_dormant/-/0/-1/west	creaking_heart_dormant/-/0/-1/east
+model	creaking_heart_horizontal	0,0,0	16,16,16	creaking_heart_top/-/0/-1/down	creaking_heart_top/-/180/-1/up	creaking_heart/-/0/-1/north	creaking_heart/-/0/-1/south	creaking_heart/-/0/-1/west	creaking_heart/-/0/-1/east
+model	cyan_glazed_terracotta	0,0,0	16,16,16	cyan_glazed_terracotta/0,0,16,16/0/-1/down	cyan_glazed_terracotta/0,0,16,16/0/-1/up	cyan_glazed_terracotta/0,0,16,16/90/-1/north	cyan_glazed_terracotta/0,0,16,16/270/-1/south	cyan_glazed_terracotta/0,0,16,16/0/-1/west	cyan_glazed_terracotta/0,0,16,16/180/-1/east
+model	deepslate	0,0,0	16,16,16	deepslate_top/-/0/-1/down	deepslate_top/-/0/-1/up	deepslate/-/0/-1/north	deepslate/-/0/-1/south	deepslate/-/0/-1/west	deepslate/-/0/-1/east
+model	deepslate_mirrored	0,0,0	16,16,16	deepslate_top/16,0,0,16/0/-1/down	deepslate_top/16,0,0,16/0/-1/up	deepslate/16,0,0,16/0/-1/north	deepslate/16,0,0,16/0/-1/south	deepslate/16,0,0,16/0/-1/west	deepslate/16,0,0,16/0/-1/east
+model	dispenser	0,0,0	16,16,16	furnace_top/-/0/-1/down	furnace_top/-/0/-1/up	dispenser_front/-/0/-1/north	furnace_side/-/0/-1/south	furnace_side/-/0/-1/west	furnace_side/-/0/-1/east
+model	dispenser_vertical	0,0,0	16,16,16	furnace_top/-/0/-1/down	dispenser_front_vertical/-/0/-1/up	furnace_top/-/0/-1/north	furnace_top/-/0/-1/south	furnace_top/-/0/-1/west	furnace_top/-/0/-1/east
+model	dropper	0,0,0	16,16,16	furnace_top/-/0/-1/down	furnace_top/-/0/-1/up	dropper_front/-/0/-1/north	furnace_side/-/0/-1/south	furnace_side/-/0/-1/west	furnace_side/-/0/-1/east
+model	dropper_vertical	0,0,0	16,16,16	furnace_top/-/0/-1/down	dropper_front_vertical/-/0/-1/up	furnace_top/-/0/-1/north	furnace_top/-/0/-1/south	furnace_top/-/0/-1/west	furnace_top/-/0/-1/east
+model	exposed_copper_bulb	0,0,0	16,16,16	exposed_copper_bulb/-/0/-1/down	exposed_copper_bulb/-/0/-1/up	exposed_copper_bulb/-/0/-1/north	exposed_copper_bulb/-/0/-1/south	exposed_copper_bulb/-/0/-1/west	exposed_copper_bulb/-/0/-1/east
+model	exposed_copper_bulb_lit	0,0,0	16,16,16	exposed_copper_bulb_lit/-/0/-1/down	exposed_copper_bulb_lit/-/0/-1/up	exposed_copper_bulb_lit/-/0/-1/north	exposed_copper_bulb_lit/-/0/-1/south	exposed_copper_bulb_lit/-/0/-1/west	exposed_copper_bulb_lit/-/0/-1/east
+model	exposed_copper_bulb_lit_powered	0,0,0	16,16,16	exposed_copper_bulb_lit_powered/-/0/-1/down	exposed_copper_bulb_lit_powered/-/0/-1/up	exposed_copper_bulb_lit_powered/-/0/-1/north	exposed_copper_bulb_lit_powered/-/0/-1/south	exposed_copper_bulb_lit_powered/-/0/-1/west	exposed_copper_bulb_lit_powered/-/0/-1/east
+model	exposed_copper_bulb_powered	0,0,0	16,16,16	exposed_copper_bulb_powered/-/0/-1/down	exposed_copper_bulb_powered/-/0/-1/up	exposed_copper_bulb_powered/-/0/-1/north	exposed_copper_bulb_powered/-/0/-1/south	exposed_copper_bulb_powered/-/0/-1/west	exposed_copper_bulb_powered/-/0/-1/east
+model	grass_block_snow	0,0,0	16,16,16	dirt/-/0/-1/down	grass_block_top/-/0/-1/up	grass_block_snow/-/0/-1/north	grass_block_snow/-/0/-1/south	grass_block_snow/-/0/-1/west	grass_block_snow/-/0/-1/east
+model	gray_glazed_terracotta	0,0,0	16,16,16	gray_glazed_terracotta/0,0,16,16/0/-1/down	gray_glazed_terracotta/0,0,16,16/0/-1/up	gray_glazed_terracotta/0,0,16,16/90/-1/north	gray_glazed_terracotta/0,0,16,16/270/-1/south	gray_glazed_terracotta/0,0,16,16/0/-1/west	gray_glazed_terracotta/0,0,16,16/180/-1/east
+model	green_glazed_terracotta	0,0,0	16,16,16	green_glazed_terracotta/0,0,16,16/0/-1/down	green_glazed_terracotta/0,0,16,16/0/-1/up	green_glazed_terracotta/0,0,16,16/90/-1/north	green_glazed_terracotta/0,0,16,16/270/-1/south	green_glazed_terracotta/0,0,16,16/0/-1/west	green_glazed_terracotta/0,0,16,16/180/-1/east
+model	hay_block	0,0,0	16,16,16	hay_block_top/-/0/-1/down	hay_block_top/-/0/-1/up	hay_block_side/-/0/-1/north	hay_block_side/-/0/-1/south	hay_block_side/-/0/-1/west	hay_block_side/-/0/-1/east
+model	hay_block_horizontal	0,0,0	16,16,16	hay_block_top/-/0/-1/down	hay_block_top/-/180/-1/up	hay_block_side/-/0/-1/north	hay_block_side/-/0/-1/south	hay_block_side/-/0/-1/west	hay_block_side/-/0/-1/east
+model	light_blue_glazed_terracotta	0,0,0	16,16,16	light_blue_glazed_terracotta/0,0,16,16/0/-1/down	light_blue_glazed_terracotta/0,0,16,16/0/-1/up	light_blue_glazed_terracotta/0,0,16,16/90/-1/north	light_blue_glazed_terracotta/0,0,16,16/270/-1/south	light_blue_glazed_terracotta/0,0,16,16/0/-1/west	light_blue_glazed_terracotta/0,0,16,16/180/-1/east
+model	light_gray_glazed_terracotta	0,0,0	16,16,16	light_gray_glazed_terracotta/0,0,16,16/0/-1/down	light_gray_glazed_terracotta/0,0,16,16/0/-1/up	light_gray_glazed_terracotta/0,0,16,16/90/-1/north	light_gray_glazed_terracotta/0,0,16,16/270/-1/south	light_gray_glazed_terracotta/0,0,16,16/0/-1/west	light_gray_glazed_terracotta/0,0,16,16/180/-1/east
+model	lime_glazed_terracotta	0,0,0	16,16,16	lime_glazed_terracotta/0,0,16,16/0/-1/down	lime_glazed_terracotta/0,0,16,16/0/-1/up	lime_glazed_terracotta/0,0,16,16/90/-1/north	lime_glazed_terracotta/0,0,16,16/270/-1/south	lime_glazed_terracotta/0,0,16,16/0/-1/west	lime_glazed_terracotta/0,0,16,16/180/-1/east
+model	magenta_glazed_terracotta	0,0,0	16,16,16	magenta_glazed_terracotta/0,0,16,16/0/-1/down	magenta_glazed_terracotta/0,0,16,16/0/-1/up	magenta_glazed_terracotta/0,0,16,16/90/-1/north	magenta_glazed_terracotta/0,0,16,16/270/-1/south	magenta_glazed_terracotta/0,0,16,16/0/-1/west	magenta_glazed_terracotta/0,0,16,16/180/-1/east
+model	mushroom_block_inside	0,0,0	16,16,0	-	-	mushroom_block_inside/-/0/-1/north	-	-	-
+model	mushroom_stem	0,0,0	16,16,0	-	-	mushroom_stem/-/0/-1/north	-	-	-
+model	mycelium	0,0,0	16,16,16	dirt/-/0/-1/down	mycelium_top/-/0/-1/up	mycelium_side/-/0/-1/north	mycelium_side/-/0/-1/south	mycelium_side/-/0/-1/west	mycelium_side/-/0/-1/east
+model	observer	0,0,0	16,16,16	observer_top/0,0,16,16/0/-1/down	observer_top/0,16,16,0/0/-1/up	observer_front/0,0,16,16/0/-1/north	observer_back/0,0,16,16/0/-1/south	observer_side/0,0,16,16/0/-1/west	observer_side/0,0,16,16/0/-1/east
+model	observer_on	0,0,0	16,16,16	observer_top/0,0,16,16/0/-1/down	observer_top/0,16,16,0/0/-1/up	observer_front/0,0,16,16/0/-1/north	observer_back_on/0,0,16,16/0/-1/south	observer_side/0,0,16,16/0/-1/west	observer_side/0,0,16,16/0/-1/east
+model	orange_glazed_terracotta	0,0,0	16,16,16	orange_glazed_terracotta/0,0,16,16/0/-1/down	orange_glazed_terracotta/0,0,16,16/0/-1/up	orange_glazed_terracotta/0,0,16,16/90/-1/north	orange_glazed_terracotta/0,0,16,16/270/-1/south	orange_glazed_terracotta/0,0,16,16/0/-1/west	orange_glazed_terracotta/0,0,16,16/180/-1/east
+model	oxidized_copper_bulb	0,0,0	16,16,16	oxidized_copper_bulb/-/0/-1/down	oxidized_copper_bulb/-/0/-1/up	oxidized_copper_bulb/-/0/-1/north	oxidized_copper_bulb/-/0/-1/south	oxidized_copper_bulb/-/0/-1/west	oxidized_copper_bulb/-/0/-1/east
+model	oxidized_copper_bulb_lit	0,0,0	16,16,16	oxidized_copper_bulb_lit/-/0/-1/down	oxidized_copper_bulb_lit/-/0/-1/up	oxidized_copper_bulb_lit/-/0/-1/north	oxidized_copper_bulb_lit/-/0/-1/south	oxidized_copper_bulb_lit/-/0/-1/west	oxidized_copper_bulb_lit/-/0/-1/east
+model	oxidized_copper_bulb_lit_powered	0,0,0	16,16,16	oxidized_copper_bulb_lit_powered/-/0/-1/down	oxidized_copper_bulb_lit_powered/-/0/-1/up	oxidized_copper_bulb_lit_powered/-/0/-1/north	oxidized_copper_bulb_lit_powered/-/0/-1/south	oxidized_copper_bulb_lit_powered/-/0/-1/west	oxidized_copper_bulb_lit_powered/-/0/-1/east
+model	oxidized_copper_bulb_powered	0,0,0	16,16,16	oxidized_copper_bulb_powered/-/0/-1/down	oxidized_copper_bulb_powered/-/0/-1/up	oxidized_copper_bulb_powered/-/0/-1/north	oxidized_copper_bulb_powered/-/0/-1/south	oxidized_copper_bulb_powered/-/0/-1/west	oxidized_copper_bulb_powered/-/0/-1/east
+model	pink_glazed_terracotta	0,0,0	16,16,16	pink_glazed_terracotta/0,0,16,16/0/-1/down	pink_glazed_terracotta/0,0,16,16/0/-1/up	pink_glazed_terracotta/0,0,16,16/90/-1/north	pink_glazed_terracotta/0,0,16,16/270/-1/south	pink_glazed_terracotta/0,0,16,16/0/-1/west	pink_glazed_terracotta/0,0,16,16/180/-1/east
+model	podzol	0,0,0	16,16,16	dirt/-/0/-1/down	podzol_top/-/0/-1/up	podzol_side/-/0/-1/north	podzol_side/-/0/-1/south	podzol_side/-/0/-1/west	podzol_side/-/0/-1/east
+model	purple_glazed_terracotta	0,0,0	16,16,16	purple_glazed_terracotta/0,0,16,16/0/-1/down	purple_glazed_terracotta/0,0,16,16/0/-1/up	purple_glazed_terracotta/0,0,16,16/90/-1/north	purple_glazed_terracotta/0,0,16,16/270/-1/south	purple_glazed_terracotta/0,0,16,16/0/-1/west	purple_glazed_terracotta/0,0,16,16/180/-1/east
+model	red_glazed_terracotta	0,0,0	16,16,16	red_glazed_terracotta/0,0,16,16/0/-1/down	red_glazed_terracotta/0,0,16,16/0/-1/up	red_glazed_terracotta/0,0,16,16/90/-1/north	red_glazed_terracotta/0,0,16,16/270/-1/south	red_glazed_terracotta/0,0,16,16/0/-1/west	red_glazed_terracotta/0,0,16,16/180/-1/east
+model	red_mushroom_block	0,0,0	16,16,0	-	-	red_mushroom_block/-/0/-1/north	-	-	-
+model	redstone_lamp	0,0,0	16,16,16	redstone_lamp/-/0/-1/down	redstone_lamp/-/0/-1/up	redstone_lamp/-/0/-1/north	redstone_lamp/-/0/-1/south	redstone_lamp/-/0/-1/west	redstone_lamp/-/0/-1/east
+model	redstone_lamp_on	0,0,0	16,16,16	redstone_lamp_on/-/0/-1/down	redstone_lamp_on/-/0/-1/up	redstone_lamp_on/-/0/-1/north	redstone_lamp_on/-/0/-1/south	redstone_lamp_on/-/0/-1/west	redstone_lamp_on/-/0/-1/east
+model	repeating_command_block	0,0,0	16,16,16	repeating_command_block_side/-/180/-1/down	repeating_command_block_side/-/0/-1/up	repeating_command_block_front/-/0/-1/north	repeating_command_block_back/-/0/-1/south	repeating_command_block_side/-/270/-1/west	repeating_command_block_side/-/90/-1/east
+model	repeating_command_block_conditional	0,0,0	16,16,16	repeating_command_block_conditional/-/180/-1/down	repeating_command_block_conditional/-/0/-1/up	repeating_command_block_front/-/0/-1/north	repeating_command_block_back/-/0/-1/south	repeating_command_block_conditional/-/270/-1/west	repeating_command_block_conditional/-/90/-1/east
+model	sculk	0,0,0	16,16,16	sculk/-/0/-1/down	sculk/-/0/-1/up	sculk/-/0/-1/north	sculk/-/0/-1/south	sculk/-/0/-1/west	sculk/-/0/-1/east
+model	sculk_catalyst	0,0,0	16,16,16	sculk_catalyst_bottom/-/0/-1/down	sculk_catalyst_top/-/0/-1/up	sculk_catalyst_side/-/0/-1/north	sculk_catalyst_side/-/0/-1/south	sculk_catalyst_side/-/0/-1/west	sculk_catalyst_side/-/0/-1/east
+model	sculk_catalyst_bloom	0,0,0	16,16,16	sculk_catalyst_bottom/-/0/-1/down	sculk_catalyst_top_bloom/-/0/-1/up	sculk_catalyst_side_bloom/-/0/-1/north	sculk_catalyst_side_bloom/-/0/-1/south	sculk_catalyst_side_bloom/-/0/-1/west	sculk_catalyst_side_bloom/-/0/-1/east
+model	sculk_mirrored	0,0,0	16,16,16	sculk/16,0,0,16/0/-1/down	sculk/16,0,0,16/0/-1/up	sculk/16,0,0,16/0/-1/north	sculk/16,0,0,16/0/-1/south	sculk/16,0,0,16/0/-1/west	sculk/16,0,0,16/0/-1/east
+model	stone	0,0,0	16,16,16	stone/-/0/-1/down	stone/-/0/-1/up	stone/-/0/-1/north	stone/-/0/-1/south	stone/-/0/-1/west	stone/-/0/-1/east
+model	stone_mirrored	0,0,0	16,16,16	stone/16,0,0,16/0/-1/down	stone/16,0,0,16/0/-1/up	stone/16,0,0,16/0/-1/north	stone/16,0,0,16/0/-1/south	stone/16,0,0,16/0/-1/west	stone/16,0,0,16/0/-1/east
+model	structure_block_corner	0,0,0	16,16,16	structure_block_corner/-/0/-1/down	structure_block_corner/-/0/-1/up	structure_block_corner/-/0/-1/north	structure_block_corner/-/0/-1/south	structure_block_corner/-/0/-1/west	structure_block_corner/-/0/-1/east
+model	structure_block_data	0,0,0	16,16,16	structure_block_data/-/0/-1/down	structure_block_data/-/0/-1/up	structure_block_data/-/0/-1/north	structure_block_data/-/0/-1/south	structure_block_data/-/0/-1/west	structure_block_data/-/0/-1/east
+model	structure_block_load	0,0,0	16,16,16	structure_block_load/-/0/-1/down	structure_block_load/-/0/-1/up	structure_block_load/-/0/-1/north	structure_block_load/-/0/-1/south	structure_block_load/-/0/-1/west	structure_block_load/-/0/-1/east
+model	structure_block_save	0,0,0	16,16,16	structure_block_save/-/0/-1/down	structure_block_save/-/0/-1/up	structure_block_save/-/0/-1/north	structure_block_save/-/0/-1/south	structure_block_save/-/0/-1/west	structure_block_save/-/0/-1/east
+model	suspicious_gravel_0	0,0,0	16,16,16	suspicious_gravel_0/-/0/-1/down	suspicious_gravel_0/-/0/-1/up	suspicious_gravel_0/-/0/-1/north	suspicious_gravel_0/-/0/-1/south	suspicious_gravel_0/-/0/-1/west	suspicious_gravel_0/-/0/-1/east
+model	suspicious_gravel_1	0,0,0	16,16,16	suspicious_gravel_1/-/0/-1/down	suspicious_gravel_1/-/0/-1/up	suspicious_gravel_1/-/0/-1/north	suspicious_gravel_1/-/0/-1/south	suspicious_gravel_1/-/0/-1/west	suspicious_gravel_1/-/0/-1/east
+model	suspicious_gravel_2	0,0,0	16,16,16	suspicious_gravel_2/-/0/-1/down	suspicious_gravel_2/-/0/-1/up	suspicious_gravel_2/-/0/-1/north	suspicious_gravel_2/-/0/-1/south	suspicious_gravel_2/-/0/-1/west	suspicious_gravel_2/-/0/-1/east
+model	suspicious_gravel_3	0,0,0	16,16,16	suspicious_gravel_3/-/0/-1/down	suspicious_gravel_3/-/0/-1/up	suspicious_gravel_3/-/0/-1/north	suspicious_gravel_3/-/0/-1/south	suspicious_gravel_3/-/0/-1/west	suspicious_gravel_3/-/0/-1/east
+model	suspicious_sand_0	0,0,0	16,16,16	suspicious_sand_0/-/0/-1/down	suspicious_sand_0/-/0/-1/up	suspicious_sand_0/-/0/-1/north	suspicious_sand_0/-/0/-1/south	suspicious_sand_0/-/0/-1/west	suspicious_sand_0/-/0/-1/east
+model	suspicious_sand_1	0,0,0	16,16,16	suspicious_sand_1/-/0/-1/down	suspicious_sand_1/-/0/-1/up	suspicious_sand_1/-/0/-1/north	suspicious_sand_1/-/0/-1/south	suspicious_sand_1/-/0/-1/west	suspicious_sand_1/-/0/-1/east
+model	suspicious_sand_2	0,0,0	16,16,16	suspicious_sand_2/-/0/-1/down	suspicious_sand_2/-/0/-1/up	suspicious_sand_2/-/0/-1/north	suspicious_sand_2/-/0/-1/south	suspicious_sand_2/-/0/-1/west	suspicious_sand_2/-/0/-1/east
+model	suspicious_sand_3	0,0,0	16,16,16	suspicious_sand_3/-/0/-1/down	suspicious_sand_3/-/0/-1/up	suspicious_sand_3/-/0/-1/north	suspicious_sand_3/-/0/-1/south	suspicious_sand_3/-/0/-1/west	suspicious_sand_3/-/0/-1/east
+model	test_block_accept	0,0,0	16,16,16	test_block_accept/-/0/-1/down	test_block_accept/-/0/-1/up	test_block_accept/-/0/-1/north	test_block_accept/-/0/-1/south	test_block_accept/-/0/-1/west	test_block_accept/-/0/-1/east
+model	test_block_fail	0,0,0	16,16,16	test_block_fail/-/0/-1/down	test_block_fail/-/0/-1/up	test_block_fail/-/0/-1/north	test_block_fail/-/0/-1/south	test_block_fail/-/0/-1/west	test_block_fail/-/0/-1/east
+model	test_block_log	0,0,0	16,16,16	test_block_log/-/0/-1/down	test_block_log/-/0/-1/up	test_block_log/-/0/-1/north	test_block_log/-/0/-1/south	test_block_log/-/0/-1/west	test_block_log/-/0/-1/east
+model	test_block_start	0,0,0	16,16,16	test_block_start/-/0/-1/down	test_block_start/-/0/-1/up	test_block_start/-/0/-1/north	test_block_start/-/0/-1/south	test_block_start/-/0/-1/west	test_block_start/-/0/-1/east
+model	weathered_copper_bulb	0,0,0	16,16,16	weathered_copper_bulb/-/0/-1/down	weathered_copper_bulb/-/0/-1/up	weathered_copper_bulb/-/0/-1/north	weathered_copper_bulb/-/0/-1/south	weathered_copper_bulb/-/0/-1/west	weathered_copper_bulb/-/0/-1/east
+model	weathered_copper_bulb_lit	0,0,0	16,16,16	weathered_copper_bulb_lit/-/0/-1/down	weathered_copper_bulb_lit/-/0/-1/up	weathered_copper_bulb_lit/-/0/-1/north	weathered_copper_bulb_lit/-/0/-1/south	weathered_copper_bulb_lit/-/0/-1/west	weathered_copper_bulb_lit/-/0/-1/east
+model	weathered_copper_bulb_lit_powered	0,0,0	16,16,16	weathered_copper_bulb_lit_powered/-/0/-1/down	weathered_copper_bulb_lit_powered/-/0/-1/up	weathered_copper_bulb_lit_powered/-/0/-1/north	weathered_copper_bulb_lit_powered/-/0/-1/south	weathered_copper_bulb_lit_powered/-/0/-1/west	weathered_copper_bulb_lit_powered/-/0/-1/east
+model	weathered_copper_bulb_powered	0,0,0	16,16,16	weathered_copper_bulb_powered/-/0/-1/down	weathered_copper_bulb_powered/-/0/-1/up	weathered_copper_bulb_powered/-/0/-1/north	weathered_copper_bulb_powered/-/0/-1/south	weathered_copper_bulb_powered/-/0/-1/west	weathered_copper_bulb_powered/-/0/-1/east
+model	white_glazed_terracotta	0,0,0	16,16,16	white_glazed_terracotta/0,0,16,16/0/-1/down	white_glazed_terracotta/0,0,16,16/0/-1/up	white_glazed_terracotta/0,0,16,16/90/-1/north	white_glazed_terracotta/0,0,16,16/270/-1/south	white_glazed_terracotta/0,0,16,16/0/-1/west	white_glazed_terracotta/0,0,16,16/180/-1/east
+model	yellow_glazed_terracotta	0,0,0	16,16,16	yellow_glazed_terracotta/0,0,16,16/0/-1/down	yellow_glazed_terracotta/0,0,16,16/0/-1/up	yellow_glazed_terracotta/0,0,16,16/90/-1/north	yellow_glazed_terracotta/0,0,16,16/270/-1/south	yellow_glazed_terracotta/0,0,16,16/0/-1/west	yellow_glazed_terracotta/0,0,16,16/180/-1/east
+variant	podzol	snowy=false	podzol	0	0	0
+variant	podzol	snowy=false	podzol	0	90	0
+variant	podzol	snowy=false	podzol	0	180	0
+variant	podzol	snowy=false	podzol	0	270	0
+variant	podzol	snowy=true	grass_block_snow	0	0	0
+variant	suspicious_sand	dusted=0	suspicious_sand_0	0	0	0
+variant	suspicious_sand	dusted=1	suspicious_sand_1	0	0	0
+variant	suspicious_sand	dusted=2	suspicious_sand_2	0	0	0
+variant	suspicious_sand	dusted=3	suspicious_sand_3	0	0	0
+variant	suspicious_gravel	dusted=0	suspicious_gravel_0	0	0	0
+variant	suspicious_gravel	dusted=1	suspicious_gravel_1	0	0	0
+variant	suspicious_gravel	dusted=2	suspicious_gravel_2	0	0	0
+variant	suspicious_gravel	dusted=3	suspicious_gravel_3	0	0	0
+variant	dispenser	facing=down	dispenser_vertical	180	0	0
+variant	dispenser	facing=east	dispenser	0	90	0
+variant	dispenser	facing=north	dispenser	0	0	0
+variant	dispenser	facing=south	dispenser	0	180	0
+variant	dispenser	facing=up	dispenser_vertical	0	0	0
+variant	dispenser	facing=west	dispenser	0	270	0
+variant	creaking_heart	axis=x,creaking_heart_state=awake	creaking_heart_awake_horizontal	90	90	0
+variant	creaking_heart	axis=x,creaking_heart_state=dormant	creaking_heart_dormant_horizontal	90	90	0
+variant	creaking_heart	axis=x,creaking_heart_state=uprooted	creaking_heart_horizontal	90	90	0
+variant	creaking_heart	axis=y,creaking_heart_state=awake	creaking_heart_awake	0	0	0
+variant	creaking_heart	axis=y,creaking_heart_state=dormant	creaking_heart_dormant	0	0	0
+variant	creaking_heart	axis=y,creaking_heart_state=uprooted	creaking_heart	0	0	0
+variant	creaking_heart	axis=z,creaking_heart_state=awake	creaking_heart_awake_horizontal	90	0	0
+variant	creaking_heart	axis=z,creaking_heart_state=dormant	creaking_heart_dormant_horizontal	90	0	0
+variant	creaking_heart	axis=z,creaking_heart_state=uprooted	creaking_heart_horizontal	90	0	0
+variant	infested_stone	-	stone	0	0	0
+variant	infested_stone	-	stone_mirrored	0	0	0
+variant	infested_stone	-	stone	0	180	0
+variant	infested_stone	-	stone_mirrored	0	180	0
+part	brown_mushroom_block	north=true	brown_mushroom_block	0	0	0
+part	brown_mushroom_block	east=true	brown_mushroom_block	0	90	1
+part	brown_mushroom_block	south=true	brown_mushroom_block	0	180	1
+part	brown_mushroom_block	west=true	brown_mushroom_block	0	270	1
+part	brown_mushroom_block	up=true	brown_mushroom_block	270	0	1
+part	brown_mushroom_block	down=true	brown_mushroom_block	90	0	1
+part	brown_mushroom_block	north=false	mushroom_block_inside	0	0	0
+part	brown_mushroom_block	east=false	mushroom_block_inside	0	90	0
+part	brown_mushroom_block	south=false	mushroom_block_inside	0	180	0
+part	brown_mushroom_block	west=false	mushroom_block_inside	0	270	0
+part	brown_mushroom_block	up=false	mushroom_block_inside	270	0	0
+part	brown_mushroom_block	down=false	mushroom_block_inside	90	0	0
+part	red_mushroom_block	north=true	red_mushroom_block	0	0	0
+part	red_mushroom_block	east=true	red_mushroom_block	0	90	1
+part	red_mushroom_block	south=true	red_mushroom_block	0	180	1
+part	red_mushroom_block	west=true	red_mushroom_block	0	270	1
+part	red_mushroom_block	up=true	red_mushroom_block	270	0	1
+part	red_mushroom_block	down=true	red_mushroom_block	90	0	1
+part	red_mushroom_block	north=false	mushroom_block_inside	0	0	0
+part	red_mushroom_block	east=false	mushroom_block_inside	0	90	0
+part	red_mushroom_block	south=false	mushroom_block_inside	0	180	0
+part	red_mushroom_block	west=false	mushroom_block_inside	0	270	0
+part	red_mushroom_block	up=false	mushroom_block_inside	270	0	0
+part	red_mushroom_block	down=false	mushroom_block_inside	90	0	0
+part	mushroom_stem	north=true	mushroom_stem	0	0	0
+part	mushroom_stem	east=true	mushroom_stem	0	90	1
+part	mushroom_stem	south=true	mushroom_stem	0	180	1
+part	mushroom_stem	west=true	mushroom_stem	0	270	1
+part	mushroom_stem	up=true	mushroom_stem	270	0	1
+part	mushroom_stem	down=true	mushroom_stem	90	0	1
+part	mushroom_stem	north=false	mushroom_block_inside	0	0	0
+part	mushroom_stem	east=false	mushroom_block_inside	0	90	0
+part	mushroom_stem	south=false	mushroom_block_inside	0	180	0
+part	mushroom_stem	west=false	mushroom_block_inside	0	270	0
+part	mushroom_stem	up=false	mushroom_block_inside	270	0	0
+part	mushroom_stem	down=false	mushroom_block_inside	90	0	0
+variant	mycelium	snowy=false	mycelium	0	0	0
+variant	mycelium	snowy=false	mycelium	0	90	0
+variant	mycelium	snowy=false	mycelium	0	180	0
+variant	mycelium	snowy=false	mycelium	0	270	0
+variant	mycelium	snowy=true	grass_block_snow	0	0	0
+variant	redstone_lamp	lit=false	redstone_lamp	0	0	0
+variant	redstone_lamp	lit=true	redstone_lamp_on	0	0	0
+variant	command_block	conditional=false,facing=down	command_block	90	0	0
+variant	command_block	conditional=false,facing=east	command_block	0	90	0
+variant	command_block	conditional=false,facing=north	command_block	0	0	0
+variant	command_block	conditional=false,facing=south	command_block	0	180	0
+variant	command_block	conditional=false,facing=up	command_block	270	0	0
+variant	command_block	conditional=false,facing=west	command_block	0	270	0
+variant	command_block	conditional=true,facing=down	command_block_conditional	90	0	0
+variant	command_block	conditional=true,facing=east	command_block_conditional	0	90	0
+variant	command_block	conditional=true,facing=north	command_block_conditional	0	0	0
+variant	command_block	conditional=true,facing=south	command_block_conditional	0	180	0
+variant	command_block	conditional=true,facing=up	command_block_conditional	270	0	0
+variant	command_block	conditional=true,facing=west	command_block_conditional	0	270	0
+variant	dropper	facing=down	dropper_vertical	180	0	0
+variant	dropper	facing=east	dropper	0	90	0
+variant	dropper	facing=north	dropper	0	0	0
+variant	dropper	facing=south	dropper	0	180	0
+variant	dropper	facing=up	dropper_vertical	0	0	0
+variant	dropper	facing=west	dropper	0	270	0
+variant	hay_block	axis=x	hay_block_horizontal	90	90	0
+variant	hay_block	axis=y	hay_block	0	0	0
+variant	hay_block	axis=z	hay_block_horizontal	90	0	0
+variant	repeating_command_block	conditional=false,facing=down	repeating_command_block	90	0	0
+variant	repeating_command_block	conditional=false,facing=east	repeating_command_block	0	90	0
+variant	repeating_command_block	conditional=false,facing=north	repeating_command_block	0	0	0
+variant	repeating_command_block	conditional=false,facing=south	repeating_command_block	0	180	0
+variant	repeating_command_block	conditional=false,facing=up	repeating_command_block	270	0	0
+variant	repeating_command_block	conditional=false,facing=west	repeating_command_block	0	270	0
+variant	repeating_command_block	conditional=true,facing=down	repeating_command_block_conditional	90	0	0
+variant	repeating_command_block	conditional=true,facing=east	repeating_command_block_conditional	0	90	0
+variant	repeating_command_block	conditional=true,facing=north	repeating_command_block_conditional	0	0	0
+variant	repeating_command_block	conditional=true,facing=south	repeating_command_block_conditional	0	180	0
+variant	repeating_command_block	conditional=true,facing=up	repeating_command_block_conditional	270	0	0
+variant	repeating_command_block	conditional=true,facing=west	repeating_command_block_conditional	0	270	0
+variant	chain_command_block	conditional=false,facing=down	chain_command_block	90	0	0
+variant	chain_command_block	conditional=false,facing=east	chain_command_block	0	90	0
+variant	chain_command_block	conditional=false,facing=north	chain_command_block	0	0	0
+variant	chain_command_block	conditional=false,facing=south	chain_command_block	0	180	0
+variant	chain_command_block	conditional=false,facing=up	chain_command_block	270	0	0
+variant	chain_command_block	conditional=false,facing=west	chain_command_block	0	270	0
+variant	chain_command_block	conditional=true,facing=down	chain_command_block_conditional	90	0	0
+variant	chain_command_block	conditional=true,facing=east	chain_command_block_conditional	0	90	0
+variant	chain_command_block	conditional=true,facing=north	chain_command_block_conditional	0	0	0
+variant	chain_command_block	conditional=true,facing=south	chain_command_block_conditional	0	180	0
+variant	chain_command_block	conditional=true,facing=up	chain_command_block_conditional	270	0	0
+variant	chain_command_block	conditional=true,facing=west	chain_command_block_conditional	0	270	0
+variant	observer	facing=down,powered=false	observer	90	0	0
+variant	observer	facing=down,powered=true	observer_on	90	0	0
+variant	observer	facing=east,powered=false	observer	0	90	0
+variant	observer	facing=east,powered=true	observer_on	0	90	0
+variant	observer	facing=north,powered=false	observer	0	0	0
+variant	observer	facing=north,powered=true	observer_on	0	0	0
+variant	observer	facing=south,powered=false	observer	0	180	0
+variant	observer	facing=south,powered=true	observer_on	0	180	0
+variant	observer	facing=up,powered=false	observer	270	0	0
+variant	observer	facing=up,powered=true	observer_on	270	0	0
+variant	observer	facing=west,powered=false	observer	0	270	0
+variant	observer	facing=west,powered=true	observer_on	0	270	0
+variant	white_glazed_terracotta	facing=east	white_glazed_terracotta	0	270	0
+variant	white_glazed_terracotta	facing=north	white_glazed_terracotta	0	180	0
+variant	white_glazed_terracotta	facing=south	white_glazed_terracotta	0	0	0
+variant	white_glazed_terracotta	facing=west	white_glazed_terracotta	0	90	0
+variant	orange_glazed_terracotta	facing=east	orange_glazed_terracotta	0	270	0
+variant	orange_glazed_terracotta	facing=north	orange_glazed_terracotta	0	180	0
+variant	orange_glazed_terracotta	facing=south	orange_glazed_terracotta	0	0	0
+variant	orange_glazed_terracotta	facing=west	orange_glazed_terracotta	0	90	0
+variant	magenta_glazed_terracotta	facing=east	magenta_glazed_terracotta	0	270	0
+variant	magenta_glazed_terracotta	facing=north	magenta_glazed_terracotta	0	180	0
+variant	magenta_glazed_terracotta	facing=south	magenta_glazed_terracotta	0	0	0
+variant	magenta_glazed_terracotta	facing=west	magenta_glazed_terracotta	0	90	0
+variant	light_blue_glazed_terracotta	facing=east	light_blue_glazed_terracotta	0	270	0
+variant	light_blue_glazed_terracotta	facing=north	light_blue_glazed_terracotta	0	180	0
+variant	light_blue_glazed_terracotta	facing=south	light_blue_glazed_terracotta	0	0	0
+variant	light_blue_glazed_terracotta	facing=west	light_blue_glazed_terracotta	0	90	0
+variant	yellow_glazed_terracotta	facing=east	yellow_glazed_terracotta	0	270	0
+variant	yellow_glazed_terracotta	facing=north	yellow_glazed_terracotta	0	180	0
+variant	yellow_glazed_terracotta	facing=south	yellow_glazed_terracotta	0	0	0
+variant	yellow_glazed_terracotta	facing=west	yellow_glazed_terracotta	0	90	0
+variant	lime_glazed_terracotta	facing=east	lime_glazed_terracotta	0	270	0
+variant	lime_glazed_terracotta	facing=north	lime_glazed_terracotta	0	180	0
+variant	lime_glazed_terracotta	facing=south	lime_glazed_terracotta	0	0	0
+variant	lime_glazed_terracotta	facing=west	lime_glazed_terracotta	0	90	0
+variant	pink_glazed_terracotta	facing=east	pink_glazed_terracotta	0	270	0
+variant	pink_glazed_terracotta	facing=north	pink_glazed_terracotta	0	180	0
+variant	pink_glazed_terracotta	facing=south	pink_glazed_terracotta	0	0	0
+variant	pink_glazed_terracotta	facing=west	pink_glazed_terracotta	0	90	0
+variant	gray_glazed_terracotta	facing=east	gray_glazed_terracotta	0	270	0
+variant	gray_glazed_terracotta	facing=north	gray_glazed_terracotta	0	180	0
+variant	gray_glazed_terracotta	facing=south	gray_glazed_terracotta	0	0	0
+variant	gray_glazed_terracotta	facing=west	gray_glazed_terracotta	0	90	0
+variant	light_gray_glazed_terracotta	facing=east	light_gray_glazed_terracotta	0	270	0
+variant	light_gray_glazed_terracotta	facing=north	light_gray_glazed_terracotta	0	180	0
+variant	light_gray_glazed_terracotta	facing=south	light_gray_glazed_terracotta	0	0	0
+variant	light_gray_glazed_terracotta	facing=west	light_gray_glazed_terracotta	0	90	0
+variant	cyan_glazed_terracotta	facing=east	cyan_glazed_terracotta	0	270	0
+variant	cyan_glazed_terracotta	facing=north	cyan_glazed_terracotta	0	180	0
+variant	cyan_glazed_terracotta	facing=south	cyan_glazed_terracotta	0	0	0
+variant	cyan_glazed_terracotta	facing=west	cyan_glazed_terracotta	0	90	0
+variant	purple_glazed_terracotta	facing=east	purple_glazed_terracotta	0	270	0
+variant	purple_glazed_terracotta	facing=north	purple_glazed_terracotta	0	180	0
+variant	purple_glazed_terracotta	facing=south	purple_glazed_terracotta	0	0	0
+variant	purple_glazed_terracotta	facing=west	purple_glazed_terracotta	0	90	0
+variant	blue_glazed_terracotta	facing=east	blue_glazed_terracotta	0	270	0
+variant	blue_glazed_terracotta	facing=north	blue_glazed_terracotta	0	180	0
+variant	blue_glazed_terracotta	facing=south	blue_glazed_terracotta	0	0	0
+variant	blue_glazed_terracotta	facing=west	blue_glazed_terracotta	0	90	0
+variant	brown_glazed_terracotta	facing=east	brown_glazed_terracotta	0	270	0
+variant	brown_glazed_terracotta	facing=north	brown_glazed_terracotta	0	180	0
+variant	brown_glazed_terracotta	facing=south	brown_glazed_terracotta	0	0	0
+variant	brown_glazed_terracotta	facing=west	brown_glazed_terracotta	0	90	0
+variant	green_glazed_terracotta	facing=east	green_glazed_terracotta	0	270	0
+variant	green_glazed_terracotta	facing=north	green_glazed_terracotta	0	180	0
+variant	green_glazed_terracotta	facing=south	green_glazed_terracotta	0	0	0
+variant	green_glazed_terracotta	facing=west	green_glazed_terracotta	0	90	0
+variant	red_glazed_terracotta	facing=east	red_glazed_terracotta	0	270	0
+variant	red_glazed_terracotta	facing=north	red_glazed_terracotta	0	180	0
+variant	red_glazed_terracotta	facing=south	red_glazed_terracotta	0	0	0
+variant	red_glazed_terracotta	facing=west	red_glazed_terracotta	0	90	0
+variant	black_glazed_terracotta	facing=east	black_glazed_terracotta	0	270	0
+variant	black_glazed_terracotta	facing=north	black_glazed_terracotta	0	180	0
+variant	black_glazed_terracotta	facing=south	black_glazed_terracotta	0	0	0
+variant	black_glazed_terracotta	facing=west	black_glazed_terracotta	0	90	0
+variant	barrel	facing=down,open=false	barrel	180	0	0
+variant	barrel	facing=down,open=true	barrel_open	180	0	0
+variant	barrel	facing=east,open=false	barrel	90	90	0
+variant	barrel	facing=east,open=true	barrel_open	90	90	0
+variant	barrel	facing=north,open=false	barrel	90	0	0
+variant	barrel	facing=north,open=true	barrel_open	90	0	0
+variant	barrel	facing=south,open=false	barrel	90	180	0
+variant	barrel	facing=south,open=true	barrel_open	90	180	0
+variant	barrel	facing=up,open=false	barrel	0	0	0
+variant	barrel	facing=up,open=true	barrel_open	0	0	0
+variant	barrel	facing=west,open=false	barrel	90	270	0
+variant	barrel	facing=west,open=true	barrel_open	90	270	0
+variant	structure_block	mode=corner	structure_block_corner	0	0	0
+variant	structure_block	mode=data	structure_block_data	0	0	0
+variant	structure_block	mode=load	structure_block_load	0	0	0
+variant	structure_block	mode=save	structure_block_save	0	0	0
+variant	test_block	mode=accept	test_block_accept	0	0	0
+variant	test_block	mode=fail	test_block_fail	0	0	0
+variant	test_block	mode=log	test_block_log	0	0	0
+variant	test_block	mode=start	test_block_start	0	0	0
+variant	bee_nest	facing=east,honey_level=0	bee_nest_empty	0	90	0
+variant	bee_nest	facing=east,honey_level=1	bee_nest_empty	0	90	0
+variant	bee_nest	facing=east,honey_level=2	bee_nest_empty	0	90	0
+variant	bee_nest	facing=east,honey_level=3	bee_nest_empty	0	90	0
+variant	bee_nest	facing=east,honey_level=4	bee_nest_empty	0	90	0
+variant	bee_nest	facing=east,honey_level=5	bee_nest_honey	0	90	0
+variant	bee_nest	facing=north,honey_level=0	bee_nest_empty	0	0	0
+variant	bee_nest	facing=north,honey_level=1	bee_nest_empty	0	0	0
+variant	bee_nest	facing=north,honey_level=2	bee_nest_empty	0	0	0
+variant	bee_nest	facing=north,honey_level=3	bee_nest_empty	0	0	0
+variant	bee_nest	facing=north,honey_level=4	bee_nest_empty	0	0	0
+variant	bee_nest	facing=north,honey_level=5	bee_nest_honey	0	0	0
+variant	bee_nest	facing=south,honey_level=0	bee_nest_empty	0	180	0
+variant	bee_nest	facing=south,honey_level=1	bee_nest_empty	0	180	0
+variant	bee_nest	facing=south,honey_level=2	bee_nest_empty	0	180	0
+variant	bee_nest	facing=south,honey_level=3	bee_nest_empty	0	180	0
+variant	bee_nest	facing=south,honey_level=4	bee_nest_empty	0	180	0
+variant	bee_nest	facing=south,honey_level=5	bee_nest_honey	0	180	0
+variant	bee_nest	facing=west,honey_level=0	bee_nest_empty	0	270	0
+variant	bee_nest	facing=west,honey_level=1	bee_nest_empty	0	270	0
+variant	bee_nest	facing=west,honey_level=2	bee_nest_empty	0	270	0
+variant	bee_nest	facing=west,honey_level=3	bee_nest_empty	0	270	0
+variant	bee_nest	facing=west,honey_level=4	bee_nest_empty	0	270	0
+variant	bee_nest	facing=west,honey_level=5	bee_nest_honey	0	270	0
+variant	beehive	facing=east,honey_level=0	beehive_empty	0	90	0
+variant	beehive	facing=east,honey_level=1	beehive_empty	0	90	0
+variant	beehive	facing=east,honey_level=2	beehive_empty	0	90	0
+variant	beehive	facing=east,honey_level=3	beehive_empty	0	90	0
+variant	beehive	facing=east,honey_level=4	beehive_empty	0	90	0
+variant	beehive	facing=east,honey_level=5	beehive_honey	0	90	0
+variant	beehive	facing=north,honey_level=0	beehive_empty	0	0	0
+variant	beehive	facing=north,honey_level=1	beehive_empty	0	0	0
+variant	beehive	facing=north,honey_level=2	beehive_empty	0	0	0
+variant	beehive	facing=north,honey_level=3	beehive_empty	0	0	0
+variant	beehive	facing=north,honey_level=4	beehive_empty	0	0	0
+variant	beehive	facing=north,honey_level=5	beehive_honey	0	0	0
+variant	beehive	facing=south,honey_level=0	beehive_empty	0	180	0
+variant	beehive	facing=south,honey_level=1	beehive_empty	0	180	0
+variant	beehive	facing=south,honey_level=2	beehive_empty	0	180	0
+variant	beehive	facing=south,honey_level=3	beehive_empty	0	180	0
+variant	beehive	facing=south,honey_level=4	beehive_empty	0	180	0
+variant	beehive	facing=south,honey_level=5	beehive_honey	0	180	0
+variant	beehive	facing=west,honey_level=0	beehive_empty	0	270	0
+variant	beehive	facing=west,honey_level=1	beehive_empty	0	270	0
+variant	beehive	facing=west,honey_level=2	beehive_empty	0	270	0
+variant	beehive	facing=west,honey_level=3	beehive_empty	0	270	0
+variant	beehive	facing=west,honey_level=4	beehive_empty	0	270	0
+variant	beehive	facing=west,honey_level=5	beehive_honey	0	270	0
+variant	sculk	-	sculk	0	0	0
+variant	sculk	-	sculk_mirrored	0	0	0
+variant	sculk	-	sculk	0	180	0
+variant	sculk	-	sculk_mirrored	0	180	0
+variant	sculk_catalyst	bloom=false	sculk_catalyst	0	0	0
+variant	sculk_catalyst	bloom=true	sculk_catalyst_bloom	0	0	0
+variant	copper_bulb	lit=false,powered=false	copper_bulb	0	0	0
+variant	copper_bulb	lit=false,powered=true	copper_bulb_powered	0	0	0
+variant	copper_bulb	lit=true,powered=false	copper_bulb_lit	0	0	0
+variant	copper_bulb	lit=true,powered=true	copper_bulb_lit_powered	0	0	0
+variant	exposed_copper_bulb	lit=false,powered=false	exposed_copper_bulb	0	0	0
+variant	exposed_copper_bulb	lit=false,powered=true	exposed_copper_bulb_powered	0	0	0
+variant	exposed_copper_bulb	lit=true,powered=false	exposed_copper_bulb_lit	0	0	0
+variant	exposed_copper_bulb	lit=true,powered=true	exposed_copper_bulb_lit_powered	0	0	0
+variant	weathered_copper_bulb	lit=false,powered=false	weathered_copper_bulb	0	0	0
+variant	weathered_copper_bulb	lit=false,powered=true	weathered_copper_bulb_powered	0	0	0
+variant	weathered_copper_bulb	lit=true,powered=false	weathered_copper_bulb_lit	0	0	0
+variant	weathered_copper_bulb	lit=true,powered=true	weathered_copper_bulb_lit_powered	0	0	0
+variant	oxidized_copper_bulb	lit=false,powered=false	oxidized_copper_bulb	0	0	0
+variant	oxidized_copper_bulb	lit=false,powered=true	oxidized_copper_bulb_powered	0	0	0
+variant	oxidized_copper_bulb	lit=true,powered=false	oxidized_copper_bulb_lit	0	0	0
+variant	oxidized_copper_bulb	lit=true,powered=true	oxidized_copper_bulb_lit_powered	0	0	0
+variant	waxed_copper_bulb	lit=false,powered=false	copper_bulb	0	0	0
+variant	waxed_copper_bulb	lit=false,powered=true	copper_bulb_powered	0	0	0
+variant	waxed_copper_bulb	lit=true,powered=false	copper_bulb_lit	0	0	0
+variant	waxed_copper_bulb	lit=true,powered=true	copper_bulb_lit_powered	0	0	0
+variant	waxed_exposed_copper_bulb	lit=false,powered=false	exposed_copper_bulb	0	0	0
+variant	waxed_exposed_copper_bulb	lit=false,powered=true	exposed_copper_bulb_powered	0	0	0
+variant	waxed_exposed_copper_bulb	lit=true,powered=false	exposed_copper_bulb_lit	0	0	0
+variant	waxed_exposed_copper_bulb	lit=true,powered=true	exposed_copper_bulb_lit_powered	0	0	0
+variant	waxed_weathered_copper_bulb	lit=false,powered=false	weathered_copper_bulb	0	0	0
+variant	waxed_weathered_copper_bulb	lit=false,powered=true	weathered_copper_bulb_powered	0	0	0
+variant	waxed_weathered_copper_bulb	lit=true,powered=false	weathered_copper_bulb_lit	0	0	0
+variant	waxed_weathered_copper_bulb	lit=true,powered=true	weathered_copper_bulb_lit_powered	0	0	0
+variant	waxed_oxidized_copper_bulb	lit=false,powered=false	oxidized_copper_bulb	0	0	0
+variant	waxed_oxidized_copper_bulb	lit=false,powered=true	oxidized_copper_bulb_powered	0	0	0
+variant	waxed_oxidized_copper_bulb	lit=true,powered=false	oxidized_copper_bulb_lit	0	0	0
+variant	waxed_oxidized_copper_bulb	lit=true,powered=true	oxidized_copper_bulb_lit_powered	0	0	0
+variant	infested_deepslate	axis=x	deepslate	90	90	0
+variant	infested_deepslate	axis=x	deepslate_mirrored	90	90	0
+variant	infested_deepslate	axis=x	deepslate	90	90	0
+variant	infested_deepslate	axis=x	deepslate_mirrored	90	90	0
+variant	infested_deepslate	axis=y	deepslate	0	0	0
+variant	infested_deepslate	axis=y	deepslate_mirrored	0	0	0
+variant	infested_deepslate	axis=y	deepslate	0	180	0
+variant	infested_deepslate	axis=y	deepslate_mirrored	0	180	0
+variant	infested_deepslate	axis=z	deepslate	90	0	0
+variant	infested_deepslate	axis=z	deepslate_mirrored	90	0	0
+variant	infested_deepslate	axis=z	deepslate	90	180	0
+variant	infested_deepslate	axis=z	deepslate_mirrored	90	180	0
+variant	crafter	crafting=false,orientation=down_east,triggered=false	crafter	90	90	0
+variant	crafter	crafting=false,orientation=down_east,triggered=true	crafter_triggered	90	90	0
+variant	crafter	crafting=false,orientation=down_north,triggered=false	crafter	90	0	0
+variant	crafter	crafting=false,orientation=down_north,triggered=true	crafter_triggered	90	0	0
+variant	crafter	crafting=false,orientation=down_south,triggered=false	crafter	90	180	0
+variant	crafter	crafting=false,orientation=down_south,triggered=true	crafter_triggered	90	180	0
+variant	crafter	crafting=false,orientation=down_west,triggered=false	crafter	90	270	0
+variant	crafter	crafting=false,orientation=down_west,triggered=true	crafter_triggered	90	270	0
+variant	crafter	crafting=false,orientation=east_up,triggered=false	crafter	0	90	0
+variant	crafter	crafting=false,orientation=east_up,triggered=true	crafter_triggered	0	90	0
+variant	crafter	crafting=false,orientation=north_up,triggered=false	crafter	0	0	0
+variant	crafter	crafting=false,orientation=north_up,triggered=true	crafter_triggered	0	0	0
+variant	crafter	crafting=false,orientation=south_up,triggered=false	crafter	0	180	0
+variant	crafter	crafting=false,orientation=south_up,triggered=true	crafter_triggered	0	180	0
+variant	crafter	crafting=false,orientation=up_east,triggered=false	crafter	270	270	0
+variant	crafter	crafting=false,orientation=up_east,triggered=true	crafter_triggered	270	270	0
+variant	crafter	crafting=false,orientation=up_north,triggered=false	crafter	270	180	0
+variant	crafter	crafting=false,orientation=up_north,triggered=true	crafter_triggered	270	180	0
+variant	crafter	crafting=false,orientation=up_south,triggered=false	crafter	270	0	0
+variant	crafter	crafting=false,orientation=up_south,triggered=true	crafter_triggered	270	0	0
+variant	crafter	crafting=false,orientation=up_west,triggered=false	crafter	270	90	0
+variant	crafter	crafting=false,orientation=up_west,triggered=true	crafter_triggered	270	90	0
+variant	crafter	crafting=false,orientation=west_up,triggered=false	crafter	0	270	0
+variant	crafter	crafting=false,orientation=west_up,triggered=true	crafter_triggered	0	270	0
+variant	crafter	crafting=true,orientation=down_east,triggered=false	crafter_crafting	90	90	0
+variant	crafter	crafting=true,orientation=down_east,triggered=true	crafter_crafting_triggered	90	90	0
+variant	crafter	crafting=true,orientation=down_north,triggered=false	crafter_crafting	90	0	0
+variant	crafter	crafting=true,orientation=down_north,triggered=true	crafter_crafting_triggered	90	0	0
+variant	crafter	crafting=true,orientation=down_south,triggered=false	crafter_crafting	90	180	0
+variant	crafter	crafting=true,orientation=down_south,triggered=true	crafter_crafting_triggered	90	180	0
+variant	crafter	crafting=true,orientation=down_west,triggered=false	crafter_crafting	90	270	0
+variant	crafter	crafting=true,orientation=down_west,triggered=true	crafter_crafting_triggered	90	270	0
+variant	crafter	crafting=true,orientation=east_up,triggered=false	crafter_crafting	0	90	0
+variant	crafter	crafting=true,orientation=east_up,triggered=true	crafter_crafting_triggered	0	90	0
+variant	crafter	crafting=true,orientation=north_up,triggered=false	crafter_crafting	0	0	0
+variant	crafter	crafting=true,orientation=north_up,triggered=true	crafter_crafting_triggered	0	0	0
+variant	crafter	crafting=true,orientation=south_up,triggered=false	crafter_crafting	0	180	0
+variant	crafter	crafting=true,orientation=south_up,triggered=true	crafter_crafting_triggered	0	180	0
+variant	crafter	crafting=true,orientation=up_east,triggered=false	crafter_crafting	270	270	0
+variant	crafter	crafting=true,orientation=up_east,triggered=true	crafter_crafting_triggered	270	270	0
+variant	crafter	crafting=true,orientation=up_north,triggered=false	crafter_crafting	270	180	0
+variant	crafter	crafting=true,orientation=up_north,triggered=true	crafter_crafting_triggered	270	180	0
+variant	crafter	crafting=true,orientation=up_south,triggered=false	crafter_crafting	270	0	0
+variant	crafter	crafting=true,orientation=up_south,triggered=true	crafter_crafting_triggered	270	0	0
+variant	crafter	crafting=true,orientation=up_west,triggered=false	crafter_crafting	270	90	0
+variant	crafter	crafting=true,orientation=up_west,triggered=true	crafter_crafting_triggered	270	90	0
+variant	crafter	crafting=true,orientation=west_up,triggered=false	crafter_crafting	0	270	0
+variant	crafter	crafting=true,orientation=west_up,triggered=true	crafter_crafting_triggered	0	270	0
