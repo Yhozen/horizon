@@ -125,7 +125,6 @@ blocks:minecraft:brown_stained_glass_pane
 blocks:minecraft:brown_wall_banner
 blocks:minecraft:brown_wool_slab
 blocks:minecraft:brown_wool_stairs
-blocks:minecraft:bubble_column
 blocks:minecraft:bubble_coral
 blocks:minecraft:bubble_coral_block
 blocks:minecraft:bubble_coral_fan
@@ -415,7 +414,6 @@ blocks:minecraft:lantern
 blocks:minecraft:lapis_ore
 blocks:minecraft:large_amethyst_bud
 blocks:minecraft:large_fern
-blocks:minecraft:lava
 blocks:minecraft:lava_cauldron
 blocks:minecraft:leaf_litter
 blocks:minecraft:lectern

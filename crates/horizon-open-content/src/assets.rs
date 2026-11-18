@@ -336,9 +336,20 @@ fn models(block: &Block, tinting: Tinting) -> (Vec<(String, Value)>, Option<Valu
             )
         }
         Faces::Fluid { still, .. } => {
-            // Fluids draw through the fluid renderer; the model gives particles.
-            let model = json!({"textures": {"particle": tex(still)}});
-            (vec![(format!("block/{id}"), model)], None)
+            // Fluids draw through the fluid renderer; the model, one per
+            // fluid as Minecraft's `block/water` and `block/lava`, gives
+            // particles. A bubble column uses water's.
+            let fluid = block.fluid().unwrap_or(id);
+            let models = if fluid == id {
+                let model = json!({"textures": {"particle": tex(still)}});
+                vec![(format!("block/{id}"), model)]
+            } else {
+                Vec::new()
+            };
+            (
+                models,
+                Some(json!({"variants": {"": {"model": format!("minecraft:block/{fluid}")}}})),
+            )
         }
         Faces::None => (Vec::new(), None),
     }
@@ -485,20 +496,13 @@ pub fn write(
             Origin::Generator("art"),
         )?;
     }
-    // The fluid renderer reads lava's sprites too; lava never appears, so
-    // these are plain original fills.
-    for name in ["lava_still", "lava_flow", "water_overlay"] {
-        let color = if name == "water_overlay" {
-            [40, 80, 200, 160]
-        } else {
-            [210, 90, 20, 255]
-        };
-        bundle.png(
-            format!("assets/minecraft/textures/block/{name}.png"),
-            &speckle(color),
-            Origin::Generator("art"),
-        )?;
-    }
+    // The fluid renderer also reads water's overlay (water seen through
+    // glass): a plain original fill, as the biome's water tint is white.
+    bundle.png(
+        "assets/minecraft/textures/block/water_overlay.png",
+        &speckle([40, 80, 200, 160]),
+        Origin::Generator("art"),
+    )?;
 
     // Items: definitions, prototypes and translations.
     let mut prototypes = BTreeMap::new();
