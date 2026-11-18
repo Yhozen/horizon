@@ -280,7 +280,7 @@ pub fn value<'a>(properties: &[(&str, &'a str)], key: &str) -> &'a str {
 
 /// The shapes of a cached shape table (`cached-collision.nbt`,
 /// `occlusion.nbt`), each written once: the empty shape and the full block
-/// first, as Minecraft's canonical shapes 1 and 2.
+/// first, as Minecraft's canonical shapes 1 and 2 (the others are 0).
 pub struct Table {
     shapes: Vec<Tag>,
     index: HashMap<String, i32>,
@@ -374,9 +374,9 @@ fn shape_tag(shape: &Shape, canonical: Option<i8>) -> Tag {
     let axes = shape.cube_coordinate_axes();
     let (min, max) = shape.discrete_bounds();
     let mut fields = Vec::new();
-    if let Some(c) = canonical {
-        fields.push(("canonical", Tag::Byte(c)));
-    }
+    // 0 for a shape that is neither of the canonical ones: the readers
+    // need the key on every shape to trust shape identities.
+    fields.push(("canonical", Tag::Byte(canonical.unwrap_or(0))));
     fields.extend([
         ("x", coords(Axis::X)),
         ("y", coords(Axis::Y)),
@@ -427,5 +427,16 @@ mod tests {
         }
         assert_eq!(table.cached, vec![0, 1, 2, 2]);
         assert_eq!(table.shapes.len(), 3);
+        // The readers trust shape identities only when every shape says
+        // whether it is canonical.
+        let canonical: Vec<_> = table.shapes.iter().map(|t| t.get("canonical")).collect();
+        assert_eq!(
+            canonical,
+            [
+                Some(&Tag::Byte(1)),
+                Some(&Tag::Byte(2)),
+                Some(&Tag::Byte(0))
+            ]
+        );
     }
 }
