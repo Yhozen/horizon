@@ -214,12 +214,38 @@ fn play_clientbound(id: i32) -> Rule {
         | cb::SET_CURSOR_ITEM
         | cb::SET_PLAYER_INVENTORY => rule(Policy::Translate, ITEMS),
         cb::UPDATE_ATTRIBUTES => rule(Policy::Translate, &["minecraft:attribute"]),
+        // Display ids renamed to the bundle's recipes (`recipes.rs`); recipe
+        // book categories and display kinds are the same registries on both
+        // sides, as the coverage file says.
+        cb::RECIPE_BOOK_ADD => rule(
+            Policy::Translate,
+            &[
+                "minecraft:item",
+                "minecraft:data_component_type",
+                "minecraft:recipe_book_category",
+                "minecraft:recipe_display",
+                "minecraft:slot_display",
+            ],
+        ),
+        cb::PLACE_GHOST_RECIPE => rule(
+            Policy::Translate,
+            &[
+                "minecraft:item",
+                "minecraft:data_component_type",
+                "minecraft:recipe_display",
+                "minecraft:slot_display",
+            ],
+        ),
+        cb::RECIPE_BOOK_REMOVE => TRANSLATE,
+        // Each book's open and filter flags.
+        cb::RECIPE_BOOK_SETTINGS => PASS,
         cb::OPEN_SCREEN => rule(Policy::Translate, &["minecraft:menu"]),
         // Everything else names something by a vanilla number the open
         // client would misread (sounds, particles, block entities, mob
-        // effects, recipes, advancements, tags, statistics, maps, trades,
+        // effects, advancements, tags, statistics, maps, trades,
         // explosions, waypoints, debug data) or is a packet it does not
-        // decode at all.
+        // decode at all (`update_recipes`: the open client reads none, it
+        // takes furnace fuels and stonecutter recipes from its bundle).
         _ => DROP,
     }
 }
@@ -229,6 +255,8 @@ fn play_serverbound(id: i32) -> Rule {
         // Read to follow the phase, then passed.
         sb::CONFIGURATION_ACKNOWLEDGED => TRANSLATE,
         sb::CONTAINER_CLICK | sb::SET_CREATIVE_MODE_SLOT => rule(Policy::Translate, ITEMS),
+        // Display ids back to the server's (`recipes.rs`).
+        sb::PLACE_RECIPE | sb::RECIPE_BOOK_SEEN_RECIPE => TRANSLATE,
         // The beacon's chosen effects.
         sb::SET_BEACON => rule(Policy::Pass, &["minecraft:mob_effect"]),
         // The debug renderers a client subscribes to (the open client sends none).

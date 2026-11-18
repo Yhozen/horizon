@@ -31,14 +31,10 @@ play/clientbound/map_item_data
 play/clientbound/merchant_offers
 play/clientbound/mount_screen_open
 play/clientbound/move_minecart_along_track
-play/clientbound/place_ghost_recipe
 play/clientbound/player_combat_end
 play/clientbound/player_combat_enter
 play/clientbound/player_look_at
 play/clientbound/post_effects
-play/clientbound/recipe_book_add
-play/clientbound/recipe_book_remove
-play/clientbound/recipe_book_settings
 play/clientbound/remove_mob_effect
 play/clientbound/resource_pack_pop
 play/clientbound/select_advancements_tab

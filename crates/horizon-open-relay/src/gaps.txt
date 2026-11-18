@@ -1,6 +1,12 @@
 # Built-in registry numbers the relay forwards as vanilla's (policy.rs): "packet registry",
 # sorted. Remove a line when the relay renumbers it or the packet stops carrying it.
+# The recipe registries are the same in the bundle as in vanilla (its coverage file lists none missing).
 play/clientbound/container_set_data minecraft:mob_effect
+play/clientbound/place_ghost_recipe minecraft:recipe_display
+play/clientbound/place_ghost_recipe minecraft:slot_display
+play/clientbound/recipe_book_add minecraft:recipe_book_category
+play/clientbound/recipe_book_add minecraft:recipe_display
+play/clientbound/recipe_book_add minecraft:slot_display
 play/clientbound/set_entity_data minecraft:villager_profession
 play/clientbound/set_entity_data minecraft:villager_type
 play/serverbound/debug_subscription_request minecraft:debug_subscription

@@ -5293,6 +5293,9 @@ impl Game<'_> {
         }
     }
     fn craft_result(&self) -> Option<ItemStack> {
+        if let Some(result) = self.server_craft_result() {
+            return result;
+        }
         self.craft_recipe().map(|(_, result)| result)
     }
     /// The recipe id and result of the crafting grid.
@@ -5954,6 +5957,11 @@ impl Game<'_> {
             .collect();
         let carried = self.carried.clone();
         let creative = self.creative;
+        let server_result = if plain_map.is_some() {
+            self.server_craft_result()
+        } else {
+            None
+        };
         // CreativeModeInventoryScreen clicks the menu itself and sends every
         // changed slot, which the server sets by player.
         let equipment_before = (self.screen == Screen::Creative).then(|| self.player_equipment());
@@ -6034,6 +6042,11 @@ impl Game<'_> {
             menu.set_player_item(40, self.offhand.clone());
         }
         menu.settle(&env);
+        if let Some(result) = server_result {
+            // The click is predicted on the server's result (taking it
+            // empties the slot until the server sends the next).
+            menu.set_slot(&env, 0, result);
+        }
         if kind == Kind::Loom
             && let Some((selected, patterns)) = station_menu
         {

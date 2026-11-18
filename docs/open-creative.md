@@ -398,8 +398,14 @@ translates every packet:
   is never spawned for the open player, and its later packets are dropped.
 - **Attributes**: renumbered by name to the bundle's `attributes.json` order (the open wire ids);
   attributes the bundle lacks are dropped, so none is read as another.
-- **Dropped**: sounds, particles, block entities (sign text, chest lids), mob effects, recipes and
-  the recipe book, advancements, tags, statistics, maps, trades, explosions (no knockback),
+- **Recipe book**: the server numbers its recipe displays in its own recipe order, the open client
+  in the bundle's (`data/minecraft/recipe`, by name). Each display the server sends takes the id
+  of the bundle's recipe that draws the same (shape, ingredients, result: `recipes.rs`); the others
+  are left out, so the book never shows one recipe and places another. Picks from the book go back
+  by the server's id. Crafting itself is the server's: the open client shows the result slot the
+  server sends, so every Java recipe crafts, in the book or not.
+- **Dropped**: sounds, particles, block entities (sign text, chest lids), mob effects, the server's
+  recipe list (`update_recipes`: the open client reads none), advancements, tags, statistics, maps, trades, explosions (no knockback),
   waypoints, transfers and dialogs. Chat, commands, the tab list, scoreboards, titles, time, health,
   hunger and experience pass unchanged.
 - **Brand**: the server's `minecraft:brand` becomes the bundle's open brand, so open clients stay.
@@ -412,7 +418,8 @@ translates every packet:
 `policy.rs` holds what happens to each packet, in both directions: passed, passed unless its entity
 is hidden, translated, or dropped. Its test walks every packet id of the protocol: the dropped
 packets must equal `src/dropped.txt`, and every built-in registry a forwarded packet still holds in
-vanilla numbers must be listed in `src/gaps.txt` (beacon effects, villager data). Change a packet's
+vanilla numbers must be listed in `src/gaps.txt` (beacon effects, villager data, the recipe
+display kinds and book categories, which the bundle numbers as vanilla does). Change a packet's
 handling and update the list in the same change.
 
 Limits: the world looks approximate (stairs and slabs are full blocks, so the open client predicts

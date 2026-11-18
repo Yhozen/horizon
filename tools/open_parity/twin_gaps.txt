@@ -1141,11 +1141,6 @@ entities:minecraft:zombie_horse
 entities:minecraft:zombie_nautilus
 entities:minecraft:zombie_villager
 entities:minecraft:zombified_piglin
-furnace:crafted
-furnace:grid
-furnace:held
-furnace:placed
-furnace:placed on server
 furnace:recipe book
 items:minecraft:acacia_button
 items:minecraft:acacia_door

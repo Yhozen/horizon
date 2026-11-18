@@ -9,8 +9,10 @@
 //! the relay"): block states in chunks and block updates, items everywhere a
 //! stack travels, entity types (a creature the bundle lacks shows as its
 //! stand-in, `rules::stand_in`, or is never spawned, its later packets dropped
-//! too), menu types, attributes, and the server brand.
+//! too), menu types, attributes, recipe book displays (`recipes.rs`), and the
+//! server brand.
 use crate::policy::{EntityId, Policy, policy};
+use crate::recipes::Displays;
 use crate::rules;
 use crate::tables::Tables;
 use horizon_protocol::{
@@ -20,7 +22,10 @@ use horizon_protocol::{
     entity_data::{Value, serializer},
     ids::{configuration::clientbound as cfg_cb, play::clientbound as cb, play::serverbound as sb},
     item::{Component, Hashed, Stack, component},
-    packets::{configuration as cfg, play},
+    packets::{
+        configuration as cfg, play,
+        recipes::{HolderSet, RecipeDisplay, SlotDisplay},
+    },
     registry::{DimensionType, Dynamic, ceil_log2},
 };
 use horizon_world::nbt::{JavaString, Tag};
@@ -77,6 +82,8 @@ pub struct Clientbound<'t> {
     hidden: HashSet<i32>,
     /// Entities shown as a stand-in (`rules::stand_in`): only their shared data passes.
     standing_in: HashSet<i32>,
+    /// Recipe display ids learnt, shared with the serverbound side.
+    displays: Displays,
     pub counts: Counts,
 }
 
@@ -93,8 +100,16 @@ impl<'t> Clientbound<'t> {
             biome_bits: 0,
             hidden: HashSet::new(),
             standing_in: HashSet::new(),
+            displays: Displays::default(),
             counts: Counts::default(),
         }
+    }
+
+    /// The recipe display ids are learnt into `displays` (shared with the
+    /// connection's `Serverbound`).
+    pub fn with_displays(mut self, displays: Displays) -> Self {
+        self.displays = displays;
+        self
     }
 
     /// The body to send the open player for this server packet, if any.
@@ -343,8 +358,175 @@ impl<'t> Clientbound<'t> {
                 _ => None,
             },
             cb::COMMANDS if self.t.commands_compatible => Some(body(id, payload)),
+            // The displays the bundle has a recipe for, by its display ids;
+            // the rest are left out (`recipes.rs`).
+            cb::RECIPE_BOOK_ADD => match typed()? {
+                C::RecipeBookAdd(mut p) => {
+                    let mut displays = self.displays.lock().map_err(|e| e.to_string())?;
+                    if p.replace {
+                        displays.clear();
+                    }
+                    let name = |id: i32| self.t.vanilla_items.name(id).map(String::from);
+                    p.entries = p
+                        .entries
+                        .into_iter()
+                        .filter_map(|mut e| {
+                            let open = self.t.book.display(&e.display, &name)?;
+                            displays.learn(e.id, open);
+                            e.id = open;
+                            e.display = self.display(e.display);
+                            e.requirements = e
+                                .requirements
+                                .map(|r| r.into_iter().map(|h| self.holder_set(h)).collect());
+                            Some(e)
+                        })
+                        .collect();
+                    (p.replace || !p.entries.is_empty()).then(|| C::RecipeBookAdd(p).encode())
+                }
+                _ => None,
+            },
+            cb::RECIPE_BOOK_REMOVE => match typed()? {
+                C::RecipeBookRemove(mut p) => {
+                    let mut displays = self.displays.lock().map_err(|e| e.to_string())?;
+                    p.ids = p
+                        .ids
+                        .into_iter()
+                        .filter_map(|i| displays.forget(i))
+                        .collect();
+                    (!p.ids.is_empty()).then(|| C::RecipeBookRemove(p).encode())
+                }
+                _ => None,
+            },
+            cb::PLACE_GHOST_RECIPE => match typed()? {
+                C::PlaceGhostRecipe(mut p) => {
+                    p.display = self.display(p.display);
+                    Some(C::PlaceGhostRecipe(p).encode())
+                }
+                _ => None,
+            },
             _ => None,
         })
+    }
+
+    /// A recipe display with its items and components in open numbering;
+    /// what the bundle lacks shows empty.
+    fn display(&self, d: RecipeDisplay) -> RecipeDisplay {
+        let s = |s: SlotDisplay| self.slot_display(s);
+        let all = |l: Vec<SlotDisplay>| l.into_iter().map(|d| self.slot_display(d)).collect();
+        match d {
+            RecipeDisplay::Shapeless {
+                ingredients,
+                result,
+                station,
+            } => RecipeDisplay::Shapeless {
+                ingredients: all(ingredients),
+                result: s(result),
+                station: s(station),
+            },
+            RecipeDisplay::Shaped {
+                width,
+                height,
+                ingredients,
+                result,
+                station,
+            } => RecipeDisplay::Shaped {
+                width,
+                height,
+                ingredients: all(ingredients),
+                result: s(result),
+                station: s(station),
+            },
+            RecipeDisplay::Furnace {
+                ingredient,
+                fuel,
+                result,
+                station,
+                duration,
+                experience,
+            } => RecipeDisplay::Furnace {
+                ingredient: s(ingredient),
+                fuel: s(fuel),
+                result: s(result),
+                station: s(station),
+                duration,
+                experience,
+            },
+            RecipeDisplay::Stonecutter {
+                input,
+                result,
+                station,
+            } => RecipeDisplay::Stonecutter {
+                input: s(input),
+                result: s(result),
+                station: s(station),
+            },
+            RecipeDisplay::Smithing {
+                template,
+                base,
+                addition,
+                result,
+                station,
+            } => RecipeDisplay::Smithing {
+                template: s(template),
+                base: s(base),
+                addition: s(addition),
+                result: s(result),
+                station: s(station),
+            },
+        }
+    }
+
+    fn slot_display(&self, d: SlotDisplay) -> SlotDisplay {
+        let inner = |d: Box<SlotDisplay>| Box::new(self.slot_display(*d));
+        match d {
+            SlotDisplay::Item(id) => match self.t.item(id) {
+                Some(target) => SlotDisplay::Item(target.id),
+                None => SlotDisplay::Empty,
+            },
+            SlotDisplay::ItemStack(stack) => match self.stack(Some(stack)) {
+                Some(stack) => SlotDisplay::ItemStack(stack),
+                None => SlotDisplay::Empty,
+            },
+            SlotDisplay::Tag(h) => SlotDisplay::Tag(self.holder_set(h)),
+            SlotDisplay::WithAnyPotion(d) => SlotDisplay::WithAnyPotion(inner(d)),
+            SlotDisplay::OnlyWithComponent(d, kind) => match self.t.component(kind) {
+                Some(kind) => SlotDisplay::OnlyWithComponent(inner(d), kind),
+                None => SlotDisplay::Empty,
+            },
+            SlotDisplay::Dyed { dye, target } => SlotDisplay::Dyed {
+                dye: inner(dye),
+                target: inner(target),
+            },
+            SlotDisplay::SmithingTrim {
+                base,
+                material,
+                pattern,
+            } => SlotDisplay::SmithingTrim {
+                base: inner(base),
+                material: inner(material),
+                pattern,
+            },
+            SlotDisplay::WithRemainder { input, remainder } => SlotDisplay::WithRemainder {
+                input: inner(input),
+                remainder: inner(remainder),
+            },
+            SlotDisplay::Composite(list) => {
+                SlotDisplay::Composite(list.into_iter().map(|d| self.slot_display(d)).collect())
+            }
+            d @ (SlotDisplay::Empty | SlotDisplay::AnyFuel) => d,
+        }
+    }
+
+    /// Item ids in open numbering (a tag keeps its name).
+    fn holder_set(&self, h: HolderSet) -> HolderSet {
+        match h {
+            HolderSet::Items(ids) => HolderSet::Items(
+                ids.into_iter()
+                    .filter_map(|i| self.t.item(i).map(|t| t.id))
+                    .collect(),
+            ),
+            tag => tag,
+        }
     }
 
     /// A chunk column in open numbering: every section's block states
@@ -478,13 +660,27 @@ impl<'t> Clientbound<'t> {
 pub struct Serverbound<'t> {
     t: &'t Tables,
     pub phase: Phase,
+    /// Recipe display ids the clientbound side learnt.
+    displays: Displays,
 }
 impl<'t> Serverbound<'t> {
     pub fn new(t: &'t Tables) -> Self {
         Self {
             t,
             phase: Phase::Configuration,
+            displays: Displays::default(),
         }
+    }
+
+    /// Recipe display ids from the connection's `Clientbound`.
+    pub fn with_displays(mut self, displays: Displays) -> Self {
+        self.displays = displays;
+        self
+    }
+
+    /// The server's display id for an open one (none: never sent as one).
+    fn display_back(&self, open: i32) -> Option<i32> {
+        self.displays.lock().ok()?.to_server(open)
     }
 
     pub fn translate(&mut self, id: i32, payload: &[u8]) -> Option<Vec<u8>> {
@@ -521,6 +717,20 @@ impl<'t> Serverbound<'t> {
                 }
                 _ => None,
             },
+            // The recipe the player picked in the book, by the server's id.
+            sb::PLACE_RECIPE => match S::decode(id, payload).ok()? {
+                S::PlaceRecipe(mut p) => {
+                    p.recipe = self.display_back(p.recipe)?;
+                    Some(S::PlaceRecipe(p).encode())
+                }
+                _ => None,
+            },
+            sb::RECIPE_BOOK_SEEN_RECIPE => {
+                let open = Reader::new(payload).varint().ok()?;
+                let mut w = Writer::new();
+                w.varint(self.display_back(open)?);
+                Some(body(id, &w.data))
+            }
             sb::SET_CREATIVE_MODE_SLOT => match S::decode(id, payload).ok()? {
                 S::SetCreativeModeSlot(mut p) => {
                     p.item = p.item.take().and_then(|s| self.stack_back(s));

@@ -562,3 +562,86 @@ fn clicks_send_component_ids_back() {
     let carried = p.carried.unwrap();
     assert_eq!((carried.added, carried.removed), (vec![(1, 123)], vec![0]));
 }
+
+/// Recipe book displays take the id of the bundle's recipe that draws the
+/// same, the rest are left out, and the player's pick goes back by the
+/// server's id.
+#[test]
+fn recipe_displays_take_the_bundle_ids_and_picks_go_back() {
+    use horizon_protocol::packets::recipes::{
+        PlaceRecipe, RecipeBookAdd, RecipeBookEntry, RecipeBookRemove, RecipeDisplay, SlotDisplay,
+    };
+    let mut t = tables();
+    let recipes = [
+        (
+            "minecraft:a_stone",
+            serde_json::json!({"type": "minecraft:crafting_shapeless",
+                "ingredients": ["minecraft:oak_log"], "result": {"id": "minecraft:stone"}}),
+        ),
+        (
+            "minecraft:b_other",
+            serde_json::json!({"type": "minecraft:crafting_shapeless",
+                "ingredients": ["minecraft:stone"], "result": {"id": "minecraft:oak_log"}}),
+        ),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v))
+    .collect();
+    t.book = crate::recipes::OpenBook::from_recipes(&recipes);
+    let displays = crate::recipes::Displays::default();
+    let mut c = playing(&t).with_displays(displays.clone());
+    let mut s = Serverbound::new(&t).with_displays(displays);
+    assert!(s.translate(3, &[]).is_some(), "finish configuration");
+    // Vanilla items: 1 stone, 3 oak_log, 4 torch; open: 1 stone, 2 oak_log.
+    let entry = |id, ingredient, result| RecipeBookEntry {
+        id,
+        display: RecipeDisplay::Shapeless {
+            ingredients: vec![SlotDisplay::Item(ingredient)],
+            result: SlotDisplay::ItemStack(Stack::new(result, 1)),
+            station: SlotDisplay::Empty,
+        },
+        group: 0,
+        category: 2,
+        requirements: None,
+        flags: 0,
+    };
+    let add = play::Clientbound::RecipeBookAdd(RecipeBookAdd {
+        entries: vec![entry(7, 3, 1), entry(8, 4, 1), entry(9, 1, 3)],
+        replace: true,
+    });
+    let play::Clientbound::RecipeBookAdd(out) = decode(send(&mut c, add)) else {
+        panic!()
+    };
+    assert_eq!(out.entries.len(), 2, "the torch recipe is not the bundle's");
+    assert_eq!((out.entries[0].id, out.entries[1].id), (0, 1));
+    let RecipeDisplay::Shapeless { ingredients, .. } = &out.entries[0].display else {
+        panic!()
+    };
+    assert_eq!(ingredients, &vec![SlotDisplay::Item(2)], "open oak_log");
+    let pick = |s: &mut Serverbound, recipe| {
+        let (id, payload) = split(
+            &play::Serverbound::PlaceRecipe(PlaceRecipe {
+                container: 1,
+                recipe,
+                use_max: false,
+            })
+            .encode(),
+        );
+        s.translate(id, &payload).map(|out| {
+            let (id, payload) = split(&out);
+            match play::Serverbound::decode(id, &payload).unwrap() {
+                play::Serverbound::PlaceRecipe(p) => p.recipe,
+                _ => panic!(),
+            }
+        })
+    };
+    assert_eq!(pick(&mut s, 0), Some(7));
+    assert_eq!(pick(&mut s, 1), Some(9));
+    assert_eq!(pick(&mut s, 5), None, "never sent");
+    let remove = play::Clientbound::RecipeBookRemove(RecipeBookRemove { ids: vec![8, 9] });
+    let play::Clientbound::RecipeBookRemove(out) = decode(send(&mut c, remove)) else {
+        panic!()
+    };
+    assert_eq!(out.ids, vec![1]);
+    assert_eq!(pick(&mut s, 1), None, "removed");
+}
