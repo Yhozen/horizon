@@ -680,8 +680,47 @@ pub fn vanilla() -> Vec<VanillaItem> {
         .collect()
 }
 
+/// Minecraft's default components of a block's item (`blocks` in
+/// `data/items/defaults.json`), without the name and model `assets` adds;
+/// none for a name that has no block item there.
+pub fn block_item_components(id: &str) -> Option<serde_json::Map<String, Value>> {
+    static DATA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    let data =
+        DATA.get_or_init(|| serde_json::from_str(DEFAULTS).expect("data/items/defaults.json"));
+    let entry = data["blocks"].get(id)?;
+    let mut components = data["base"].as_object().cloned().unwrap_or_default();
+    for (k, v) in entry["components"].as_object()? {
+        if v.is_null() {
+            components.remove(k);
+        } else {
+            components.insert(k.clone(), v.clone());
+        }
+    }
+    Some(components)
+}
+
 #[cfg(test)]
 mod vanilla_tests {
+    #[test]
+    fn block_items_have_minecraft_defaults() {
+        let planks = super::block_item_components("oak_planks").unwrap();
+        assert_eq!(planks["minecraft:max_stack_size"], 64);
+        assert_eq!(
+            planks["minecraft:cooking_fuel"]["burn_time"],
+            "minecraft:cooking/time_wood_blocks"
+        );
+        assert_eq!(
+            planks["minecraft:break_sound"],
+            "minecraft:entity.item.break"
+        );
+        let bed = super::block_item_components("white_bed").unwrap();
+        assert_eq!(bed["minecraft:max_stack_size"], 1);
+        assert!(
+            super::block_item_components("stick").is_none(),
+            "not a block"
+        );
+    }
+
     #[test]
     fn rotten_flesh_has_minecraft_food_values() {
         let items = super::vanilla();
