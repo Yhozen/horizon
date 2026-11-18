@@ -50,11 +50,13 @@ def read_open_content():
             path.read_bytes()
 
 
-def run_probes(binary, out):
-    """Both folders at once: vanilla's prepared resources and a freshly built open bundle."""
+def run_probes(binary, out, open_root=None):
+    """Both folders at once: vanilla's prepared resources and a freshly built open bundle (or the
+    bundle already prepared in `open_root`)."""
+    source = [str(open_root)] if open_root else ['--open']
     jobs = {
         'vanilla': subprocess.Popen([str(binary), str(RESOURCES), str(out / 'vanilla.json')]),
-        'open': subprocess.Popen([str(binary), '--open', str(out / 'open.json')]),
+        'open': subprocess.Popen([str(binary), *source, str(out / 'open.json')]),
     }
     for name, job in jobs.items():
         if job.wait():
@@ -136,6 +138,8 @@ def main():
     parser.add_argument('--write-gaps', action='store_true', help='rewrite the gap lists from this run')
     parser.add_argument('--examples', type=int, default=10, help='failures shown per kind and category')
     parser.add_argument('--bin-dir', help='a cargo profile directory with a built probe (default: build it)')
+    parser.add_argument('--open-root', help='compare this prepared open bundle (horizon-prepare open --out DIR) '
+                        'instead of building one in the probe, so a probe built once serves generator changes')
     args = parser.parse_args()
     if not (RESOURCES / 'facts.json').exists():
         sys.exit(f'{RESOURCES} is missing: prepare the vanilla resources first (docs/parity-workflow.md)')
@@ -148,7 +152,7 @@ def main():
         binary = lab.cargo_target() / 'fast' / 'examples' / PROBE
     built = time.monotonic()
     with tempfile.TemporaryDirectory(prefix='open-tables-') as out:
-        docs = run_probes(binary, Path(out))
+        docs = run_probes(binary, Path(out), args.open_root and Path(args.open_root).resolve())
     ran = time.monotonic()
     rows, failures = compare(docs['vanilla'], docs['open'], args.write_gaps, args.examples)
     print_scoreboard(rows)
