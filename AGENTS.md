@@ -26,6 +26,8 @@ Feature → files → harness for the most-changed areas: [docs/architecture.md]
 - Small PRs (< ~500 lines). Labels: `feature` (players get something new), `skip-release` (they see no
   change), none for a fix. Agents never add `release-now`: the maintainer decides it. Merges ship in batches of 5, or after
   6 hours ([docs/release-flow.md](docs/release-flow.md)).
+- **This fork is MIT; upstream is LGPL since `fb1135c6020`.** Never copy upstream code, tests or comments
+  from after that commit ([UPSTREAM.md](UPSTREAM.md#licence-boundary-imports-stopped)).
 - Contributors first: `gh pr list --state open --search <area>` before you start; never duplicate theirs.
 
 ## Crates

@@ -181,6 +181,9 @@ pub(super) struct Remote {
     /// Inventory, off hand and armour as last synchronised, for creative-mode
     /// slot updates (`creative_sync_stacks`).
     synced: Vec<Option<ItemStack>>,
+    /// The wire form of stacks the server sent that carry components, by what
+    /// they decoded to, so creative slot updates send them back whole.
+    wire_stacks: std::cell::RefCell<WireStacks>,
     decode_errors: u32,
     clock: Option<i32>,
     /// `ClientClockManager.ClientClockInstance`'s rate and partial tick for
@@ -432,6 +435,7 @@ impl Game<'_> {
             death_message: None,
             player_type,
             synced: vec![None; CREATIVE_SYNCED],
+            wire_stacks: Default::default(),
             decode_errors: 0,
             clock: None,
             clock_rate: 1.0,
@@ -601,6 +605,9 @@ impl Game<'_> {
             *out.data_mut() = *data;
         }
         out.tidy();
+        if let Some(r) = self.remote.as_ref() {
+            r.wire_stacks.borrow_mut().remember(&out, s);
+        }
         Some(out)
     }
     /// The item's patched components as vanilla's `components` compound.
@@ -721,6 +728,16 @@ impl Game<'_> {
     }
     fn to_network(&self, s: &Option<ItemStack>) -> Option<Stack> {
         let s = s.as_ref()?;
+        // A vanilla client sends back the whole stack it holds. Ours decodes
+        // only some components, so a stack the server sent goes back in its
+        // wire form: its enchantments, names, contents and the rest stay.
+        if let Some(stack) = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.wire_stacks.borrow_mut().find(s))
+        {
+            return Some(stack);
+        }
         let mut stack = Stack::new(self.item_id(&s.item), s.count as i32);
         if s.damage > 0 {
             stack.added.push((
@@ -5438,6 +5455,44 @@ fn in_storage_range(view_distance: i32, center: (i32, i32), x: i32, z: i32) -> b
     x.abs_diff(center.0) <= range && z.abs_diff(center.1) <= range
 }
 
+/// Recently received stacks that carry components, by the [`ItemStack`] each
+/// decoded to (count 1), newest last. Creative slot updates (`to_network`)
+/// look a stack up here so the server gets back what it sent, components this
+/// client doesn't decode included.
+#[derive(Default)]
+struct WireStacks(Vec<(ItemStack, Stack)>);
+impl WireStacks {
+    /// Enough for a full inventory, an open container and the creative screen's
+    /// carried stack with room to spare.
+    const CAPACITY: usize = 256;
+    fn key(s: &ItemStack) -> ItemStack {
+        let mut key = s.clone();
+        key.count = 1;
+        key
+    }
+    fn remember(&mut self, decoded: &ItemStack, wire: &Stack) {
+        if wire.added.is_empty() && wire.removed.is_empty() {
+            return;
+        }
+        let key = Self::key(decoded);
+        self.0.retain(|(k, _)| *k != key);
+        if self.0.len() >= Self::CAPACITY {
+            self.0.remove(0);
+        }
+        self.0.push((key, wire.clone()));
+    }
+    /// The wire form of `s` with its count, if the server sent one like it.
+    fn find(&mut self, s: &ItemStack) -> Option<Stack> {
+        let key = Self::key(s);
+        let at = self.0.iter().rposition(|(k, _)| *k == key)?;
+        let entry = self.0.remove(at);
+        let mut stack = entry.1.clone();
+        stack.count = s.count as i32;
+        self.0.push(entry);
+        Some(stack)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -5458,6 +5513,44 @@ mod tests {
     }
 
     use super::Game;
+
+    /// A stack the server sent goes back whole, with the count it has now;
+    /// one it never sent, or one changed here, does not match.
+    #[test]
+    fn creative_updates_send_received_stacks_back_whole() {
+        use super::{ItemStack, Stack, WireStacks};
+        use horizon_protocol::item::Component;
+        let mut wire = Stack::new(7, 1);
+        wire.added.push((79, Component::Raw(vec![1, 2, 3])));
+        wire.removed.push(5);
+        let mut decoded = ItemStack::new("minecraft:beehive", 1);
+        let mut stacks = WireStacks::default();
+        stacks.remember(&decoded, &Stack::new(7, 1));
+        assert!(
+            stacks.find(&decoded).is_none(),
+            "no components: nothing kept"
+        );
+        stacks.remember(&decoded, &wire);
+        decoded.count = 3;
+        let sent = stacks.find(&decoded).unwrap();
+        assert_eq!((sent.item, sent.count), (7, 3));
+        assert_eq!(
+            (sent.added, sent.removed),
+            (wire.added.clone(), wire.removed.clone())
+        );
+        decoded.damage = 1;
+        assert!(stacks.find(&decoded).is_none());
+        assert!(stacks.find(&ItemStack::new("minecraft:stone", 1)).is_none());
+        for i in 0..WireStacks::CAPACITY {
+            stacks.remember(&ItemStack::new(&format!("minecraft:item_{i}"), 1), &wire);
+        }
+        assert_eq!(stacks.0.len(), WireStacks::CAPACITY);
+        assert!(
+            stacks
+                .find(&ItemStack::new("minecraft:beehive", 1))
+                .is_none()
+        );
+    }
 
     /// Number keys and Q can arrive before the next simulation tick. Exercise
     /// their real input path, including prediction and the remembered wire slot.
