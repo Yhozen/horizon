@@ -105,8 +105,8 @@ The checks live at the boundaries, not through the game:
   when both sides number argument types alike; without one, `OPEN_COMMANDS`), the Nether and End
   load with the sky, fog and light of the server's dimension type (the bundle's biomes are the
   overworld's, so biome colours are left out there), and the pause menu offers Advancements once
-  the server sends them (the relay drops them today: their icons are Minecraft item numbers, and
-  the bundle has no advancement window art yet).
+  the server sends ones to display (the relay translates their icons; the bundle draws the screen
+  with its own art, `art_advancements.rs`).
 
 ## Preparing the bundle
 
@@ -131,6 +131,7 @@ The generator is `crates/horizon-open-content`:
 | `tables.rs` | the per-state tables (`facts.json`, `gameplay-facts.json`, `block-behaviours.json`, shapes, movement, tags), the biome, dimension and day cycle, player attributes, damage types, loot |
 | `assets.rs` | textures, block states, models (its own display transforms, `item/generated` and `item/handheld`), items, the creative palette (`creative-inventory.json`) |
 | `art.rs` | original art: bedrock, breaking cracks, the interface, sun, moon, clouds, the player's model and skin |
+| `art_advancements.rs` | original art: the advancements window, its tabs on every side, the task, goal and challenge frames, the title and description boxes, and the five tab backgrounds vanilla's advancements name |
 | `art_survival.rs` | original art: hearts (every kind the HUD draws), food, air, armour, experience and jump bars, the inventory, crafting table, recipe book and game-mode switcher screens, empty equipment slots, toasts, menu icons, world and server list icons, statistics headers, the vignette, the title's wordmark and panorama, the crafting table's faces |
 | `lang.rs` | the English interface text: hand-written labels (menus, survival, death messages, joining and leaving, statistics, the allowed commands' replies and errors), then a line for every key Minecraft's English has: every block, item, entity, effect, attribute and statistic named by its id title-cased (from `data/registries/`, a short table where that reads wrong), and every other key of `data/lang/keys.txt` (written by `tools/open_lang_keys.py`: keys and their placeholders, no text) worded by rules on the key. Each line keeps Minecraft's placeholders in Minecraft's order |
 | `sources.rs` | `content/open/sources.json`: inputs, checksums, credits and notices |
@@ -487,8 +488,12 @@ translates every packet:
   are left out, so the book never shows one recipe and places another. Picks from the book go back
   by the server's id. Crafting itself is the server's: the open client shows the result slot the
   server sends, so every Java recipe crafts, in the book or not.
+- **Advancements**: `update_advancements` passes with each displayed advancement's icon translated
+  as any stack is (a vanilla item the bundle lacks shows as its stand-in, named as vanilla's);
+  titles, descriptions, backgrounds (`gui/advancements/backgrounds/*`, drawn by the bundle) and
+  progress pass as sent, and so does `select_advancements_tab` (an id, no number).
 - **Dropped**: sounds, particles, block entities (sign text, chest lids), mob effects, the server's
-  recipe list (`update_recipes`: the open client reads none), advancements, tags, statistics, maps, trades, explosions (no knockback),
+  recipe list (`update_recipes`: the open client reads none), tags, statistics, maps, trades, explosions (no knockback),
   waypoints, transfers and dialogs. Chat, commands, the tab list, scoreboards, titles, time, health,
   hunger and experience pass unchanged.
 - **Brand**: the server's `minecraft:brand` becomes the bundle's open brand, so open clients stay.

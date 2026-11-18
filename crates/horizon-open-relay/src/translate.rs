@@ -9,8 +9,8 @@
 //! the relay"): block states in chunks and block updates, items everywhere a
 //! stack travels, entity types (a creature the bundle lacks shows as its
 //! stand-in, `rules::stand_in`, or is never spawned, its later packets dropped
-//! too), menu types, attributes, recipe book displays (`recipes.rs`), and the
-//! server brand.
+//! too), menu types, attributes, recipe book displays (`recipes.rs`),
+//! advancement icons, and the server brand.
 use crate::policy::{EntityId, Policy, policy};
 use crate::recipes::Displays;
 use crate::rules;
@@ -347,6 +347,20 @@ impl<'t> Clientbound<'t> {
                 C::SetPlayerInventory(mut p) => {
                     p.item = self.stack(p.item.take());
                     Some(C::SetPlayerInventory(p).encode())
+                }
+                _ => None,
+            },
+            // Each displayed advancement's icon in open numbering: a vanilla
+            // item the bundle lacks shows as its stand-in, named as vanilla's.
+            cb::UPDATE_ADVANCEMENTS => match typed()? {
+                C::UpdateAdvancements(mut p) => {
+                    for d in p.added.iter_mut().filter_map(|a| a.display.as_mut()) {
+                        let icon = std::mem::replace(&mut d.icon, Stack::new(0, 1));
+                        if let Some(open) = self.stack(Some(icon)) {
+                            d.icon = open;
+                        }
+                    }
+                    Some(C::UpdateAdvancements(p).encode())
                 }
                 _ => None,
             },

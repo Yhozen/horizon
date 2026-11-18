@@ -645,3 +645,61 @@ fn recipe_displays_take_the_bundle_ids_and_picks_go_back() {
     assert_eq!(out.ids, vec![1]);
     assert_eq!(pick(&mut s, 1), None, "removed");
 }
+
+#[test]
+fn advancement_icons_take_the_bundle_items() {
+    let t = tables();
+    let mut c = playing(&t);
+    let text = |s: &str| horizon_world::nbt::Tag::String(s.into());
+    let advancement = |id: &str, icon: Option<Stack>| play::Advancement {
+        id: id.into(),
+        parent: None,
+        display: icon.map(|icon| play::AdvancementDisplay {
+            title: text("Title"),
+            description: text("Description"),
+            icon,
+            frame: 2,
+            show_toast: true,
+            hidden: false,
+            background: Some("minecraft:gui/advancements/backgrounds/stone".into()),
+        }),
+        requirements: vec![vec!["done".into()]],
+        telemetry: false,
+        x: 1.0,
+        y: 0.5,
+    };
+    let packet = play::UpdateAdvancements {
+        reset: true,
+        added: vec![
+            // Vanilla's golden apple (2) is the bundle's apple (4) in the fixture.
+            advancement("minecraft:story/root", Some(Stack::new(2, 1))),
+            advancement("minecraft:recipes/root", None),
+        ],
+        removed: vec!["minecraft:story/gone".into()],
+        progress: vec![(
+            "minecraft:story/root".into(),
+            vec![("done".into(), Some(7))],
+        )],
+        show: true,
+    };
+    let play::Clientbound::UpdateAdvancements(p) = decode(send(
+        &mut c,
+        play::Clientbound::UpdateAdvancements(packet.clone()),
+    )) else {
+        panic!("advancements pass")
+    };
+    let icon = &p.added[0].display.as_ref().unwrap().icon;
+    assert_eq!((icon.item, icon.count), (4, 1));
+    // Everything but the icon is as the server sent it.
+    let mut expected = packet;
+    expected.added[0].display.as_mut().unwrap().icon = icon.clone();
+    assert_eq!(p, expected);
+    // The selected tab carries no number: it passes as it came.
+    let mut w = Writer::new();
+    w.bool(true);
+    w.string("minecraft:story/root");
+    assert_eq!(
+        c.translate(cb::SELECT_ADVANCEMENTS_TAB, &w.data),
+        Some(body(cb::SELECT_ADVANCEMENTS_TAB, &w.data))
+    );
+}
