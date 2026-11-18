@@ -567,3 +567,21 @@ fn uniform_initializers() {
     );
     naga(&rw, Stage::Fragment);
 }
+
+#[test]
+fn modf_and_frexp_are_polyfilled() {
+    let src = "varying vec2 uv;\n\
+               void main() { float i, f = modf(uv.x, i); vec2 w; vec2 g = modf(uv, w); ivec3 e;\n\
+               vec3 m = frexp(vec3(uv, 1.0), e); gl_FragData[0] = vec4(f + i, g + w, 0.0) + vec4(m, e.x); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(rw.body.contains("hz_modf(uv.x, i)"), "{}", rw.body);
+    naga(&rw, Stage::Fragment);
+    // A pack's own `modf` stays.
+    let own = "float modf(float x, float y) { return x; }\nvoid main() { gl_FragData[0] = vec4(modf(1.0, 2.0)); }\n";
+    assert!(
+        !rewrite(own, Stage::Fragment)
+            .unwrap()
+            .body
+            .contains("hz_modf")
+    );
+}
