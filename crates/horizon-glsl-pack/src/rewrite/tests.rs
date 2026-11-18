@@ -600,3 +600,17 @@ fn isnan_and_isinf_are_polyfilled() {
     // The WGSL writer, which has no `isnan`, takes it.
     naga(&rw, Stage::Fragment);
 }
+
+#[test]
+fn struct_varyings_are_declared_after_their_struct() {
+    let src = "struct Fog { vec3 color; float density; };\nflat varying Fog fog;\n\
+               void main() { gl_FragData[0] = vec4(fog.color, fog.density); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert_eq!(rw.varyings[0].ty, "Fog");
+    assert!(
+        rw.body
+            .contains("struct Fog { vec3 color; float density; }; Fog fog;"),
+        "{}",
+        rw.body
+    );
+}

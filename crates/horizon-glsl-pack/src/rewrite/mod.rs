@@ -228,6 +228,23 @@ pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
         }
         cx.emit(start, end, &mut body)?;
     }
+    // Struct-typed varyings: their globals go right after their struct.
+    for v in &cx.out.varyings {
+        if !structs.contains(&v.ty) {
+            continue;
+        }
+        let decl = match v.array_len {
+            Some(n) => format!(" {} {}[{n}];", v.ty, v.name),
+            None => format!(" {} {};", v.ty, v.name),
+        };
+        let at = body
+            .find(&format!("struct {} ", v.ty))
+            .or_else(|| body.find(&format!("struct {}{{", v.ty)));
+        if let Some(close) = at.and_then(|a| body[a..].find('}').map(|c| a + c)) {
+            let semi = body[close..].find(';').map_or(close + 1, |s| close + s + 1);
+            body.insert_str(semi, &decl);
+        }
+    }
     let mut prelude: String = cx.prelude.iter().map(|l| format!("{l}\n")).collect();
     prelude.push_str(&body);
     cx.out.body = prelude;
