@@ -44,6 +44,8 @@ except ImportError:
     import lab
     import test_rust_parity as base
     from test_dedicated_server_parity import Server
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'open_parity'))
+import twin_scripted  # noqa: E402
 
 NAME = 'open-twin-parity'
 PLAYER = 'Twin'
@@ -227,6 +229,11 @@ class Client:
             raise AssertionError(f'{self.label}: horizon-ctl {" ".join(map(str, words))}: {reply}\n{self.log_tail()}')
         return reply
 
+    def ctl_async(self, *words):
+        """A horizon-ctl command left running (read the game while it moves)."""
+        return subprocess.Popen([str(self.bins / 'horizon-ctl'), '--socket', str(self.socket), *map(str, words)],
+                                cwd=self.home, env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     def log_tail(self, lines=25):
         log = self.socket.with_suffix('.log')
         return '\n'.join(log.read_text(errors='replace').splitlines()[-lines:]) if log.exists() else ''
@@ -260,6 +267,24 @@ class Client:
             if time.time() > deadline:
                 raise AssertionError(f'{self.label}: no chat line {text!r} in {timeout} s')
             time.sleep(0.05)
+
+    def catch_up(self, console):
+        """Returns once the server has what this client sent so far (its chat line comes after its
+        clicks), and this client has what the server sent so far: a chat line sent a few ticks after
+        the console's commands ran comes after the slots and blocks they changed."""
+        said = f'twin said {time.monotonic_ns()}'
+        start = len(console.server.lines)
+        self.ctl('chat', said)
+        deadline = time.time() + 30
+        while not any(said in line for line in console.server.lines[start:]):
+            if time.time() > deadline:
+                raise AssertionError(f'{self.label}: the server did not get the chat line {said!r}')
+            time.sleep(0.05)
+        console.sync()
+        time.sleep(0.15)
+        marker = f'twin {self.label} {time.monotonic_ns()}'
+        console.run(f'say {marker}', re.escape(f'[Server] {marker}'))
+        self.wait_chat(marker)
 
     def logout(self):
         self.ctl('disconnect')
@@ -309,6 +334,11 @@ class Attributes:
             # A player lacks the mobs' attributes (follow range, tempt range...): those are refused.
             console.run(f'attribute {PLAYER} {attribute} base set {value}',
                         r'(?i)base value for attribute|has no attribute|cannot|can.t')
+
+    def reset(self, console):
+        for attribute in attribute_values():
+            console.server.console(f'attribute {PLAYER} {attribute} base reset')
+        console.sync()
 
     def read(self, client, console):
         state = client.ctl('state')
@@ -454,6 +484,8 @@ class Entities:
 
 
 SCENARIOS = [Attributes(), Blocks(), Items(), Entities()]
+# The second batch: each client runs a script after the first batch was read by both.
+SCRIPTED = twin_scripted.SCRIPTED
 
 
 # ---------------------------------------------------------------- comparison
@@ -508,7 +540,12 @@ def main():
     parser.add_argument('--bin-dir', default=os.environ.get('HORIZON_TWIN_BIN_DIR'),
                         help='prebuilt horizon-client, horizon-ctl, horizon-open-relay and horizon-prepare')
     parser.add_argument('--write-gaps', action='store_true', help='write the differing keys as the new gap list')
+    parser.add_argument('--only', help='comma-separated scenarios to run (default: all)')
     args = parser.parse_args()
+    if args.only:
+        wanted = set(args.only.split(','))
+        SCENARIOS[:] = [s for s in SCENARIOS if s.name in wanted]
+        SCRIPTED[:] = [s for s in SCRIPTED if s.name in wanted]
     started = time.time()
     _, jars, libraries = base.verify_artifacts()
     if not (REPORTS / 'blocks.json').exists():
@@ -546,12 +583,30 @@ def main():
         console.wait_offline()
         phase(started, 'scenarios set up')
         seen = {}
-        for client in (open_, horizon):
+        for client in (open_, horizon) if SCENARIOS else ():
             client.login(address[client.label])
             seen[client.label] = {f'{s.name}:{k}': v for s in SCENARIOS for k, v in s.read(client, console).items()}
             client.logout()
             console.wait_offline()
             phase(started, f'{client.label} read')
+        # The second batch starts from a bare flat world around the spawn.
+        console.run('kill @e[type=!minecraft:player]', r'Killed|No entity')
+        console.run('fill -18 -50 -18 17 -50 17 minecraft:air strict', r'filled|No blocks')
+        for client in (open_, horizon) if SCRIPTED else ():
+            client.login(address[client.label])
+            # The scripts play at vanilla's size and speed.
+            Attributes().reset(console)
+
+            def relog(client=client):
+                client.logout()
+                console.wait_offline()
+                client.login(address[client.label])
+            for scenario in SCRIPTED:
+                for key, value in scenario.run(client, console, relog).items():
+                    seen.setdefault(client.label, {})[f'{scenario.name}:{key}'] = value
+            client.logout()
+            console.wait_offline()
+            phase(started, f'{client.label} scripted')
         lab.write_json(build / 'seen.json', seen)
     finally:
         for client in (horizon, open_):
@@ -565,7 +620,7 @@ def main():
     if args.write_gaps:
         GAPS.parent.mkdir(parents=True, exist_ok=True)
         GAPS.write_text(''.join(f'{k}\n' for k in sorted(differing)))
-    counts = {s.name: sum(k.startswith(s.name + ':') for k in differing) for s in SCENARIOS}
+    counts = {s.name: sum(k.startswith(s.name + ':') for k in differing) for s in SCENARIOS + SCRIPTED}
     print(f'open twin: {len(seen["horizon"])} items compared, gaps per scenario {counts}, '
           f'{time.time() - started:.0f} s (details: {build}/seen.json)')
     if failures and not args.write_gaps:
