@@ -57,7 +57,34 @@ impl Ctx<'_> {
                 next = 4;
             }
             if rest.get(next) == Some(&"=") {
-                return Err(format!("initializer on `{storage} {name}`"));
+                // GLSL 330 allows `uniform T x = v;`: Horizon's value wins for a uniform it
+                // provides; any other keeps `v` as a plain global instead of the zero fallback.
+                if storage != "uniform" || array_len.is_some() {
+                    return Err(format!("initializer on `{storage} {name}`"));
+                }
+                let mut depth = 0i32;
+                let len = rest[next + 1..]
+                    .iter()
+                    .position(|w| {
+                        match *w {
+                            "(" | "[" => depth += 1,
+                            ")" | "]" => depth -= 1,
+                            _ => {}
+                        }
+                        depth == 0 && *w == ","
+                    })
+                    .unwrap_or(rest.len() - next - 1);
+                let init = rest[next + 1..next + 1 + len].join(" ");
+                if crate::uniforms::uniform_type(name).is_none() {
+                    self.prelude.insert(format!("{ty} {name} = {init};"));
+                } else {
+                    self.record(storage, &ty, name, flat, array_len)?;
+                }
+                match rest.get(next + 1 + len) {
+                    None => break,
+                    _ => rest = &rest[next + 2 + len..],
+                }
+                continue;
             }
             self.record(storage, &ty, name, flat, array_len)?;
             match rest.get(next) {

@@ -606,3 +606,59 @@ fn a_plain_overload_beside_a_sampler_one() {
     assert!(rw.body.contains("f_hz_colortex9("), "{}", rw.body);
     assert!(rw.body.contains("f(vec3(0.5), true)"), "{}", rw.body);
 }
+
+#[test]
+fn uniform_initializers() {
+    // GLSL 330: Horizon's value wins for its own uniforms; others keep the pack's value.
+    let src = "uniform float viewWidth = 1.0, heavyFog = max(0.25, 0.5);\n\
+               uniform vec2 offset = vec2(1.0, -2.0);\n\
+               out vec4 color;\n\
+               void main() { color = vec4(viewWidth, heavyFog, offset); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    let names: Vec<_> = rw.uniforms.iter().map(|u| u.name.as_str()).collect();
+    assert_eq!(names, ["viewWidth"], "{}", rw.body);
+    assert!(
+        rw.body.contains("float heavyFog = max ( 0.25 , 0.5 );"),
+        "{}",
+        rw.body
+    );
+    assert!(
+        rw.body.contains("vec2 offset = vec2 ( 1.0 , - 2.0 );"),
+        "{}",
+        rw.body
+    );
+    naga(&rw, Stage::Fragment);
+}
+
+#[test]
+fn modf_and_frexp_are_polyfilled() {
+    let src = "varying vec2 uv;\n\
+               void main() { float i, f = modf(uv.x, i); vec2 w; vec2 g = modf(uv, w); ivec3 e;\n\
+               vec3 m = frexp(vec3(uv, 1.0), e); gl_FragData[0] = vec4(f + i, g + w, 0.0) + vec4(m, e.x); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(rw.body.contains("hz_modf(uv.x, i)"), "{}", rw.body);
+    naga(&rw, Stage::Fragment);
+    // A pack's own `modf` stays.
+    let own = "float modf(float x, float y) { return x; }\nvoid main() { gl_FragData[0] = vec4(modf(1.0, 2.0)); }\n";
+    assert!(
+        !rewrite(own, Stage::Fragment)
+            .unwrap()
+            .body
+            .contains("hz_modf")
+    );
+}
+
+#[test]
+fn isnan_and_isinf_are_polyfilled() {
+    let src = "varying vec3 c;\n\
+               void main() { bool a = isnan(c.x) || isinf(c.y); bvec3 b = isnan(c);\n\
+               gl_FragData[0] = vec4(a || any(b) || any(isinf(vec2(c))) ? 1.0 : 0.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(
+        rw.body.contains("hz_isnan(c.x) || hz_isinf(c.y)"),
+        "{}",
+        rw.body
+    );
+    // The WGSL writer, which has no `isnan`, takes it.
+    naga(&rw, Stage::Fragment);
+}

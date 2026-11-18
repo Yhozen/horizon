@@ -10,20 +10,176 @@ mod expr;
 
 use expr::{K, lex};
 
-/// The macros OptiFine defines before a pack's sources (`MC_VERSION`, …).
+/// Iris's render stages (`MC_RENDER_STAGE_<name>`), numbered in the order of
+/// the public docs from `NONE` = 0; the `renderStage` uniform uses the same
+/// numbers.
+pub const RENDER_STAGES: [&str; 24] = [
+    "NONE",
+    "SKY",
+    "SUNSET",
+    "CUSTOM_SKY",
+    "SUN",
+    "MOON",
+    "STARS",
+    "VOID",
+    "TERRAIN_SOLID",
+    "TERRAIN_CUTOUT_MIPPED",
+    "TERRAIN_CUTOUT",
+    "ENTITIES",
+    "BLOCK_ENTITIES",
+    "DESTROY",
+    "OUTLINE",
+    "DEBUG",
+    "HAND_SOLID",
+    "TERRAIN_TRANSLUCENT",
+    "TRIPWIRE",
+    "PARTICLES",
+    "CLOUDS",
+    "RAIN_SNOW",
+    "WORLD_BORDER",
+    "HAND_TRANSLUCENT",
+];
+
+/// The vanilla biomes, alphabetical: `BIOME_<NAME>` is the index, and the
+/// `biome` uniform must use the same numbers.
+pub const BIOMES: [&str; 65] = [
+    "badlands",
+    "bamboo_jungle",
+    "basalt_deltas",
+    "beach",
+    "birch_forest",
+    "cherry_grove",
+    "cold_ocean",
+    "crimson_forest",
+    "dark_forest",
+    "deep_cold_ocean",
+    "deep_dark",
+    "deep_frozen_ocean",
+    "deep_lukewarm_ocean",
+    "deep_ocean",
+    "desert",
+    "dripstone_caves",
+    "end_barrens",
+    "end_highlands",
+    "end_midlands",
+    "eroded_badlands",
+    "flower_forest",
+    "forest",
+    "frozen_ocean",
+    "frozen_peaks",
+    "frozen_river",
+    "grove",
+    "ice_spikes",
+    "jagged_peaks",
+    "jungle",
+    "lukewarm_ocean",
+    "lush_caves",
+    "mangrove_swamp",
+    "meadow",
+    "mushroom_fields",
+    "nether_wastes",
+    "ocean",
+    "old_growth_birch_forest",
+    "old_growth_pine_taiga",
+    "old_growth_spruce_taiga",
+    "pale_garden",
+    "plains",
+    "river",
+    "savanna",
+    "savanna_plateau",
+    "small_end_islands",
+    "snowy_beach",
+    "snowy_plains",
+    "snowy_slopes",
+    "snowy_taiga",
+    "soul_sand_valley",
+    "sparse_jungle",
+    "stony_peaks",
+    "stony_shore",
+    "sunflower_plains",
+    "swamp",
+    "taiga",
+    "the_end",
+    "the_void",
+    "warm_ocean",
+    "warped_forest",
+    "windswept_forest",
+    "windswept_gravelly_hills",
+    "windswept_hills",
+    "windswept_savanna",
+    "wooded_badlands",
+];
+
+/// Biome categories (`CAT_<NAME>`), numbered in the docs' order from `NONE` = 0
+/// (the `biome_category` uniform).
+pub const BIOME_CATEGORIES: [&str; 17] = [
+    "NONE",
+    "TAIGA",
+    "EXTREME_HILLS",
+    "JUNGLE",
+    "MESA",
+    "PLAINS",
+    "SAVANNA",
+    "ICY",
+    "THE_END",
+    "BEACH",
+    "FOREST",
+    "OCEAN",
+    "DESERT",
+    "RIVER",
+    "SWAMP",
+    "MUSHROOM",
+    "NETHER",
+];
+
+/// The macros the host defines before a pack's own (the "who Horizon says it
+/// is" contract): Iris at the OpenGL 4.1 level, no vendor or GPU named.
 pub fn predefined(mc_version: u32) -> BTreeMap<String, String> {
-    [
+    let os = if cfg!(target_os = "linux") {
+        "MC_OS_LINUX"
+    } else if cfg!(target_os = "macos") {
+        "MC_OS_MAC"
+    } else if cfg!(target_os = "windows") {
+        "MC_OS_WINDOWS"
+    } else {
+        "MC_OS_OTHER"
+    };
+    let mut macros: BTreeMap<String, String> = [
         ("MC_VERSION", mc_version.to_string()),
-        ("MC_GL_VERSION", "320".into()),
-        ("MC_GLSL_VERSION", "150".into()),
-        ("MC_OS_LINUX", "1".into()),
+        ("MC_GL_VERSION", "410".into()),
+        ("MC_GLSL_VERSION", "410".into()),
+        (os, "1".into()),
+        ("MC_GL_VENDOR_OTHER", "1".into()),
+        ("MC_GL_RENDERER_OTHER", "1".into()),
+        ("IS_IRIS", "1".into()),
+        ("IRIS_VERSION", "11107".into()),
         ("MC_RENDER_QUALITY", "1.0".into()),
         ("MC_SHADOW_QUALITY", "1.0".into()),
         ("MC_HAND_DEPTH", "0.125".into()),
+        ("MC_MIPMAP_LEVEL", "4".into()),
+        ("PPT_NONE", "0".into()),
+        ("PPT_RAIN", "1".into()),
+        ("PPT_SNOW", "2".into()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
-    .collect()
+    .collect();
+    let numbered = [
+        ("MC_RENDER_STAGE_", &RENDER_STAGES[..], false),
+        ("BIOME_", &BIOMES[..], true),
+        ("CAT_", &BIOME_CATEGORIES[..], false),
+    ];
+    for (prefix, names, upper) in numbered {
+        for (i, name) in names.iter().enumerate() {
+            let name = if upper {
+                name.to_ascii_uppercase()
+            } else {
+                name.to_string()
+            };
+            macros.insert(format!("{prefix}{name}"), i.to_string());
+        }
+    }
+    macros
 }
 
 /// The file at `path` with includes expanded, comments removed, conditionals
@@ -473,6 +629,17 @@ mod tests {
             &o,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn horizon_says_it_is_iris_at_gl_410() {
+        let text = "#if defined IS_IRIS && IRIS_VERSION >= 10800 && MC_GL_VERSION == 410\nI\n#endif\n\
+                    #ifdef MC_GL_VENDOR_NVIDIA\nN\n#endif\n\
+                    MC_RENDER_STAGE_NONE MC_RENDER_STAGE_SUN BIOME_BADLANDS BIOME_PLAINS CAT_NETHER PPT_SNOW";
+        let out = pp(text);
+        let words: Vec<&str> = out.split_whitespace().collect();
+        assert_eq!(words, ["I", "0", "4", "0", "40", "16", "2"]);
+        assert_eq!(BIOMES[40], "plains");
     }
 
     #[test]

@@ -23,7 +23,21 @@ pub fn glsl_to_wgsl(source: &str, stage: Stage) -> Result<String, String> {
     let mut module = frontend
         .parse(&glsl::Options::from(stage), source)
         .map_err(|e| e.emit_to_string(source))?;
+    // `vector % scalar`: wrap the scalar in the source and parse again.
+    let mut patched = String::new();
+    for _ in 0..4 {
+        let splats = modulo_splats(&module);
+        if splats.is_empty() {
+            break;
+        }
+        patched = wrap_ranges(if patched.is_empty() { source } else { &patched }, splats);
+        module = glsl::Frontend::default()
+            .parse(&glsl::Options::from(stage), &patched)
+            .map_err(|e| e.emit_to_string(&patched))?;
+    }
+    let source = if patched.is_empty() { source } else { &patched };
     spill_pointer_arguments(&mut module);
+    end_terminated_cases(&mut module);
     let info = Validator::new(ValidationFlags::all(), Capabilities::empty())
         .validate(&module)
         .map_err(|e| e.emit_to_string(source))?;
@@ -185,5 +199,148 @@ void main() {
         let wgsl = glsl_to_wgsl(source, Stage::Fragment).unwrap();
         assert!(wgsl.contains("hz_spill"), "{wgsl}");
         assert!(!wgsl.contains("(&g.") && !wgsl.contains("(&v["), "{wgsl}");
+    }
+}
+
+/// Marks `switch` cases that end in `return`, `discard` or `continue` as not
+/// falling through: naga's GLSL front end only counts a final `break`, and
+/// its WGSL writer refuses fall-through cases with statements.
+fn end_terminated_cases(module: &mut naga::Module) {
+    use naga::Statement;
+    fn walk(block: &mut naga::Block) {
+        for statement in block.iter_mut() {
+            match statement {
+                Statement::Block(b) => walk(b),
+                Statement::If { accept, reject, .. } => {
+                    walk(accept);
+                    walk(reject);
+                }
+                Statement::Loop {
+                    body, continuing, ..
+                } => {
+                    walk(body);
+                    walk(continuing);
+                }
+                Statement::Switch { cases, .. } => {
+                    for c in cases {
+                        walk(&mut c.body);
+                        if c.fall_through
+                            && matches!(
+                                c.body.last(),
+                                Some(
+                                    Statement::Return { .. }
+                                        | Statement::Kill
+                                        | Statement::Continue
+                                        | Statement::Break
+                                )
+                            )
+                        {
+                            c.fall_through = false;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for (_, f) in module.functions.iter_mut() {
+        walk(&mut f.body);
+    }
+    for e in &mut module.entry_points {
+        walk(&mut e.function.body);
+    }
+}
+
+/// Where `vector % scalar` (or `scalar % vector`) sits in `source`: the
+/// scalar operand's byte range and the vector constructor to wrap it in.
+/// GLSL allows the mix; naga's GLSL front end keeps it as is and its
+/// validator rejects it.
+fn modulo_splats(module: &naga::Module) -> Vec<(std::ops::Range<usize>, String)> {
+    use naga::{BinaryOperator, Expression, ScalarKind, TypeInner};
+    let functions = module
+        .functions
+        .iter()
+        .map(|(_, f)| f)
+        .chain(module.entry_points.iter().map(|e| &e.function));
+    let mut out = Vec::new();
+    for f in functions {
+        let Some(last) = f.expressions.iter().map(|(h, _)| h).last() else {
+            continue;
+        };
+        let ctx = naga::proc::ResolveContext::with_locals(module, &f.local_variables, &f.arguments);
+        let mut types = naga::front::Typifier::new();
+        if types.grow(last, &f.expressions, &ctx).is_err() {
+            continue;
+        }
+        for (_, e) in f.expressions.iter() {
+            let Expression::Binary {
+                op: BinaryOperator::Modulo,
+                left,
+                right,
+            } = *e
+            else {
+                continue;
+            };
+            let (l, r) = (
+                types.get(left, &module.types),
+                types.get(right, &module.types),
+            );
+            let (operand, size, scalar) = match (l, r) {
+                (TypeInner::Vector { size, scalar }, TypeInner::Scalar(_)) => (right, size, scalar),
+                (TypeInner::Scalar(_), TypeInner::Vector { size, scalar }) => (left, size, scalar),
+                _ => continue,
+            };
+            let prefix = match scalar.kind {
+                ScalarKind::Sint => "ivec",
+                ScalarKind::Uint => "uvec",
+                _ => "vec",
+            };
+            if let Some(range) = f.expressions.get_span(operand).to_range() {
+                out.push((range, format!("{prefix}{}", *size as u8)));
+            }
+        }
+    }
+    out
+}
+
+/// `source` with each range wrapped in its constructor (`ivec2(…)`);
+/// overlapping ranges after the first are left for the next round.
+fn wrap_ranges(source: &str, mut patches: Vec<(std::ops::Range<usize>, String)>) -> String {
+    patches.sort_by_key(|(r, _)| std::cmp::Reverse(r.start));
+    let mut out = source.to_string();
+    let mut limit = usize::MAX;
+    for (r, ctor) in patches {
+        if r.end > limit || r.end > out.len() || r.start >= r.end {
+            continue;
+        }
+        out.insert(r.end, ')');
+        out.insert_str(r.start, &format!("{ctor}("));
+        limit = r.start;
+    }
+    out
+}
+
+#[cfg(test)]
+mod modulo_tests {
+    use super::*;
+
+    #[test]
+    fn cases_ending_in_return_do_not_fall_through() {
+        let src = "#version 450\nlayout(location = 0) flat in int m;\nlayout(location = 0) out vec4 c;\n\
+                   float f(float x) { switch (m) { case 1: return x; case 2: case 3: \
+                   if (x > 0.0) { return 1.0; } return max(x, 2.0); default: return 0.0; } }\n\
+                   void main() { c = vec4(f(1.0)); }\n";
+        glsl_to_wgsl(src, Stage::Fragment).unwrap();
+    }
+
+    #[test]
+    fn vector_modulo_scalar() {
+        let src = "#version 450\nlayout(location = 0) flat in ivec2 p;\nlayout(location = 0) out vec4 c;\n\
+                   void main() { ivec2 a = p % 4; ivec2 b = 3 % p; if (p.x > 0) { c = vec4(a + b, p % 2); } }\n";
+        let wgsl = glsl_to_wgsl(src, Stage::Fragment).unwrap();
+        assert!(
+            wgsl.contains("% vec2(4i)") || wgsl.contains("vec2<i32>(4i)"),
+            "{wgsl}"
+        );
     }
 }
