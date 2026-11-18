@@ -124,7 +124,7 @@ The generator is `crates/horizon-open-content`:
 | `assets.rs` | textures, block states, models (its own display transforms, `item/generated` and `item/handheld`), items, the creative palette (`creative-inventory.json`) |
 | `art.rs` | original art: bedrock, breaking cracks, the interface, sun, moon, clouds, the player's model and skin |
 | `art_survival.rs` | original art: hearts (every kind the HUD draws), food, air, armour, experience and jump bars, the inventory, crafting table, recipe book and game-mode switcher screens, empty equipment slots, toasts, menu icons, world and server list icons, statistics headers, the vignette, the title's wordmark and panorama, the crafting table's faces |
-| `lang.rs` | the English interface text: menus, survival, death messages, joining and leaving, statistics, the allowed commands' replies and errors |
+| `lang.rs` | the English interface text: hand-written labels (menus, survival, death messages, joining and leaving, statistics, the allowed commands' replies and errors), then a line for every key Minecraft's English has: every block, item, entity, effect, attribute and statistic named by its id title-cased (from `data/registries/`, a short table where that reads wrong), and every other key of `data/lang/keys.txt` (written by `tools/open_lang_keys.py`: keys and their placeholders, no text) worded by rules on the key. Each line keeps Minecraft's placeholders in Minecraft's order |
 | `sources.rs` | `content/open/sources.json`: inputs, checksums, credits and notices |
 | `numbering.rs`, `network.rs` | Minecraft's numbering from `data/` ([Numbering](#numbering)) and `registries.json` |
 | `coverage.rs` | `horizon-open-coverage.json` ([Coverage](#coverage)) |

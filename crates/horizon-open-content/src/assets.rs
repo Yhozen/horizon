@@ -610,6 +610,7 @@ pub fn write(
         lang.insert((*key).to_owned(), (*value).to_owned());
     }
     lang.extend(crate::lang::key_names());
+    crate::lang::fill(&mut lang);
     bundle.json("assets/minecraft/lang/en_us.json", &json!(lang), GENERATOR)?;
     let _ = (Form::Air, Layer::Solid);
     Ok(())
