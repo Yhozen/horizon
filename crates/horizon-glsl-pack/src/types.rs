@@ -69,6 +69,10 @@ pub struct HostParams {
     /// Sampled textures one stage may bind (`maxSampledTexturesPerShaderStage`,
     /// 16 in WebGPU), Horizon's own included.
     pub max_textures: u32,
+    /// Sampled textures Horizon's terrain group 0 layout declares for both
+    /// stages, used or not (gfx.rs: 8 sprite arrays and the lightmap); they
+    /// count against `max_textures` in terrain programs.
+    pub terrain_textures: u32,
     /// Colour attachments one pass may write (`maxColorAttachments`, 8).
     pub max_draw_buffers: u32,
     /// Bytes per pixel of all colour attachments together
@@ -84,6 +88,7 @@ impl Default for HostParams {
             sprite_grid: 1,
             max_varyings: 16,
             max_textures: 16,
+            terrain_textures: 9,
             max_draw_buffers: 8,
             max_attachment_bytes: 128,
         }

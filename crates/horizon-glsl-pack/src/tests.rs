@@ -668,3 +668,35 @@ fn a_3d_override_leaves_the_2d_buffer() {
     // colortex8 has no 3D texture: the default, with a note.
     assert_eq!(p.notes.len(), 1, "{:?}", p.notes);
 }
+
+#[test]
+fn integer_colour_buffers_bind_as_integers() {
+    let decls = "/*\nconst int colortex5Format = R32UI;\n*/\nuniform usampler2D colortex5;\nuniform sampler2D colortex4;\n\
+                 /*\nconst int colortex4Format = RGBA16I;\n*/";
+    let body = "    uvec4 id = texelFetch(colortex5, ivec2(0), 0) + texture(colortex5, uv);\n    \
+                c += vec4(id) + texture(colortex4, uv);";
+    let p = deferred(&sampling_pack(decls, body, "", &[])).unwrap();
+    let got: Vec<(TextureSource, SamplerKind, SampleKind)> = p
+        .textures
+        .iter()
+        .map(|t| (t.source.clone(), t.sampler, t.sample))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (
+                TextureSource::Buffer(4),
+                SamplerKind::Point,
+                SampleKind::Sint
+            ),
+            (
+                TextureSource::Buffer(5),
+                SamplerKind::Point,
+                SampleKind::Uint
+            ),
+        ]
+    );
+    assert!(
+        p.fragment_wgsl.contains("texture_2d<u32>") && p.fragment_wgsl.contains("texture_2d<i32>")
+    );
+}
