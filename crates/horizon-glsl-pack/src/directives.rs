@@ -678,3 +678,62 @@ mod tests {
         assert_eq!(canonical_sampler("noisetex"), "noisetex");
     }
 }
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+    use crate::PackFiles;
+
+    #[test]
+    fn declared_outputs() {
+        let text = "uniform float x; layout(location = 3) out vec4 a; out vec3 b, c;\n\
+                    layout (location=1, index = 0) out highp float d;\nvoid f(out vec4 e) { }\n\
+                    vec4 g() { out_value = 1.0; }\nflat out int h[2];";
+        let outs: Vec<(String, String, Option<u32>, usize)> = fragment_outputs(text)
+            .into_iter()
+            .map(|o| (o.name.clone(), o.ty.clone(), o.location, o.slot()))
+            .collect();
+        let want = [
+            ("a", "vec4", Some(3), 3),
+            ("b", "vec3", None, 1),
+            ("c", "vec3", None, 2),
+            ("d", "float", Some(1), 1),
+        ];
+        assert_eq!(
+            outs,
+            want.map(|(n, t, l, s)| (n.to_string(), t.to_string(), l, s))
+        );
+        assert_eq!(
+            highest_output("gl_FragData[2] = x; gl_FragData[11] = y;"),
+            Some(11)
+        );
+        assert_eq!(highest_output(text), Some(3));
+        assert_eq!(highest_output("gl_FragColor = x;"), None);
+    }
+
+    #[test]
+    fn live_directives_only() {
+        let files = PackFiles::default();
+        let macros = BTreeMap::from([("HIGH".to_string(), "1".to_string())]);
+        let text = "#if HIGH == 1 // a comment\n/* DRAWBUFFERS:12 */\n#else\n/* DRAWBUFFERS:3 */\n#endif\n\
+                    /* note:\n#if 0\n*/\nvoid main() {}\n";
+        assert_eq!(
+            live_draw_buffers(text, "x.fsh", &files, &macros),
+            Some(vec![1, 2])
+        );
+        assert_eq!(
+            live_draw_buffers(text, "x.fsh", &files, &BTreeMap::new()),
+            Some(vec![3])
+        );
+        // Unbalanced branches: the raw text's last directive.
+        assert_eq!(
+            live_draw_buffers(
+                "#if 1\n/* RENDERTARGETS: 4,15 */\n",
+                "x.fsh",
+                &files,
+                &macros
+            ),
+            Some(vec![4, 15])
+        );
+    }
+}

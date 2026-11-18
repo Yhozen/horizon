@@ -86,7 +86,8 @@ fn alpha_test_of(spec: &ProgramSpec) -> Option<String> {
         Some(AlphaTest::Test(func, reference)) => {
             let op = match func {
                 AlphaFunc::Always => return None,
-                AlphaFunc::Never => return Some("    discard;\n".into()),
+                // Code after a bare `discard` is unreachable, which naga rejects.
+                AlphaFunc::Never => return Some("    if (true) { discard; }\n".into()),
                 AlphaFunc::Less => "<",
                 AlphaFunc::Equal => "==",
                 AlphaFunc::LessEqual => "<=",

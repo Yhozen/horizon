@@ -550,3 +550,31 @@ fn outputs_by_location_and_size() {
     assert!(wgsl.contains("vec4<u32>"), "{wgsl}");
     assert_eq!(r.status, PackStatus::Works);
 }
+
+#[test]
+fn targets_get_their_format_s_range_and_type() {
+    let fsh = "#version 120\n/* RENDERTARGETS: 0,2,3 */\n\
+               /* const int colortex2Format = RGBA8_SNORM; const int colortex3Format = rgba16i; */\n\
+               void main() {\n    gl_FragData[0] = vec4(1.0);\n    gl_FragData[1] = vec4(-2.0);\n    gl_FragData[2] = vec4(3.0);\n}\n";
+    let files = programs(
+        &[
+            ("gbuffers_terrain", FSH),
+            ("composite", fsh),
+            ("final", FSH),
+        ],
+        &[(
+            "shaders/shaders.properties",
+            "alphaTest.gbuffers_terrain = NEVER 0\n",
+        )],
+    );
+    let (pack, r) = report(&files, &PackOptions::default());
+    let pack = pack.unwrap_or_else(|| panic!("{}", r.text("x")));
+    use ProgramKind as K;
+    let c = &pack.programs[&K::Composite(0)].fragment_wgsl;
+    assert!(c.contains("vec4<i32>"), "{c}");
+    assert!(c.contains("-1f"), "snorm clamp: {c}");
+    // NEVER discards every fragment.
+    let t = &pack.programs[&K::Terrain].fragment_wgsl;
+    assert!(t.contains("discard"), "{t}");
+    assert_ne!(t, &pack.programs[&K::Water].fragment_wgsl);
+}

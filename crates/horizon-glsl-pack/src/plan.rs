@@ -827,3 +827,89 @@ impl PackPlan {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_documented_format_name() {
+        for row in FORMATS {
+            assert_eq!(BufferFormat::parse(row.0), Some(row.1), "{}", row.0);
+            assert_eq!(row.1.name(), row.0);
+        }
+        assert_eq!(BufferFormat::parse("rgba16f"), Some(BufferFormat::Rgba16F));
+        assert_eq!(
+            BufferFormat::parse("GL_RGB10_A2"),
+            Some(BufferFormat::Rgb10A2)
+        );
+        assert_eq!(BufferFormat::parse(" r32ui "), Some(BufferFormat::R32UI));
+        assert_eq!(BufferFormat::parse("RGBA"), None);
+        use StorageFormat as S;
+        let f = |n: &str| BufferFormat::parse(n).unwrap();
+        assert_eq!(f("RGB8").storage(), S::Rgba8Unorm);
+        assert_eq!(f("RGBA16").storage(), S::Rgba16Float);
+        assert_eq!(f("RG8_SNORM").storage(), S::Rg16Float);
+        assert_eq!(f("RGB9_E5").storage(), S::Rgba16Float);
+        assert_eq!(f("RGB565").storage(), S::Rgba8Unorm);
+        assert_eq!(f("RGB16I").storage(), S::Rgba16Sint);
+        assert_eq!(f("R8UI").storage(), S::R8Uint);
+        assert_eq!(f("RGB10_A2UI").storage(), S::Rgb10a2Uint);
+        assert_eq!(f("RGBA32F").bytes(), 16);
+        assert_eq!(f("RGBA8").bytes(), 8);
+        assert_eq!(f("R32UI").bytes(), 4);
+        assert!(f("RGBA16I").is_integer() && !f("RGBA16F").is_integer());
+        assert_eq!(f("RGBA8_SNORM").kind(), FormatKind::Snorm);
+        assert_eq!(f("R11F_G11F_B10F").channels(), 3);
+    }
+
+    #[test]
+    fn pass_state_values() {
+        assert_eq!(
+            Blend::parse("one ZERO GL_SRC_ALPHA one_minus_dst_alpha"),
+            Some(Blend::On {
+                src: BlendFactor::One,
+                dst: BlendFactor::Zero,
+                src_alpha: BlendFactor::SrcAlpha,
+                dst_alpha: BlendFactor::OneMinusDstAlpha,
+            })
+        );
+        assert_eq!(Blend::parse("off"), Some(Blend::Off));
+        assert_eq!(Blend::parse("ONE ZERO"), None);
+        assert_eq!(
+            AlphaTest::parse("GEQUAL 0.25f"),
+            Some(AlphaTest::Test(AlphaFunc::GreaterEqual, 0.25))
+        );
+        assert_eq!(AlphaTest::parse("OFF"), Some(AlphaTest::Off));
+        assert_eq!(AlphaTest::parse("BIGGER 1"), None);
+        assert_eq!(BufferSize::Pixels(0, 9).pixels(10, 10), (1, 9));
+    }
+
+    #[test]
+    fn a_slot_takes_its_own_state_over_its_file_s() {
+        let mut plan = PackPlan::default();
+        plan.programs.insert(
+            ProgramKind::Clouds,
+            "shaders/world0/gbuffers_textured".into(),
+        );
+        plan.program_states.insert(
+            "gbuffers_textured".into(),
+            ProgramState {
+                blend: Some(Blend::Off),
+                alpha_test: Some(AlphaTest::Off),
+                ..ProgramState::default()
+            },
+        );
+        plan.program_states.insert(
+            "gbuffers_clouds".into(),
+            ProgramState {
+                alpha_test: Some(AlphaTest::Test(AlphaFunc::Greater, 0.5)),
+                ..ProgramState::default()
+            },
+        );
+        let s = plan.state(ProgramKind::Clouds);
+        assert_eq!(s.blend, Some(Blend::Off));
+        assert_eq!(s.alpha_test, Some(AlphaTest::Test(AlphaFunc::Greater, 0.5)));
+        assert_eq!(plan.state(ProgramKind::Water), ProgramState::default());
+    }
+}
