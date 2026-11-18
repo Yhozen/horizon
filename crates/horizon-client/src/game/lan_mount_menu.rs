@@ -121,8 +121,12 @@ impl Game<'_> {
         else {
             return false;
         };
+        // ServerGamePacketListenerImpl.handleContainerClick ignores clicks on a menu that fails
+        // `stillValid`. Without this, a guest could take items from a mount killed earlier in the
+        // tick, which has dropped them already, before `tick_lan_mount_menus` closes the window.
         if let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn)
             && !host.hub.guests[gi].spectator()
+            && self.mount_menu_still_valid(&host.hub.guests[gi], mob)
             && let Some(index) = self.mobs.iter().position(|m| m.id == mob)
         {
             let mut menu = self.mount_engine_menu(index, columns);
@@ -182,6 +186,23 @@ impl Game<'_> {
         closed
     }
 
+    /// `AbstractMountInventoryMenu.stillValid`: the mount is alive and the guest's eyes are
+    /// within the entity interaction range plus 4 of its box.
+    fn mount_menu_still_valid(&self, g: &horizon_client::lan::guest::Guest, mob: u32) -> bool {
+        let eye = [g.position[0], g.position[1] + g.eye_height(), g.position[2]];
+        self.mobs.iter().find(|m| m.id == mob).is_some_and(|m| {
+            let (w, h) = (f64::from(m.width()) / 2.0, f64::from(m.height()));
+            let p = [m.position.x, m.position.y, m.position.z];
+            let lo = [p[0] - w, p[1], p[2] - w];
+            let hi = [p[0] + w, p[1] + h, p[2] + w];
+            let d: f64 = (0..3)
+                .map(|k| (eye[k] - eye[k].clamp(lo[k], hi[k])).powi(2))
+                .sum();
+            // Player.ENTITY_INTERACTION_RANGE 3, plus 4.
+            m.alive() && d < 7.0 * 7.0
+        })
+    }
+
     /// Each tick: a mount menu whose mount died or is out of reach closes
     /// (`AbstractMountInventoryMenu.stillValid`: alive, within the entity
     /// interaction range plus 4 of the eyes), and the others follow the
@@ -196,19 +217,7 @@ impl Game<'_> {
             let Some(g) = host.hub.guests.iter().find(|g| g.conn == conn) else {
                 continue;
             };
-            let eye = [g.position[0], g.position[1] + g.eye_height(), g.position[2]];
-            let valid = self.mobs.iter().find(|m| m.id == mob).is_some_and(|m| {
-                let (w, h) = (f64::from(m.width()) / 2.0, f64::from(m.height()));
-                let p = [m.position.x, m.position.y, m.position.z];
-                let lo = [p[0] - w, p[1], p[2] - w];
-                let hi = [p[0] + w, p[1] + h, p[2] + w];
-                let d: f64 = (0..3)
-                    .map(|k| (eye[k] - eye[k].clamp(lo[k], hi[k])).powi(2))
-                    .sum();
-                // Player.ENTITY_INTERACTION_RANGE 3, plus 4.
-                m.alive() && d < 7.0 * 7.0
-            });
-            if valid {
+            if self.mount_menu_still_valid(g, mob) {
                 self.lan_send_mount(host, conn);
             } else {
                 self.lan_mount_closed(host, conn, Some(window));
