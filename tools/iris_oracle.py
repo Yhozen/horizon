@@ -41,7 +41,7 @@ MC = "26.3"
 LOADER = "0.20.1"
 MODS = {
     # slug: version_number on Modrinth
-    "sodium": "mc26.3-0.9.3-beta.5-fabric",
+    "sodium": "mc26.3-0.9.2-fabric",  # beta.5 declares it breaks Iris <= 1.12.0
     "iris": "1.11.7+26.3-fabric",
 }
 ASSET_HOST = "https://resources.download.minecraft.net/"
@@ -236,11 +236,21 @@ def write_options(game_dir: Path, extra: list[str]) -> None:
         "soundCategory_master": "0.0",
         "maxFps": "30",
         "enableVsync": "false",
+        # Iris needs OpenGL; 26.3 falls back to Vulkan when the GL window fails.
+        "preferredGraphicsBackend": '"opengl"',
     }
     for kv in extra:
         k, _, v = kv.partition(":")
         lines[k] = v
     (game_dir / "options.txt").write_text("".join(f"{k}:{v}\n" for k, v in lines.items()))
+
+
+def offline_uuid(name: str) -> str:
+    """Java's `UUID.nameUUIDFromBytes("OfflinePlayer:" + name)`: an MD5 version-3 UUID with no namespace."""
+    h = bytearray(hashlib.md5(f"OfflinePlayer:{name}".encode()).digest())
+    h[6] = (h[6] & 0x0F) | 0x30
+    h[8] = (h[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(h)))
 
 
 def free_display() -> int:
@@ -283,12 +293,13 @@ def run(args) -> int:
 
     natives = Path(tempfile.mkdtemp(prefix="iris-natives-"))
     subst = {
-        "auth_player_name": "Oracle",
+        # Horizon's single player is "Player"; same name, same offline UUID, so the save's player data loads.
+        "auth_player_name": "Player",
         "version_name": MC,
         "game_directory": str(game_dir),
         "assets_root": str(HOME / "assets"),
         "assets_index_name": version["assetIndex"]["id"],
-        "auth_uuid": str(uuid.uuid3(uuid.NAMESPACE_OID, "OfflinePlayer:Oracle")).replace("-", ""),
+        "auth_uuid": offline_uuid("Player").replace("-", ""),
         "auth_access_token": "0",
         "clientid": "0",
         "auth_xuid": "0",
@@ -315,6 +326,9 @@ def run(args) -> int:
         GALLIUM_DRIVER="llvmpipe",
         VK_ICD_FILENAMES="/usr/share/vulkan/icd.d/lvp_icd.x86_64.json",
         SDL_AUDIODRIVER="dummy",
+        # Xvfb's GLX has no sRGB-capable visual, so SDL's GLX path fails ("Couldn't find matching GLX
+        # visual") and the game falls back to Vulkan, which Iris cannot use. EGL on X11 works.
+        SDL_VIDEO_FORCE_EGL="1",
         ALSOFT_DRIVERS="null",
     )
     if args.gl_override:
@@ -381,18 +395,107 @@ def run(args) -> int:
     return 0 if status == "ok" and out.exists() else 1
 
 
+# ---------------------------------------------------------------- world
+
+
+def build_world(args) -> int:
+    """Builds the screenshot scene of `.context/run/shot.sh` with Horizon and copies the save out.
+
+    The player stands at the viewpoint looking at it (yaw 180, pitch 25); daylight cycle off, time fixed.
+    """
+    ctl = MAIN / "target" / "fast" / "horizon-ctl"
+    client = MAIN / "target" / "fast" / "horizon-client"
+    res = Path(args.resources)
+    out = Path(args.out).resolve()
+    home = Path(tempfile.mkdtemp(prefix="hz-home-"))
+    env = dict(os.environ)
+    env.update(
+        VK_ICD_FILENAMES="/usr/share/vulkan/icd.d/lvp_icd.x86_64.json",
+        HORIZON_TELEMETRY_URL="off",
+        HORIZON_HOME=str(home),
+        HORIZON_LAUNCHER_HOME=tempfile.mkdtemp(),
+        XDG_DATA_HOME=tempfile.mkdtemp(),
+        XDG_CONFIG_HOME=tempfile.mkdtemp(),
+        HORIZON_LAUNCHER_NO_SELF_UPDATE="1",
+        HORIZON_NO_AUDIO="1",
+    )
+    sock = str(home / "ctl.sock")
+    display = free_display()
+    xvfb = subprocess.Popen(["Xvfb", f":{display}", "-screen", "0", "854x480x24", "-nolisten", "tcp"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(1.5)
+    env["DISPLAY"] = f":{display}"
+
+    def c(*a: str, check: bool = True) -> str:
+        r = subprocess.run([str(ctl), "--socket", sock, *a], env=env, cwd=home, capture_output=True, text=True, timeout=200)
+        if check and r.returncode != 0:
+            raise SystemExit(f"horizon-ctl {a[0]} failed: {r.stdout}{r.stderr}")
+        return r.stdout
+
+    c("launch", "--world", "scene", "--seed", str(args.seed), "--creative", "--offscreen", "--wait", "--game", str(client),
+      "--resources", str(res), "--width", "854", "--height", "480", "--time", str(args.time), "--spawn-radius", "0",
+      "--render-distance", "6")
+    try:
+        c("wait-ready", "180")
+        # 26.3's names (advance_time, advance_weather, spawn_mobs); the old camelCase names are gone.
+        for cmd in ("/gamerule advance_time false", "/gamerule advance_weather false", "/gamerule spawn_mobs false",
+                    "/gamerule send_command_feedback false", f"/time set {args.time}", "/weather clear"):
+            print(cmd, c("command", cmd, check=False).strip()[:200])
+        state = json.loads(c("state"))
+        p = state.get("player", state).get("position") or state["player"]["pos"]
+        x, y, z = (int(v) for v in p[:3])
+        print("player at", x, y, z)
+        fills = [
+            f"/fill {x-6} {y-1} {z-14} {x+6} {y-1} {z-3} minecraft:water",
+            f"/fill {x-6} {y-2} {z-14} {x+6} {y-2} {z-3} minecraft:sand",
+            f"/fill {x-6} {y} {z-16} {x+6} {y+4} {z-15} minecraft:stone_bricks",
+            f"/fill {x+3} {y} {z-10} {x+5} {y+2} {z-8} minecraft:oak_leaves",
+            f"/fill {x-4} {y} {z-12} {x-4} {y+3} {z-12} minecraft:glass",
+            f"/setblock {x-2} {y} {z-2} minecraft:short_grass",
+            f"/setblock {x+2} {y} {z-2} minecraft:poppy",
+            f"/setblock {x-1} {y} {z-17} minecraft:torch",
+        ]
+        for f in fills:
+            c("command", f)
+        c("tp", str(x), str(y + 1), str(z))
+        c("look", "180", "25")
+        time.sleep(4)
+        if args.shot:
+            c("screenshot", str(Path(args.shot).resolve()))
+        c("command", "/save-all flush")
+        time.sleep(3)
+    finally:
+        c("quit", check=False)
+        time.sleep(5)
+        xvfb.terminate()
+    save = home / "saves" / "scene"
+    if not (save / "level.dat").exists():
+        raise SystemExit(f"no save at {save}: {list(home.rglob('level.dat'))}")
+    if out.exists():
+        shutil.rmtree(out)
+    shutil.copytree(save, out)
+    print("world", out)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mcdir", default=str(MCDIR))
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("prepare")
+    wo = sub.add_parser("world", help="build the scene save with Horizon")
+    wo.add_argument("--out", default=str(HOME / "worlds" / "scene"))
+    wo.add_argument("--resources", default=str(MAIN / ".context" / "wt" / "prep" / ".local" / "horizon-client" / MC))
+    wo.add_argument("--seed", type=int, default=1)
+    wo.add_argument("--time", type=int, default=6000)
+    wo.add_argument("--shot", help="also save Horizon's own screenshot of the scene here")
     r = sub.add_parser("run")
     r.add_argument("--pack", required=True, help="shader pack zip or folder")
     r.add_argument("--options", help="the pack's option file (`<pack>.txt`, `NAME=value` lines)")
     r.add_argument("--world", required=True, help="save folder (copied)")
     r.add_argument("--out", required=True, help="screenshot path; the log goes beside it as .log")
     r.add_argument("--size", default="854x480")
-    r.add_argument("--wait", type=float, default=60, help="seconds after the world loaded")
+    r.add_argument("--wait", type=float, default=90, help="seconds after the world loaded")
     r.add_argument("--timeout", type=float, default=600)
     r.add_argument("--name", help="run folder name under .local/iris-oracle/runs/")
     r.add_argument("--xmx", default="2G")
@@ -405,6 +508,8 @@ def main() -> int:
     if args.cmd == "prepare":
         prepare(args)
         return 0
+    if args.cmd == "world":
+        return build_world(args)
     return run(args)
 
 
