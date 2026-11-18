@@ -506,10 +506,18 @@ pub fn write(
 
     // Items: definitions, prototypes and translations.
     let mut prototypes = BTreeMap::new();
-    prototypes.insert(
-        "minecraft:air".to_owned(),
-        json!({"minecraft:max_stack_size": 64, "minecraft:item_model": "minecraft:air"}),
-    );
+    let mut air = json!({
+        "minecraft:max_stack_size": 64,
+        "minecraft:item_model": "minecraft:air",
+        "minecraft:item_name": {"translate": "block.minecraft.air"},
+    });
+    if let (Some(a), Some(defaults)) = (
+        air.as_object_mut(),
+        crate::items::block_item_components("air"),
+    ) {
+        a.extend(defaults);
+    }
+    prototypes.insert("minecraft:air".to_owned(), air);
     let mut lang = BTreeMap::new();
     for block in blocks.iter().filter(|b| b.tier != Tier::Support) {
         lang.insert(
@@ -540,15 +548,20 @@ pub fn write(
             &json!({"model": item_model}),
             GENERATOR,
         )?;
-        prototypes.insert(
-            block.key(),
-            json!({
-                "minecraft:max_stack_size": 64,
-                "minecraft:item_model": block.key(),
-                "minecraft:item_name": {"translate": format!("block.minecraft.{}", block.id)},
-                "minecraft:rarity": "common",
-            }),
-        );
+        let mut prototype = json!({
+            "minecraft:max_stack_size": 64,
+            "minecraft:item_model": block.key(),
+            "minecraft:item_name": {"translate": format!("block.minecraft.{}", block.id)},
+            "minecraft:rarity": "common",
+        });
+        // Minecraft's defaults (stack size, fuel, compost...), where it has the item.
+        if let (Some(p), Some(defaults)) = (
+            prototype.as_object_mut(),
+            crate::items::block_item_components(block.id),
+        ) {
+            p.extend(defaults);
+        }
+        prototypes.insert(block.key(), prototype);
         lang.insert(
             format!("item.minecraft.{}", block.id),
             block.name.to_owned(),

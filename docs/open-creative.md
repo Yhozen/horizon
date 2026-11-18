@@ -206,6 +206,10 @@ comes from its identifier ("Rotten Flesh"). Tool rules that name a block tag the
 left out. The edition's own items (`items::all`: tools, apple, stick, ores' materials) keep their
 own definitions.
 
+Block items take Minecraft's default components from the same file (its `blocks` list: stack
+size, furnace fuel, compost chance, container...) when the generator writes their block, so a
+block family added later gets them with no further change.
+
 ### Coverage
 
 `horizon-open-coverage.json` says which registered names have content, so the relay can keep a
