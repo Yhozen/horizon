@@ -256,6 +256,8 @@ pub struct PackPlan {
     pub properties: PackProperties,
     /// Options found in the sources, for `--shader-pack-option` and logs.
     pub options: Vec<PackOption>,
+    /// `uniform.*` / `variable.*` of `shaders.properties` (group 1, binding 1).
+    pub custom_uniforms: crate::custom_uniforms::CustomUniforms,
 }
 
 impl Default for PackPlan {
@@ -274,6 +276,7 @@ impl Default for PackPlan {
             eye_brightness_half_life: 10.0,
             properties: PackProperties::default(),
             options: Vec::new(),
+            custom_uniforms: Default::default(),
         }
     }
 }

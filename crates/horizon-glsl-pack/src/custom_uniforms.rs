@@ -658,9 +658,10 @@ impl Parser<'_, '_> {
             "if" | "ifb" => arity(n >= 3 && n % 2 == 1)?,
             "in" => arity(n >= 2)?,
             "random" | "randomInt" => arity(n == 0 || n == 2)?,
-            "vec2" => arity(n == 2)?,
-            "vec3" => arity(n == 3)?,
-            "vec4" => arity(n == 4)?,
+            // One argument fills every component, as in GLSL.
+            "vec2" => arity(n == 1 || n == 2)?,
+            "vec3" => arity(n == 1 || n == 3)?,
+            "vec4" => arity(n == 1 || n == 4)?,
             "print" => arity(n >= 1)?,
             _ => return Err(format!("unknown function {name}")),
         }
@@ -1194,11 +1195,12 @@ fn call(name: &str, a: &[Val], ctx: &mut Ctx) -> Result<Val, String> {
             }
         }
         "vec2" | "vec3" | "vec4" => {
+            let n = name.as_bytes()[3] - b'0';
             let mut c = [0.0; 4];
-            for (o, v) in c.iter_mut().zip(a) {
-                *o = v.f()?;
+            for (i, o) in c.iter_mut().enumerate().take(usize::from(n)) {
+                *o = a[if a.len() == 1 { 0 } else { i }].f()?;
             }
-            Val::V(a.len() as u8, c)
+            Val::V(n, c)
         }
         "print" => a[a.len() - 1],
         _ => return Err(format!("unknown function {name}")),

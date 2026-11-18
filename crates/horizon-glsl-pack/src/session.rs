@@ -136,6 +136,7 @@ fn read(
         properties: props.properties,
         custom_textures: props.textures,
         options: defaults,
+        custom_uniforms: crate::custom_uniforms::CustomUniforms::parse(&props.entries),
         ..PackPlan::default()
     };
     directives::read_globals(
@@ -252,6 +253,7 @@ fn compile_slots(
     let shadow = ShadowSettings::from(&plan.shadow);
     Ok(CompiledPack {
         programs,
+        custom_uniforms: plan.custom_uniforms.clone(),
         plan,
         skipped,
         blocks,
