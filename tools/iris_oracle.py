@@ -346,6 +346,11 @@ class XInput:
     def key(self, name: str) -> None:
         self._tap(name)
 
+    def hold(self, name: str, down: bool) -> None:
+        code = self.x.XKeysymToKeycode(self.d, self.x.XStringToKeysym(name.encode()))
+        self.xt.XTestFakeKeyEvent(self.d, code, 1 if down else 0, 0)
+        self.x.XFlush(self.d)
+
     def center_pointer(self, w: int, h: int) -> None:
         self.xt.XTestFakeMotionEvent(self.d, -1, w // 2, h // 2, 0)
         self.x.XFlush(self.d)
@@ -383,6 +388,33 @@ def scene_commands(scene: str, pose: dict) -> list[str]:
 SCENE_SETTLE = {"noon": 8, "dusk": 10, "underwater": 25}
 
 
+def write_scene_datapack(save: Path, scenes: list[str], pose: dict) -> None:
+    """A datapack in the copied save (data pack format 121, 26.3): each time the player starts sneaking, the next scene's commands run
+    and `say oracle-scene-N` marks it in the log."""
+    dp = save / "datapacks" / "oracle"
+    fn = dp / "data" / "oracle" / "function"
+    fn.mkdir(parents=True, exist_ok=True)
+    (dp / "pack.mcmeta").write_text(json.dumps({"pack": {"description": "iris oracle scenes", "min_format": 121,
+                                                         "max_format": 121}}))
+    tags = dp / "data" / "minecraft" / "tags" / "function"
+    tags.mkdir(parents=True, exist_ok=True)
+    (tags / "tick.json").write_text(json.dumps({"values": ["oracle:tick"]}))
+    # `sneak_time` counts ticks spent sneaking; it is reset every tick, so 1 means "sneaking now".
+    # (A predicate file would do too, but a malformed registry entry stops the world from loading.)
+    (fn / "tick.mcfunction").write_text(
+        "scoreboard objectives add oracle dummy\n"
+        "scoreboard objectives add oracle_sneak minecraft.custom:minecraft.sneak_time\n"
+        "execute as @a[scores={oracle_sneak=1..}] unless score #held oracle matches 1 run function oracle:next\n"
+        "execute as @a[scores={oracle_sneak=0}] run scoreboard players set #held oracle 0\n"
+        "scoreboard players set @a oracle_sneak 0\n")
+    nxt = ["scoreboard players set #held oracle 1", "scoreboard players add #stage oracle 1"]
+    for i, scene in enumerate(scenes):
+        nxt.append(f"execute if score #stage oracle matches {i + 1} run function oracle:scene_{i + 1}")
+        body = [c.lstrip("/") for c in scene_commands(scene, pose)] + [f"say oracle-scene-{i + 1}"]
+        (fn / f"scene_{i + 1}.mcfunction").write_text("\n".join(body) + "\n")
+    (fn / "next.mcfunction").write_text("\n".join(nxt) + "\n")
+
+
 def run(args) -> int:
     mcdir = Path(args.mcdir)
     version = json.loads((mcdir / "versions" / MC / f"{MC}.json").read_text())
@@ -413,6 +445,9 @@ def run(args) -> int:
     (game_dir / "config" / "iris.properties").write_text("".join(f"{k}={v}\n" for k, v in iris_props.items()))
     write_options(game_dir, args.option or [])
     shutil.copytree(world, game_dir / "saves" / world.name)
+    if args.scenes:
+        pose = json.loads((world / "oracle-pose.json").read_text())
+        write_scene_datapack(game_dir / "saves" / world.name, args.scenes.split(","), pose)
 
     natives = Path(tempfile.mkdtemp(prefix="iris-natives-"))
     subst = {
@@ -511,15 +546,28 @@ def run(args) -> int:
             time.sleep(1)
         probe.unlink(missing_ok=True)
         if status == "ok" and args.scenes:
-            pose = json.loads((world / "oracle-pose.json").read_text())
+            # Each scene's commands run from the datapack (see `write_scene_datapack`) when the player starts
+            # sneaking: hold Shift until the log shows the scene's marker. Typing in the chat is not
+            # reliable when a pack draws a frame every few seconds; a held key is.
             xin = XInput(f":{display}")
             xin.center_pointer(w, h)
-            if args.hide_gui:
-                xin.key("F1")
-            for scene in args.scenes.split(","):
-                for cmd in scene_commands(scene, pose):
-                    xin.command(cmd)
-                time.sleep(SCENE_SETTLE.get(scene, 10))
+            for i, scene in enumerate(args.scenes.split(",")):
+                marker = f"oracle-scene-{i + 1}"
+                xin.hold("Shift_L", True)
+                t0 = time.time()
+                while marker not in log_path.read_text(errors="replace") and time.time() - t0 < 180:
+                    if game_proc.poll() is not None:
+                        break
+                    time.sleep(1)
+                xin.hold("Shift_L", False)
+                if marker not in log_path.read_text(errors="replace"):
+                    status = f"scene {scene} never ran (no {marker} in the log)"
+                    break
+                print(f"scene {scene} set")
+                if i == 0 and args.hide_gui:
+                    time.sleep(2)
+                    xin.key("F1")
+                time.sleep(SCENE_SETTLE.get(scene, 10) * args.settle)
                 path = out.with_name(f"{out.stem}-{scene}.png")
                 if grab(path):
                     if args.mask_hud and not args.hide_gui:
@@ -777,6 +825,7 @@ def main() -> int:
     r.add_argument("--keep", action="store_true", help="keep the copied save")
     r.add_argument("--scenes", help="comma list of noon, dusk, underwater: typed as commands in one game, one "
                    "picture each (OUT-<scene>.png); needs <world>/oracle-pose.json")
+    r.add_argument("--settle", type=float, default=1.0, help="multiply the per-scene settle times")
     r.add_argument("--no-hide-gui", dest="hide_gui", action="store_false", help="with --scenes: do not press F1")
     r.add_argument("--no-mask-hud", dest="mask_hud", action="store_false", help="leave the hotbar and crosshair visible")
     args = ap.parse_args()
