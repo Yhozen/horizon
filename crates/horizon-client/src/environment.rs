@@ -148,8 +148,9 @@ impl Environment {
         Self::load_dimension(root, "overworld", true)
     }
     /// A dimension these resources do not have (Horizon Open Creative has only
-    /// the overworld): the built-in base attributes, no timeline. Nothing can
-    /// travel there, so nothing samples it; it only fills the slot.
+    /// the overworld): the built-in base attributes, no timeline. Its own
+    /// worlds cannot travel there, so nothing samples it; on a server the
+    /// server's dimension type takes its place (`from_dimension_type`).
     pub fn unavailable() -> Self {
         let mut environment = Self {
             period: 24000,
@@ -172,6 +173,20 @@ impl Environment {
         let dimension: Value = serde_json::from_slice(&fs::read(
             root.join(format!("data/minecraft/dimension_type/{dimension}.json")),
         )?)?;
+        Self::build(&timeline, &dimension)
+    }
+    /// A dimension as a server describes it (its synchronized dimension type,
+    /// as JSON): its base attributes, no timeline, as `load_dimension` reads a
+    /// dimension without the day cycle. Horizon Open Creative has no Nether or
+    /// End of its own, so on a server it takes theirs from the server.
+    pub fn from_dimension_type(dimension: &Value) -> Self {
+        Self::build(
+            &serde_json::json!({"period_ticks": 24000, "tracks": {}}),
+            dimension,
+        )
+        .unwrap_or_else(|_| Self::unavailable())
+    }
+    fn build(timeline: &Value, dimension: &Value) -> Result<Self> {
         let mut tracks = HashMap::new();
         for (name, track) in timeline["tracks"].as_object().ok_or("invalid timeline")? {
             let easing = match &track["ease"] {
@@ -403,5 +418,45 @@ pub fn apply_weather(sky: &mut Sky, rain: f32, thunder: f32) {
                 s[3],
             ],
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Environment;
+
+    #[test]
+    fn a_servers_dimension_type_gives_its_sky_and_fog() {
+        // The End's dimension type as a 26.3 server synchronizes it (attributes
+        // abridged), read as JSON from its NBT.
+        let end = serde_json::json!({
+            "has_skylight": 1,
+            "attributes": {
+                "minecraft:visual/fog_color": "#181318",
+                "minecraft:visual/sky_color": "#000000",
+                "minecraft:visual/sky_light_color": "#ac60cd",
+                "minecraft:visual/sky_light_factor": 0.0,
+                "minecraft:gameplay/bed_rule": {"can_sleep": "never"},
+            },
+        });
+        let sky = Environment::from_dimension_type(&end).sample(6000, None, None);
+        assert_eq!(sky.sky_color, [0.0; 3]);
+        assert!((sky.fog_color[0] - 24.0 / 255.0).abs() < 1e-6);
+        assert!((sky.sky_light_color[2] - 205.0 / 255.0).abs() < 1e-6);
+        assert_eq!(sky.sky_light_factor, 0.0);
+        // No day cycle: the same at midnight.
+        assert_eq!(
+            Environment::from_dimension_type(&end)
+                .sample(18000, None, None)
+                .sky_light_factor,
+            0.0
+        );
+        // The Nether's fog distances.
+        let nether = serde_json::json!({"attributes": {
+            "minecraft:visual/fog_start_distance": 10.0,
+            "minecraft:visual/fog_end_distance": 96.0,
+        }});
+        let sky = Environment::from_dimension_type(&nether).sample(0, None, None);
+        assert_eq!((sky.fog_start, sky.fog_end), (10.0, 96.0));
     }
 }

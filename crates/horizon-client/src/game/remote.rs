@@ -113,6 +113,9 @@ pub(super) struct Remote {
     status: String,
     pub(super) entity_id: i32,
     dimension: DimensionType,
+    /// The current dimension's environment as the server describes it, for
+    /// Horizon Open Creative in the dimensions its bundle does not have.
+    pub(super) environment: Option<horizon_client::environment::Environment>,
     biome_map: Vec<u16>,
     biome_bits: u8,
     view_distance: i32,
@@ -395,6 +398,7 @@ impl Game<'_> {
             status: "Connecting to the server...".into(),
             entity_id: 0,
             dimension: DimensionType::vanilla("minecraft:overworld"),
+            environment: None,
             biome_map: Vec::new(),
             biome_bits: 7,
             view_distance: self.settings.render_distance,
@@ -995,6 +999,19 @@ impl Game<'_> {
             return;
         };
         let dimension = r.registries.dimension(spawn.dimension_type);
+        // The open bundle has the overworld only: elsewhere its sky and fog
+        // come from the server's dimension type.
+        r.environment = (self.options.profile.is_open() && dimension.name != "minecraft:overworld")
+            .then(|| {
+                let data = r
+                    .registries
+                    .data("minecraft:dimension_type", spawn.dimension_type);
+                horizon_client::environment::Environment::from_dimension_type(
+                    &data
+                        .map(horizon_client::item_render::tag_json)
+                        .unwrap_or_default(),
+                )
+            });
         let same = r.dimension.name == dimension.name && keep_world;
         r.dimension = dimension;
         r.game_mode = spawn.game_type;

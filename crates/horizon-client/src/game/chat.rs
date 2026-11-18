@@ -20,13 +20,24 @@ fn chat_tree<'a>(
     mods: &'a super::mods::ModsState,
     open: bool,
 ) -> &'a horizon_client::command::Dispatcher {
-    if open {
-        // Horizon Open Creative: only the commands it runs.
-        return super::open_profile::command_tree();
-    }
-    match remote.as_ref().and_then(|r| r.commands.as_ref()) {
+    pick_tree(
+        remote.as_ref().and_then(|r| r.commands.as_ref()),
+        open,
+        || mods.dispatcher(),
+    )
+}
+/// A server's tree wins, the open edition's too: the server runs the commands,
+/// so they are what it offers (a Java server through the relay sends its own).
+/// Without one, Horizon Open Creative offers only the commands it runs.
+fn pick_tree<'a>(
+    server: Option<&'a horizon_client::command::Dispatcher>,
+    open: bool,
+    own: impl FnOnce() -> &'a horizon_client::command::Dispatcher,
+) -> &'a horizon_client::command::Dispatcher {
+    match server {
         Some(tree) => tree,
-        None => mods.dispatcher(),
+        None if open => super::open_profile::command_tree(),
+        None => own(),
     }
 }
 use winit::{
@@ -989,4 +1000,27 @@ fn hover_rows(hover: &horizon_client::text::Text) -> Vec<(String, u32)> {
             (text, horizon_client::hud::rgba(r, g, b, 255))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pick_tree;
+
+    #[test]
+    fn a_server_tree_lifts_the_open_command_cut() {
+        let own = horizon_client::command::vanilla::game_dispatcher();
+        // A Java server's tree, through the relay: its commands, the open
+        // edition's cut or not.
+        let server = own.with_root_commands(&["weather", "execute", "tp"]);
+        let on_server = pick_tree(Some(&server), true, || own);
+        assert!(on_server.find("weather").is_some());
+        assert!(on_server.find("execute").is_some());
+        assert!(on_server.find("give").is_none());
+        // Open's own worlds keep the commands the edition runs.
+        let open = pick_tree(None, true, || own);
+        assert!(open.find("weather").is_none());
+        assert!(open.find("give").is_some());
+        // The Minecraft-backed game is unchanged.
+        assert!(pick_tree(None, false, || own).find("weather").is_some());
+    }
 }
