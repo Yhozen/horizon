@@ -5017,6 +5017,18 @@ impl Game<'_> {
             batch.text(atlas, message, (w - tw) / 2.0, 85.0, u32::MAX, true);
         }
     }
+    /// Every entity the server sent and has not removed, but this client's
+    /// own player: (entity id, type name, last known position).
+    pub(super) fn remote_entities(&self) -> Vec<(i32, &str, [f64; 3])> {
+        let Some(r) = self.remote.as_ref() else {
+            return Vec::new();
+        };
+        r.entities
+            .iter()
+            .filter(|(id, _)| **id != r.entity_id)
+            .map(|(id, t)| (*id, t.kind.as_str(), t.position))
+            .collect()
+    }
     /// Status for `horizon-ctl status`.
     /// The other players' entities in the level and their names (from the
     /// player list).

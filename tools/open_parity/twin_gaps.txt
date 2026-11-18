@@ -1,0 +1,6 @@
+attributes:minecraft:below_name_distance
+attributes:minecraft:flying_speed
+attributes:minecraft:follow_range
+attributes:minecraft:name_tag_distance
+attributes:minecraft:waypoint_receive_range
+attributes:minecraft:waypoint_transmit_range
