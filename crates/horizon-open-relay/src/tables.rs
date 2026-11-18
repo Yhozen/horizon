@@ -6,7 +6,9 @@
 //!   server.jar --reports`, see `vanilla.rs`), from the operator's own server jar;
 //! - the open bundle the players run (`registries.json`, `facts.json`,
 //!   `horizon-open-provenance.json`, `attributes.json`), so the relay's
-//!   numbers are the players'.
+//!   numbers are the players'. Its `horizon-open-coverage.json` says which
+//!   names have content: a name without is treated as absent, so the relay
+//!   keeps a stand-in for it.
 use crate::rules;
 use horizon_protocol::registry::{Builtin, Ids};
 use horizon_world::{chunk::BlockState, registry::BlockRegistry};
@@ -69,7 +71,83 @@ pub struct Open {
     pub visible: std::collections::HashSet<String>,
     /// `minecraft:brand` an open player expects (`assets::server_brand`).
     pub brand: String,
+    /// Which registered names have content (`horizon-open-coverage.json`).
+    pub coverage: Coverage,
 }
+
+/// `horizon-open-coverage.json` (docs/open-creative.md, "Coverage"): per
+/// registry, the names with content or the names without. A registry it
+/// doesn't list, or a bundle without the file, has content for every name.
+#[derive(Clone, Debug, Default)]
+pub struct Coverage {
+    registries: HashMap<String, Listed>,
+}
+#[derive(Clone, Debug)]
+enum Listed {
+    Content(std::collections::HashSet<String>),
+    Missing(std::collections::HashSet<String>),
+}
+impl Coverage {
+    pub fn parse(json: &[u8]) -> Result<Self> {
+        let v: serde_json::Value =
+            serde_json::from_slice(json).map_err(|e| format!("horizon-open-coverage.json: {e}"))?;
+        if v["schema"].as_i64() != Some(1) {
+            return Err("horizon-open-coverage.json: unknown schema".into());
+        }
+        let names = |list: &serde_json::Value| {
+            list.as_array().map(|a| {
+                a.iter()
+                    .filter_map(|n| n.as_str().map(String::from))
+                    .collect()
+            })
+        };
+        let mut registries = HashMap::new();
+        for (registry, entry) in v["registries"]
+            .as_object()
+            .ok_or("horizon-open-coverage.json: no registries")?
+        {
+            let listed = match (names(&entry["content"]), names(&entry["missing"])) {
+                (Some(content), None) => Listed::Content(content),
+                (None, Some(missing)) => Listed::Missing(missing),
+                _ => {
+                    return Err(format!(
+                        "horizon-open-coverage.json: {registry} needs one of content or missing"
+                    ));
+                }
+            };
+            registries.insert(registry.clone(), listed);
+        }
+        Ok(Self { registries })
+    }
+    pub fn has_content(&self, registry: &str, name: &str) -> bool {
+        match self.registries.get(registry) {
+            None => true,
+            Some(Listed::Content(c)) => c.contains(name),
+            Some(Listed::Missing(m)) => !m.contains(name),
+        }
+    }
+    /// The registry with every name lacking content blanked out, so lookups
+    /// by name miss it (a complete registry is returned as it is).
+    pub fn only_content(&self, registry: &str, ids: Ids) -> Ids {
+        match self.registries.get(registry) {
+            None => ids,
+            Some(Listed::Missing(m)) if m.is_empty() => ids,
+            Some(_) => Ids::from_names(
+                ids.names
+                    .into_iter()
+                    .map(|n| {
+                        if self.has_content(registry, &n) {
+                            n
+                        } else {
+                            String::new()
+                        }
+                    })
+                    .collect(),
+            ),
+        }
+    }
+}
+
 impl Open {
     pub fn load(root: &Path) -> Result<Self> {
         let read = |name: &str| {
@@ -91,6 +169,11 @@ impl Open {
             BlockRegistry::from_facts_json_with_flags(read("facts.json")?.as_slice())
                 .map_err(|e| format!("facts.json: {e}"))?;
         let attributes = attribute_names(&read("attributes.json")?)?;
+        let coverage = match fs::read(root.join(COVERAGE)) {
+            Ok(json) => Coverage::parse(&json)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Coverage::default(),
+            Err(e) => return Err(format!("{}: {e}", root.join(COVERAGE).display())),
+        };
         let mut visible: std::collections::HashSet<String> = ["minecraft:air", "minecraft:water"]
             .into_iter()
             .map(String::from)
@@ -115,9 +198,12 @@ impl Open {
             flags,
             visible,
             brand: brand(&read("horizon-open-provenance.json")?),
+            coverage,
         })
     }
 }
+
+const COVERAGE: &str = "horizon-open-coverage.json";
 
 /// The attribute names of a bundle's `attributes.json`, in wire-id order.
 pub fn attribute_names(json: &[u8]) -> Result<Ids> {
@@ -219,6 +305,16 @@ impl Tables {
                 .cloned()
                 .ok_or_else(|| format!("registry {name} is missing"))
         };
+        // An open registry with the names that lack content blanked out.
+        let content = |name: &str| -> Result<Ids> {
+            Ok(open
+                .coverage
+                .only_content(name, get(&open.registries, name)?))
+        };
+        // A block players can see: a definition in the bundle and content.
+        let shown = |name: &str| {
+            open.visible.contains(name) && open.coverage.has_content("minecraft:block", name)
+        };
         // Open states grouped by block name, for the best property match.
         let mut open_by_name: HashMap<&str, Vec<(u32, &BlockState)>> = HashMap::new();
         for i in 0..open.states.len() {
@@ -256,11 +352,20 @@ impl Tables {
         let mut cache: HashMap<String, String> = HashMap::new();
         let states: Vec<u32> = vanilla_states
             .iter()
-            .map(|s| {
-                if open.visible.contains(&s.name)
-                    && let Some(id) = pick(&s.name, &s.properties)
-                {
-                    return id;
+            .enumerate()
+            .map(|(i, s)| {
+                if shown(&s.name) {
+                    // The same state under the same number: no search.
+                    if open
+                        .states
+                        .state(horizon_world::registry::BlockStateId(i as u32))
+                        == Some(s)
+                    {
+                        return i as u32;
+                    }
+                    if let Some(id) = pick(&s.name, &s.properties) {
+                        return id;
+                    }
                 }
                 substituted_blocks += 1;
                 let short = s.name.strip_prefix("minecraft:").unwrap_or(&s.name);
@@ -270,15 +375,19 @@ impl Tables {
                     .entry(key)
                     .or_insert_with(|| format!("minecraft:{}", rules::block(short, wet)))
                     .clone();
-                if target == "minecraft:air" && !s.name.ends_with("air") {
+                let air = target == "minecraft:air" || !shown(&target);
+                if air && !s.name.ends_with("air") {
                     hidden.insert(s.name.clone());
+                }
+                if air && target != "minecraft:air" {
+                    return open_air;
                 }
                 pick(&target, &s.properties).unwrap_or(open_air)
             })
             .collect();
 
         let vanilla_items = get(vanilla, "minecraft:item")?;
-        let open_items = get(&open.registries, "minecraft:item")?;
+        let open_items = content("minecraft:item")?;
         let vanilla_block_names: std::collections::HashSet<&str> =
             vanilla_states.iter().map(|s| s.name.as_str()).collect();
         let stick = open_items
@@ -318,8 +427,8 @@ impl Tables {
             .collect();
 
         let vanilla_entities = get(vanilla, "minecraft:entity_type")?;
-        let open_entities = get(&open.registries, "minecraft:entity_type")?;
-        let components_open = get(&open.registries, "minecraft:data_component_type")?;
+        let open_entities = content("minecraft:entity_type")?;
+        let components_open = content("minecraft:data_component_type")?;
         let vanilla_components = get(vanilla, "minecraft:data_component_type")?;
         let open_component_names = components_open
             .names
@@ -345,9 +454,14 @@ impl Tables {
                 .collect(),
             menus: by_name(
                 &get(vanilla, "minecraft:menu")?,
-                &get(&open.registries, "minecraft:menu")?,
+                &content("minecraft:menu")?,
             ),
-            attributes: by_name(&get(vanilla, "minecraft:attribute")?, &open.attributes),
+            attributes: by_name(
+                &get(vanilla, "minecraft:attribute")?,
+                &open
+                    .coverage
+                    .only_content("minecraft:attribute", open.attributes.clone()),
+            ),
             // Components keep their number on both sides or are dropped: the
             // shared item codec reads each by its vanilla number.
             components: by_name(&vanilla_components, &components_open)
@@ -454,6 +568,33 @@ pub(crate) mod fixture {
     }
 
     pub fn tables() -> Tables {
+        tables_covered(Coverage::default(), false)
+    }
+
+    /// The covered fixture's registries without a coverage file.
+    pub fn registered() -> Tables {
+        tables_covered(Coverage::default(), true)
+    }
+
+    /// The fixture with a coverage file: every registry lists a few names
+    /// the bundle registers without content.
+    pub fn covered() -> Tables {
+        let json = serde_json::json!({"schema": 1, "registries": {
+            "minecraft:block": {"total": 12, "missing": ["minecraft:spruce_log", "minecraft:oak_planks"]},
+            "minecraft:item": {"total": 9, "missing": ["minecraft:rotten_flesh", "minecraft:spruce_log"]},
+            "minecraft:entity_type": {"total": 7, "content": [
+                "minecraft:player", "minecraft:item", "minecraft:experience_orb",
+                "minecraft:falling_block", "minecraft:skeleton",
+            ]},
+            "minecraft:menu": {"total": 2, "content": ["minecraft:generic_9x1"]},
+            "minecraft:data_component_type": {"total": 2, "missing": []},
+            "minecraft:attribute": {"total": 3, "missing": ["minecraft:scale"]},
+        }});
+        tables_covered(Coverage::parse(json.to_string().as_bytes()).unwrap(), true)
+    }
+
+    /// `every_mob`: the bundle also registers a zombie and a wither skeleton.
+    fn tables_covered(coverage: Coverage, every_mob: bool) -> Tables {
         let vanilla_states = vec![
             state("air", &[]),
             state("stone", &[]),
@@ -484,6 +625,7 @@ pub(crate) mod fixture {
                 "netherite_pickaxe",
                 "dark_oak_log",
                 "apple",
+                "rotten_flesh",
             ]),
         );
         vanilla.registries.insert(
@@ -520,17 +662,22 @@ pub(crate) mod fixture {
                 "apple",
                 "stick",
                 "diamond_pickaxe",
+                "rotten_flesh",
             ]),
         );
         open_registries.registries.insert(
             "minecraft:entity_type".into(),
-            registry(&[
-                "player",
-                "item",
-                "experience_orb",
-                "falling_block",
-                "skeleton",
-            ]),
+            registry(
+                &[
+                    "player",
+                    "item",
+                    "experience_orb",
+                    "falling_block",
+                    "skeleton",
+                    "zombie",
+                    "wither_skeleton",
+                ][..if every_mob { 7 } else { 5 }],
+            ),
         );
         open_registries.registries.insert(
             "minecraft:menu".into(),
@@ -592,6 +739,7 @@ pub(crate) mod fixture {
             flags,
             visible,
             brand: brand(b"{}"),
+            coverage,
         };
         Tables::build(&vanilla_states, &vanilla, &open).unwrap()
     }
@@ -599,7 +747,7 @@ pub(crate) mod fixture {
 
 #[cfg(test)]
 mod tests {
-    use super::fixture::tables;
+    use super::fixture::{covered, registered, tables};
 
     #[test]
     fn same_names_keep_their_properties() {
@@ -670,5 +818,58 @@ mod tests {
             "armor, below_name_distance (not in the bundle), oxygen_bonus, scale"
         );
         assert!(!t.commands_compatible, "the fixture has no argument types");
+    }
+
+    #[test]
+    fn names_without_content_are_treated_as_absent() {
+        let (all, t) = (registered(), covered());
+        // Without a coverage file, every registered name has content.
+        assert_eq!(all.item(8).unwrap().id, 7, "rotten flesh as itself");
+        assert_eq!(all.entity_type(0), Some(5), "the bundle's zombie");
+        assert_eq!(all.entity_type(5), Some(6), "the bundle's wither skeleton");
+        // Rotten flesh is registered without content: the apple, named.
+        let flesh = t.item(8).unwrap();
+        assert_eq!(
+            (flesh.id, flesh.shown_as.as_deref()),
+            (4, Some("Rotten Flesh"))
+        );
+        // A dark oak log item would be the spruce log, which has none: a stick.
+        assert_eq!(t.item(6).unwrap().id, 5);
+        assert_eq!(t.item_back(7), None);
+        // A zombie without content stays hidden; a wither skeleton without
+        // content is the skeleton again.
+        assert_eq!(t.entity_type(0), None);
+        assert_eq!(t.stand_in(0), None);
+        assert_eq!(t.entity_type(5), None);
+        assert_eq!(t.stand_in(5), Some(4));
+        assert_eq!(t.entity_type(3), Some(0));
+        // Crafting has no screen.
+        assert_eq!((t.menu(0), t.menu(1)), (Some(0), None));
+        // Blocks: spruce logs and planks have no content, so the dark oak
+        // logs and the waterlogged slab that become them are air.
+        assert_eq!([t.state(6), t.state(7), t.state(8)], [0, 0, 0]);
+        assert_eq!(t.state(10), 0);
+        assert!(
+            t.hidden_blocks
+                .contains(&"minecraft:dark_oak_log".to_string())
+        );
+        assert_eq!((t.state(1), t.state(4)), (1, 3), "covered blocks unchanged");
+        // Scale has no content; the others keep their numbers.
+        assert_eq!(
+            (0..4).map(|i| t.attribute(i)).collect::<Vec<_>>(),
+            vec![Some(2), None, Some(1), None]
+        );
+        assert_eq!(t.component(1), Some(1));
+    }
+
+    #[test]
+    fn coverage_needs_one_list_per_registry() {
+        use super::Coverage;
+        let both = serde_json::json!({"schema": 1, "registries": {
+            "minecraft:item": {"total": 1, "content": [], "missing": []},
+        }});
+        assert!(Coverage::parse(both.to_string().as_bytes()).is_err());
+        let c = Coverage::parse(br#"{"schema": 1, "registries": {}}"#).unwrap();
+        assert!(c.has_content("minecraft:item", "minecraft:anything"));
     }
 }
