@@ -68,6 +68,15 @@ pub enum Faces {
         front: &'static str,
         side: &'static str,
     },
+    /// A cube with one texture per face: down, up, north, south, west,
+    /// east (rotated by `axis` when it has one).
+    Cube([&'static str; 6]),
+    /// A cube facing its `facing` (north unturned), with another front
+    /// when `lit` (furnaces).
+    Facing {
+        faces: [&'static str; 6],
+        lit_north: &'static str,
+    },
     Cross(&'static str),
     Fluid {
         still: &'static str,
@@ -86,6 +95,8 @@ pub enum Sound {
     Wood,
     Glass,
     Wool,
+    /// Another of Minecraft's sound types, by name (`block.<name>.break`).
+    Named(&'static str),
     None,
 }
 impl Sound {
@@ -98,6 +109,7 @@ impl Sound {
             Self::Wood => "wood",
             Self::Glass => "glass",
             Self::Wool => "wool",
+            Self::Named(name) => name,
             Self::None => "stone",
         }
     }
@@ -195,6 +207,8 @@ pub struct Block {
     pub hardness: f32,
     pub resistance: f32,
     pub light: u8,
+    /// Light it gives in its `lit=true` states (furnaces).
+    pub lit_light: u8,
     /// Light it absorbs (0..=15).
     pub opacity: u8,
     pub sound: Sound,
@@ -325,6 +339,7 @@ const fn cube(
         hardness,
         resistance: hardness * 3.0,
         light: 0,
+        lit_light: 0,
         opacity: 15,
         sound,
         classes: BLOCK,
@@ -493,6 +508,7 @@ const fn plant(id: &'static str, name: &'static str, map_color: u32) -> Block {
         hardness: 0.0,
         resistance: 0.0,
         light: 0,
+        lit_light: 0,
         opacity: 0,
         sound: Sound::Grass,
         classes: BLOCK,
@@ -509,7 +525,9 @@ const fn plant(id: &'static str, name: &'static str, map_color: u32) -> Block {
 pub fn defined() -> Vec<Block> {
     let vanilla: HashMap<&str, &BlockStates> =
         numbering::blocks().iter().map(|b| (b.name, b)).collect();
-    authored()
+    let mut blocks = authored();
+    crate::cubes::add(&mut blocks);
+    blocks
         .into_iter()
         .map(|mut block| {
             let states = vanilla
@@ -537,6 +555,7 @@ fn authored() -> Vec<Block> {
             hardness: 0.0,
             resistance: 0.0,
             light: 0,
+            lit_light: 0,
             opacity: 0,
             sound: Sound::None,
             classes: &["AirBlock", "Block"],
@@ -702,6 +721,7 @@ fn authored() -> Vec<Block> {
             hardness: 100.0,
             resistance: 100.0,
             light: 0,
+            lit_light: 0,
             opacity: 1,
             sound: Sound::None,
             classes: &["LiquidBlock", "Block"],
@@ -971,6 +991,7 @@ pub fn support(id: &'static str) -> Block {
         hardness: 0.0,
         resistance: 0.0,
         light: 0,
+        lit_light: 0,
         opacity: 0,
         sound: Sound::None,
         classes: if air { &["AirBlock", "Block"] } else { BLOCK },
@@ -1050,6 +1071,14 @@ impl Block {
             _ => Vec::new(),
         }
     }
+    /// The light it gives in a state.
+    pub fn emission(&self, properties: &[(&str, &str)]) -> u8 {
+        if properties.contains(&("lit", "true")) {
+            self.lit_light
+        } else {
+            self.light
+        }
+    }
     /// Every texture its model and fluid renderer read.
     pub fn textures(&self) -> Vec<&'static str> {
         match self.faces {
@@ -1063,9 +1092,26 @@ impl Block {
                 front,
                 side,
             } => vec![top, bottom, front, side],
+            Faces::Cube(faces) => unique(&faces),
+            Faces::Facing { faces, lit_north } => {
+                let mut all = unique(&faces);
+                all.push(lit_north);
+                all
+            }
             Faces::Fluid { still, flow } => vec![still, flow],
         }
     }
+}
+
+/// Names in first-seen order, each once.
+fn unique(names: &[&'static str]) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for name in names {
+        if !out.contains(name) {
+            out.push(*name);
+        }
+    }
+    out
 }
 
 /// The open bundle's blocks in Minecraft's registry order: its own, and an
@@ -1132,7 +1178,7 @@ mod tests {
     }
 
     /// The number of palette blocks (checked again by the client's test).
-    pub const PALETTE_BLOCKS: usize = 86;
+    pub const PALETTE_BLOCKS: usize = 281;
 
     #[test]
     fn states_vary_the_last_property_fastest_and_have_a_default() {

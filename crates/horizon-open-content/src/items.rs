@@ -365,6 +365,11 @@ pub fn recipes(blocks: &[Block]) -> Vec<(String, Value)> {
         .filter(|b| b.has_item() && b.id.ends_with("_log"))
     {
         let species = b.id.trim_end_matches("_log");
+        // Stripped logs have no planks of their own.
+        let planks = format!("{species}_planks");
+        if !blocks.iter().any(|p| p.id == planks && p.has_item()) {
+            continue;
+        }
         out.push((
             format!("{species}_planks"),
             shapeless(&[&m(b.id)], &format!("{species}_planks"), 4, "building"),
