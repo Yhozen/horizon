@@ -3,6 +3,7 @@
 use crate::Result;
 use horizon_core::fs;
 use horizon_core::{noise::SimplexNoise, random::LegacyRandom};
+use horizon_world::nbt::Tag;
 use serde_json::Value;
 use std::{collections::HashMap, path::Path};
 
@@ -42,6 +43,27 @@ pub struct BiomeInfo {
     /// The biome's own fog colour attribute; otherwise the dimension's applies.
     pub fog: Option<u32>,
     pub water_fog: u32,
+}
+/// Biome ids the chunk storage holds (`chunk::BIOME_STRATEGY`'s 7 bits).
+const SERVER_ID_LIMIT: usize = 128;
+/// A biome's sky, fog and water fog colours: what the client draws of a
+/// server's biome these resources lack (`Biomes::server_ids`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ServerBiome {
+    pub sky: Option<u32>,
+    pub fog: Option<u32>,
+    pub water_fog: u32,
+}
+impl ServerBiome {
+    /// From a biome's definition (its synchronized data, as JSON).
+    pub fn from_json(v: &Value) -> Self {
+        let attributes = &v["attributes"];
+        Self {
+            sky: color(&attributes["minecraft:visual/sky_color"]),
+            fog: color(&attributes["minecraft:visual/fog_color"]),
+            water_fog: color(&attributes["minecraft:visual/water_fog_color"]).unwrap_or(0x050533),
+        }
+    }
 }
 pub struct Biomes {
     pub list: Vec<BiomeInfo>,
@@ -165,8 +187,52 @@ impl Biomes {
             .copied()
             .unwrap_or(0)
     }
+    /// A biome by id; a server's biome these resources lack (an id past
+    /// `list`, `server_ids`) reads as plains, as its name would.
     pub fn get(&self, id: u16) -> &BiomeInfo {
-        &self.list[usize::from(id).min(self.list.len() - 1)]
+        self.list.get(usize::from(id)).unwrap_or_else(|| {
+            &self.list[usize::from(self.id("minecraft:plains")).min(self.list.len() - 1)]
+        })
+    }
+    /// The local id of each biome of a server's registry (in its order) and
+    /// the server biomes these resources lack, which take the ids after
+    /// `list` in turn, with the colours their synchronized data gives
+    /// (`server_colours`). Ids stop where the chunk storage does
+    /// (`chunk::BIOME_STRATEGY`); past it a missing biome is plains.
+    pub fn server_ids(&self, registry: &[(String, Option<Tag>)]) -> (Vec<u16>, Vec<ServerBiome>) {
+        let mut missing = Vec::new();
+        let mut ids = Vec::with_capacity(registry.len());
+        for (name, data) in registry {
+            let next = self.list.len() + missing.len();
+            ids.push(match self.index.get(name) {
+                Some(&id) => id,
+                None if next < SERVER_ID_LIMIT => {
+                    let json = data.as_ref().map(crate::item_render::tag_json);
+                    missing.push(ServerBiome::from_json(&json.unwrap_or_default()));
+                    next as u16
+                }
+                None => self.id(name),
+            });
+        }
+        (ids, missing)
+    }
+    /// The sky, fog and water fog colours of biome `id`: these resources'
+    /// own, or for a server's biome they lack, the server's (`server`).
+    pub fn server_colours(&self, id: u16, server: &[ServerBiome]) -> ServerBiome {
+        match usize::from(id)
+            .checked_sub(self.list.len())
+            .and_then(|i| server.get(i))
+        {
+            Some(s) => *s,
+            None => {
+                let b = self.get(id);
+                ServerBiome {
+                    sky: b.sky,
+                    fog: b.fog,
+                    water_fog: b.water_fog,
+                }
+            }
+        }
     }
     pub fn grass(&self, id: u16, x: f64, z: f64) -> u32 {
         let b = self.get(id);
@@ -280,5 +346,80 @@ mod blend_tests {
             last = v;
         }
         assert!(at(-2.0) > 0.0 && at(-2.0) < 0.5);
+    }
+}
+
+#[cfg(test)]
+mod server_biome_tests {
+    use super::*;
+    use horizon_world::nbt::JavaString;
+
+    fn info(name: &str, sky: u32) -> BiomeInfo {
+        BiomeInfo {
+            spawns: HashMap::new(),
+            spawn_costs: HashMap::new(),
+            creature_probability: 0.1,
+            name: name.into(),
+            temperature: 0.8,
+            downfall: 0.4,
+            precipitation: false,
+            grass: 0x91BD59,
+            modifier: GrassModifier::None,
+            foliage: 0x77AB2F,
+            dry_foliage: 0x5D4930,
+            water: 0x3F76E4,
+            sky: Some(sky),
+            fog: Some(sky),
+            water_fog: 0x050533,
+        }
+    }
+
+    /// A biome's synchronized data: its attributes compound.
+    fn data(attributes: &[(&str, &str)]) -> Option<Tag> {
+        let compound = |pairs: Vec<(JavaString, Tag)>| Tag::Compound(pairs.into_iter().collect());
+        Some(compound(vec![(
+            JavaString::from("attributes"),
+            compound(
+                attributes
+                    .iter()
+                    .map(|(k, v)| (JavaString::from(*k), Tag::String(JavaString::from(*v))))
+                    .collect(),
+            ),
+        )]))
+    }
+
+    #[test]
+    fn a_servers_biomes_the_resources_lack_keep_their_colours() {
+        // The open bundle: plains only.
+        let biomes = Biomes {
+            list: vec![info("minecraft:plains", 0x7FB0FF)],
+            index: [("minecraft:plains".to_owned(), 0)].into_iter().collect(),
+            info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
+        };
+        let registry = vec![
+            ("minecraft:badlands".to_owned(), data(&[])),
+            (
+                "minecraft:nether_wastes".to_owned(),
+                data(&[("minecraft:visual/fog_color", "#330808")]),
+            ),
+            ("minecraft:plains".to_owned(), data(&[])),
+        ];
+        let (ids, missing) = biomes.server_ids(&registry);
+        assert_eq!(ids, vec![1, 2, 0]);
+        assert_eq!(missing.len(), 2);
+        // The server's Nether fog, not the bundle's plains.
+        let nether = biomes.server_colours(2, &missing);
+        assert_eq!((nether.sky, nether.fog), (None, Some(0x330808)));
+        assert_eq!(biomes.server_colours(0, &missing).sky, Some(0x7FB0FF));
+        // Everything else about a missing biome reads as plains.
+        assert_eq!(biomes.get(2).name, "minecraft:plains");
+        // Past the chunk storage's ids, a missing biome is plains.
+        let many: Vec<_> = (0..200)
+            .map(|i| (format!("custom:b{i}"), data(&[])))
+            .collect();
+        let (ids, missing) = biomes.server_ids(&many);
+        assert_eq!(missing.len(), SERVER_ID_LIMIT - 1);
+        assert_eq!(ids[199], 0);
+        assert!(ids.iter().all(|&id| usize::from(id) < SERVER_ID_LIMIT));
     }
 }
