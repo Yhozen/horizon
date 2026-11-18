@@ -28,8 +28,8 @@ use fragment::fragment_source;
 pub use fragment::variant;
 use sampling::*;
 pub use sampling::{
-    COMPARE_BINDING, CUSTOM_BINDING, MIPS_BINDING, SAMPLING_OPS, SamplingCall,
-    parse_sampling_call, sampler_binding, sampler_type, sampling_call, split_sampling_call,
+    COMPARE_BINDING, CUSTOM_BINDING, MIPS_BINDING, SAMPLING_OPS, SamplingCall, parse_sampling_call,
+    sampler_binding, sampler_type, sampling_call, split_sampling_call,
 };
 use varyings::*;
 use vertex::vertex_source;
@@ -66,7 +66,8 @@ pub struct HostOutput {
     /// Group 1 textures of both stages, by binding.
     pub textures: Vec<TextureBinding>,
     /// Uniforms the pack declares that Horizon's block lacks: zero-valued globals.
-    pub unknown_uniforms: BTreeSet<String>,    /// Report lines about what may not look as in Iris (samplers with no texture…).
+    pub unknown_uniforms: BTreeSet<String>,
+    /// Report lines about what may not look as in Iris (samplers with no texture…).
     pub notes: Vec<String>,
 }
 
@@ -206,7 +207,11 @@ pub fn program_sources(
         }
     }
     let mut notes = sampling_notes(&vertex.sample_calls, spec, extras.watershadow);
-    notes.extend(sampling_notes(&fragment.sample_calls, spec, extras.watershadow));
+    notes.extend(sampling_notes(
+        &fragment.sample_calls,
+        spec,
+        extras.watershadow,
+    ));
     Ok(HostOutput {
         vertex: vs,
         fragment: fs,

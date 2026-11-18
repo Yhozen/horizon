@@ -249,7 +249,11 @@ impl Ctx<'_> {
                      { return vec4(p.xy + vec2(o) / vec2(s) * p.w, p.zw); }"
                         .into(),
                 );
-                let f = if shadow { "hz_off_shadow" } else { "hz_off" };
+                let f = if shadow && form.op != Op::Gather {
+                    "hz_off_shadow"
+                } else {
+                    "hz_off"
+                };
                 coord = format!("{f}({coord}, {off}, {size}(0))");
             }
         }
@@ -261,8 +265,7 @@ impl Ctx<'_> {
         let swizzled = self
             .next_sig(after, end)
             .is_some_and(|k| self.text(k) == ".");
-        let scalar =
-            shadow && !form.legacy_shadow && !name.starts_with("texture2D") && !swizzled;
+        let scalar = shadow && !form.legacy_shadow && !name.starts_with("texture2D") && !swizzled;
         let (op, args, wrap): (&str, Vec<String>, Option<String>) = match (form.op, shadow) {
             (Op::Implicit | Op::Grad, true) => ("hz_shadow_", vec![coord], None),
             (Op::Lod, true) => ("hz_shadowLod_", vec![coord, extra[0].into()], None),

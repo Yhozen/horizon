@@ -294,7 +294,10 @@ mod tests {
                     "tex/ids.bin TEXTURE_1D R16UI 64 RED_INTEGER UNSIGNED_SHORT",
                 ),
                 ("customTexture.bad", "tex/x.bin TEXTURE_2D RGBA8 64 RGBA"),
-                ("texture.gbuffers.stone", "minecraft:textures/block/stone.png"),
+                (
+                    "texture.gbuffers.stone",
+                    "minecraft:textures/block/stone.png",
+                ),
             ]),
             &PackFiles::default(),
         );
@@ -305,7 +308,11 @@ mod tests {
         assert_eq!(r.dim, TexDim::D3);
         assert_eq!(r.size, [64, 32, 16]);
         assert_eq!(
-            (r.internal_format.as_str(), r.pixel_format.as_str(), r.pixel_type.as_str()),
+            (
+                r.internal_format.as_str(),
+                r.pixel_format.as_str(),
+                r.pixel_type.as_str()
+            ),
             ("RGBA8", "RGBA", "UNSIGNED_BYTE")
         );
         assert_eq!(t[0].dim(), TexDim::D3);

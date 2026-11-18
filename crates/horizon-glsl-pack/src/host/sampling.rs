@@ -213,7 +213,10 @@ impl Entry {
     }
 
     fn repeat(&self) -> bool {
-        matches!(self.kind, SamplerKind::LinearRepeat | SamplerKind::PointRepeat)
+        matches!(
+            self.kind,
+            SamplerKind::LinearRepeat | SamplerKind::PointRepeat
+        )
     }
 
     fn filtered(&self) -> bool {
@@ -272,9 +275,10 @@ fn custom_applies(stage: TextureStage, sampler: &str, spec: &ProgramSpec) -> boo
         TextureStage::Composite => matches!(kind, ProgramKind::Composite(_) | ProgramKind::Final),
         TextureStage::All => true,
         // Passes Horizon does not run.
-        TextureStage::Prepare | TextureStage::Shadowcomp | TextureStage::Begin | TextureStage::Setup => {
-            false
-        }
+        TextureStage::Prepare
+        | TextureStage::Shadowcomp
+        | TextureStage::Begin
+        | TextureStage::Setup => false,
     };
     if !applies {
         return false;
@@ -621,10 +625,8 @@ pub(super) fn sampling(
                     }
                     std::collections::btree_map::Entry::Vacant(slot) => {
                         // Compare reads become a `texture_depth_2d` through their `sampler2DShadow` use.
-                        bindings.insert(
-                            (1, b),
-                            format!("uniform {} hz_t{b};", texture_type(&entry)),
-                        );
+                        bindings
+                            .insert((1, b), format!("uniform {} hz_t{b};", texture_type(&entry)));
                         let sampler = if entry.compare {
                             "samplerShadow"
                         } else {
@@ -848,7 +850,11 @@ fn entry_helpers(e: &Entry) -> String {
         } else {
             format!("hz_nearest_{b}(uv, int(lod))")
         };
-        writeln!(s, "{r} hz_read_{b}({v} uv, float lod) {{\n    return {read};\n}}").unwrap();
+        writeln!(
+            s,
+            "{r} hz_read_{b}({v} uv, float lod) {{\n    return {read};\n}}"
+        )
+        .unwrap();
         return s;
     }
     writeln!(
@@ -922,10 +928,12 @@ fn pack_function(
     let ret = |expr: String| format!("return {};", convert(expr, e.sample, c.sample));
     let (_, v, _) = vector_types(e.dim, e.sample);
     let body = match op {
-        "hz_sample_" if derivatives => ret(format!("hz_read_{b}(uv, hz_lod_{b}(dFdx(uv), dFdy(uv)))")),
-        "hz_sampleBias_" if derivatives => {
-            ret(format!("hz_read_{b}(uv, hz_lod_{b}(dFdx(uv), dFdy(uv)) + bias)"))
+        "hz_sample_" if derivatives => {
+            ret(format!("hz_read_{b}(uv, hz_lod_{b}(dFdx(uv), dFdy(uv)))"))
         }
+        "hz_sampleBias_" if derivatives => ret(format!(
+            "hz_read_{b}(uv, hz_lod_{b}(dFdx(uv), dFdy(uv)) + bias)"
+        )),
         "hz_sample_" | "hz_sampleBias_" => ret(format!("hz_read_{b}(uv, 0.0)")),
         "hz_sampleLod_" => ret(format!("hz_read_{b}(uv, lod)")),
         "hz_sampleGrad_" if e.mips && float2 => ret(format!("hz_read_{b}(uv, hz_lod_{b}(dx, dy))")),
@@ -941,13 +949,19 @@ fn pack_function(
                 body
             } else {
                 // The texels are converted once gathered.
-                body.replacen("return ", &format!("return {}(", vector_types(c.dim, c.sample).0), 1)
-                    .replacen("[comp]);", "[comp]));", 1)
+                body.replacen(
+                    "return ",
+                    &format!("return {}(", vector_types(c.dim, c.sample).0),
+                    1,
+                )
+                .replacen("[comp]);", "[comp]));", 1)
             }
         }
         "hz_queryLod_" => {
             let top = if e.mips {
-                format!("floor(log2(float(max(max(textureSize({t}, 0).x, textureSize({t}, 0).y), 1))))")
+                format!(
+                    "floor(log2(float(max(max(textureSize({t}, 0).x, textureSize({t}, 0).y), 1))))"
+                )
             } else {
                 "0.0".into()
             };
@@ -1084,7 +1098,9 @@ fn sprite_function(
     }
     if op == "hz_gather_" {
         let size = format!("textureSize({}, 0).xy / {}", array(0), p.sprite_grid);
-        let body = gather_body("vec4", &size, "hz_wrap", &|q| format!("hz_sprite_fetch({q}, 0)"));
+        let body = gather_body("vec4", &size, "hz_wrap", &|q| {
+            format!("hz_sprite_fetch({q}, 0)")
+        });
         return Some((signature(args), body));
     }
     let body = match op {
