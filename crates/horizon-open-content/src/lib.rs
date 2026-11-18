@@ -19,6 +19,7 @@ pub mod items;
 pub mod lang;
 pub mod mobs;
 pub mod network;
+pub mod screens;
 pub mod sources;
 pub mod tables;
 
