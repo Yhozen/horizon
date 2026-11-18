@@ -27,6 +27,7 @@ pub mod rewrite;
 pub mod schedule;
 pub mod session;
 pub mod shaders_properties;
+pub mod textures;
 pub mod types;
 pub mod uniforms;
 
