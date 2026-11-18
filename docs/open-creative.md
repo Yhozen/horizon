@@ -166,6 +166,20 @@ the bundle defines take Minecraft's properties too (leaves have their distances,
 `snowy`); states the bundle's content doesn't use share the block's facts and model. The
 manifest counts the support blocks (`support_blocks`).
 
+### Items that are not blocks
+
+Every Minecraft item that is not a block has content: its prototype in `items.json` carries
+Minecraft's default components (stack size, food and consumable, tool, weapon, equippable,
+durability, rarity...), from `data/items/defaults.json`. `python3 tools/open_item_defaults.py`
+writes that file from the prepared resources of the player's own install (`--check` fails if it
+is out of date): facts only (numbers, identifiers, booleans), never translated text, and which
+parent each item model uses (`item/generated` or `item/handheld`) and its texture name. Each item
+gets a model on that parent with its texture as `layer0`, taken from an open input (an enabled
+pack) when one provides it, else a generated placeholder icon (a coloured tile). Its English name
+comes from its identifier ("Rotten Flesh"). Tool rules that name a block tag the bundle lacks are
+left out. The edition's own items (`items::all`: tools, apple, stick, ores' materials) keep their
+own definitions.
+
 ### Coverage
 
 `horizon-open-coverage.json` says which registered names have content, so the relay can keep a
