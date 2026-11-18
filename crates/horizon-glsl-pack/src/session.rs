@@ -191,6 +191,8 @@ struct State {
     files: PackFiles,
     predefined: BTreeMap<String, String>,
     blocks: BlockIds,
+    entities: properties::IdMap,
+    items: properties::IdMap,
     plan: PackPlan,
     /// Every slot the pack has (any of `ProgramKind::all()`), with its
     /// usable candidates, best first.
@@ -352,10 +354,24 @@ impl Session {
             predefined.extend(flags);
             (props, predefined)
         };
-        let blocks = match properties::block_ids(&files, &predefined) {
-            Ok(b) => b,
-            Err(e) => return self.fail(e),
+        // An id file that does not read leaves its ids unlisted: the pack
+        // still runs, and the report says why its materials look off.
+        let blocks = properties::block_ids(&files, &macros).unwrap_or_else(|e| {
+            self.report
+                .notes
+                .push(format!("{e} (block ids left unlisted)"));
+            BlockIds::default()
+        });
+        let mut ids = |kind: &str, unlisted: i32| {
+            properties::id_map(&files, &macros, kind, unlisted).unwrap_or_else(|e| {
+                self.report
+                    .notes
+                    .push(format!("{e} ({kind} ids left unlisted)"));
+                properties::IdMap::default()
+            })
         };
+        let entities = ids("entity", properties::UNLISTED_ENTITY);
+        let items = ids("item", properties::UNLISTED_ITEM);
         let folder = world_folder(&files, &self.dimension);
         self.report.features = features::detect(&files, &folder, &props);
         if self.mode.refuse
@@ -416,6 +432,8 @@ impl Session {
             files,
             predefined,
             blocks,
+            entities,
+            items,
             plan,
             chains,
             prepared: BTreeMap::new(),
@@ -622,6 +640,8 @@ impl Session {
                 plan,
                 skipped: st.skipped.clone(),
                 blocks: st.blocks.clone(),
+                entities: st.entities.clone(),
+                items: st.items.clone(),
             },
             report,
         ))

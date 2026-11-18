@@ -26,6 +26,7 @@ pub mod properties;
 pub mod report;
 pub mod rewrite;
 pub mod schedule;
+pub mod screens;
 pub mod session;
 pub mod shaders_properties;
 pub mod types;

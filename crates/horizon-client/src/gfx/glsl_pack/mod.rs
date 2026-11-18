@@ -15,6 +15,7 @@ mod debug;
 mod frame;
 mod mips;
 mod pipelines;
+mod probation;
 mod targets;
 mod textures;
 mod uniforms;
@@ -26,6 +27,7 @@ use horizon_glsl_pack::{
 };
 
 pub(super) use uniforms::PackUniformInputs;
+pub(crate) use probation::Probation;
 
 use horizon_glsl_pack::schedule::Side;
 use pipelines::Program;

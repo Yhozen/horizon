@@ -523,6 +523,8 @@ pub struct Renderer {
     world_post: world_post::Post,
     /// The shader pack's pipelines and targets (`set_shader_pack`).
     glsl_pack: Option<glsl_pack::PackRenderer>,
+    /// GPU validation of the pack's first frames (`shader_pack_error`).
+    pack_check: glsl_pack::Probation,
     /// The terrain bind group's sprite layout, for the pack's generated shaders.
     sprite_host: horizon_glsl_pack::HostParams,
     /// The entity bind group's layout (pack programs on entity geometry).
@@ -2585,6 +2587,7 @@ impl Renderer {
             occlusion: occlusion::Occlusion::new(crate::chunk::MIN_Y, crate::chunk::HEIGHT / 16),
             world_post,
             glsl_pack: None,
+            pack_check: glsl_pack::Probation::default(),
             sprite_host: horizon_glsl_pack::HostParams {
                 sprite_arrays,
                 sprite_split: split,
@@ -2721,6 +2724,7 @@ impl Renderer {
         }
     }
     pub fn resize(&mut self, width: u32, height: u32) {
+        self.pack_check.rewatch();
         self.suspended = width == 0 || height == 0;
         if self.suspended {
             return;
@@ -3069,8 +3073,20 @@ impl Renderer {
         self.device.limits().max_inter_stage_shader_variables
     }
     /// How the terrain bind group holds block sprites, for compiling a pack.
+    /// and the device's limits a pack's programs must fit.
     pub fn shader_pack_host(&self) -> horizon_glsl_pack::HostParams {
-        self.sprite_host
+        let limits = self.device.limits();
+        horizon_glsl_pack::HostParams {
+            max_varyings: limits.max_inter_stage_shader_variables,
+            max_textures: limits.max_sampled_textures_per_shader_stage,
+            max_draw_buffers: limits.max_color_attachments,
+            max_attachment_bytes: limits.max_color_attachment_bytes_per_sample,
+            ..self.sprite_host
+        }
+    }
+    /// Whether a shader pack is installed.
+    pub fn has_shader_pack(&self) -> bool {
+        self.glsl_pack.is_some()
     }
     /// Draws the overworld with a compiled shader pack's programs from now on
     /// (`None`: Horizon's own). Errors leave the renderer without a pack.
@@ -3097,15 +3113,22 @@ impl Renderer {
             pack,
             files,
         )?;
-        // The browser cannot wait for the scope: its errors reach the console.
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(error) = pollster::block_on(scope.pop()) {
-            return Err(error.to_string());
+        // Natively the verdict comes at once; the browser's arrives a few
+        // frames later through `shader_pack_error`.
+        self.pack_check = glsl_pack::Probation::default();
+        self.pack_check.watch("pipelines", scope.pop());
+        if let Some(error) = self.pack_check.error() {
+            return Err(error);
         }
-        #[cfg(target_arch = "wasm32")]
-        drop(scope);
         self.glsl_pack = Some(renderer);
         Ok(())
+    }
+    /// An error the GPU reported for the installed pack (its pipelines, or
+    /// its first frames); the pack is removed. Asked once a frame.
+    pub fn shader_pack_error(&mut self) -> Option<String> {
+        let error = self.pack_check.error()?;
+        self.glsl_pack = None;
+        Some(error)
     }
     pub fn view_projection(&self, frame: &Frame) -> Mat4 {
         self.projection(
@@ -3201,7 +3224,14 @@ impl Renderer {
             .animate(encoder, &mut self.uploads, &self.queue, tick);
     }
     pub fn render(&mut self, frame: &Frame) -> Result<bool> {
+        // A pack's first frames run inside an error scope: a pipeline or bind
+        // group the GPU rejects turns the pack off instead of drawing black.
+        let scope = (self.glsl_pack.is_some() && self.pack_check.watching())
+            .then(|| self.device.push_error_scope(wgpu::ErrorFilter::Validation));
         let rendered = self.draw_frame(frame);
+        if let Some(scope) = scope {
+            self.pack_check.watch("first frames", scope.pop());
+        }
         if !matches!(rendered, Ok(true)) {
             self.held_patches.extend(frame.hud.patches.iter().cloned());
         }
@@ -4038,9 +4068,14 @@ impl Renderer {
             timer.begin(&mut encoder);
         }
         // The world's targets: the screen, or the scaled target of `post`.
-        let scaled = self
-            .world_post
-            .prepare(&self.device, [self.config.width, self.config.height]);
+        // A shader pack draws at the window's size, with its own
+        // anti-aliasing: resolution scale and FXAA wait while it runs.
+        let scaled = if pack_on {
+            None
+        } else {
+            self.world_post
+                .prepare(&self.device, [self.config.width, self.config.height])
+        };
         let (world_view, world_depth) = match &scaled {
             Some((color, depth)) => (color, depth),
             None => (&view_target, &self.depth),
@@ -4058,7 +4093,6 @@ impl Renderer {
         };
         // With a pack, its programs draw the world into the view, then
         // Horizon's overlays over its depth (`gfx/glsl_pack/frame.rs`).
-        let pack_on = pack_on && scaled.is_none();
         let pack_hand = pack_on
             && self
                 .glsl_pack
