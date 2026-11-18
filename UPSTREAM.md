@@ -8,6 +8,20 @@ Upstream repository: <https://github.com/horizon-rust/horizon>, branch `main`.
 | Main merge that introduced that source | [`85b5bcca7c79bb470b90bdb5914b413aa66fe7ae`](https://github.com/horizon-rust/horizon/commit/85b5bcca7c79bb470b90bdb5914b413aa66fe7ae) — Merge pull request #17145 from kacpherek/mod-api-merge |
 | Upstream tip assessed on 2026-11-17 (second pass) | [`34fcb5c361e9fba8b951f695f4e288e081d8e031`](https://github.com/horizon-rust/horizon/commit/34fcb5c361e9fba8b951f695f4e288e081d8e031) |
 
+## Licence boundary: imports stopped
+
+This fork stays under the **MIT licence**. Upstream moved to LGPL-3.0-or-later in
+[`fb1135c6020b09ba8d4645bd70b0a94a405f8ad1`](https://github.com/horizon-rust/horizon/commit/fb1135c6020b09ba8d4645bd70b0a94a405f8ad1)
+(2026-11-15). **No code, tests or comments are taken from upstream after that change.** Only code
+already MIT at upstream `fb1135c6020^` (`59dff1a36bb3a2308f120480e57a2e01c4ba1aae`) may still be
+imported; check with `git merge-base --is-ancestor <source> 59dff1a36bb3a2308f120480e57a2e01c4ba1aae`.
+Later upstream bugs may be noted as reports, and fixed independently from vanilla's behaviour and this
+fork's own code, without reading or copying upstream's patch.
+
+One recorded source, `0a9d9a871562561b1c8a5964326603f942c8c089` (a 3-line negative-holder guard), was
+authored on 2026-11-10 in a tree still licensed MIT, but entered upstream `main` after the change.
+Every other row is an ancestor of `59dff1a36b`.
+
 These are selective imports. The backport pointer does **not** mean every earlier upstream change
 is present, and the assessed tip does **not** mean its code has been imported. “Most recent” means
 the recorded source whose first containing merge is latest on upstream `main`'s first-parent history,
