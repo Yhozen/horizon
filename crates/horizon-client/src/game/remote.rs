@@ -117,6 +117,9 @@ pub(super) struct Remote {
     /// Horizon Open Creative in the dimensions its bundle does not have.
     pub(super) environment: Option<horizon_client::environment::Environment>,
     biome_map: Vec<u16>,
+    /// The server's biomes the resources lack, by their ids past the
+    /// resources' own (`Biomes::server_ids`).
+    pub(super) server_biomes: Vec<horizon_client::biome::ServerBiome>,
     biome_bits: u8,
     view_distance: i32,
     sequence: i32,
@@ -400,6 +403,7 @@ impl Game<'_> {
             dimension: DimensionType::vanilla("minecraft:overworld"),
             environment: None,
             biome_map: Vec::new(),
+            server_biomes: Vec::new(),
             biome_bits: 7,
             view_distance: self.settings.render_distance,
             sequence: 0,
@@ -978,18 +982,17 @@ impl Game<'_> {
         }
     }
     fn set_registries(&mut self, registries: Arc<Dynamic>) {
-        let biomes: Vec<u16> = registries
+        // The server's biomes these resources lack keep their own ids, so
+        // their sky and fog are the server's (the open bundle has plains only).
+        let (biomes, missing) = registries
             .registries
             .get("minecraft:worldgen/biome")
-            .map(|list| {
-                list.iter()
-                    .map(|(name, _)| self.res.biomes().id(name))
-                    .collect()
-            })
+            .map(|list| self.res.biomes().server_ids(list))
             .unwrap_or_default();
         if let Some(r) = self.remote.as_mut() {
             r.biome_bits = ceil_log2(biomes.len());
             r.biome_map = biomes;
+            r.server_biomes = missing;
             r.registries = registries;
         }
     }
