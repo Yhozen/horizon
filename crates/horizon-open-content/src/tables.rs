@@ -239,7 +239,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             }
             if let Some(sh) = &shaped[id] {
                 shaped_facts(&mut row, b, sh);
-                crate::cubes::patch_facts(&mut row, b.id);
+                crate::cubes::patch_facts(&mut row, b.id, &s.properties);
             }
             without_defaults(row)
         })
