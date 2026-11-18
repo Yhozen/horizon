@@ -298,6 +298,91 @@ def free_display() -> int:
     raise SystemExit("no free X display")
 
 
+class XInput:
+    """Keyboard input on an X display through XTest (libXtst): opens the chat, types commands, presses F1.
+
+    The game sees ordinary key presses, so no mod or driver is needed."""
+
+    def __init__(self, display: str):
+        import ctypes
+
+        self.ct = ctypes
+        self.x = ctypes.CDLL("libX11.so.6")
+        self.xt = ctypes.CDLL("libXtst.so.6")
+        self.x.XOpenDisplay.restype = ctypes.c_void_p
+        self.x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        self.x.XStringToKeysym.restype = ctypes.c_ulong
+        self.x.XStringToKeysym.argtypes = [ctypes.c_char_p]
+        self.x.XKeysymToKeycode.restype = ctypes.c_ubyte
+        self.x.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        self.x.XKeycodeToKeysym.restype = ctypes.c_ulong
+        self.x.XKeycodeToKeysym.argtypes = [ctypes.c_void_p, ctypes.c_ubyte, ctypes.c_int]
+        self.x.XFlush.argtypes = [ctypes.c_void_p]
+        self.xt.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+        self.xt.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+        self.d = self.x.XOpenDisplay(display.encode())
+        if not self.d:
+            raise RuntimeError(f"cannot open X display {display}")
+
+    NAMES = {" ": "space", "/": "slash", "_": "underscore", ":": "colon", ".": "period", "-": "minus",
+             "@": "at", "~": "asciitilde", "=": "equal", "[": "bracketleft", "]": "bracketright"}
+
+    def _tap(self, keysym_name: str) -> None:
+        sym = self.x.XStringToKeysym(keysym_name.encode())
+        code = self.x.XKeysymToKeycode(self.d, sym)
+        if not code:
+            raise RuntimeError(f"no key for {keysym_name!r}")
+        shift = self.x.XKeycodeToKeysym(self.d, code, 0) != sym
+        shift_code = self.x.XKeysymToKeycode(self.d, self.x.XStringToKeysym(b"Shift_L"))
+        if shift:
+            self.xt.XTestFakeKeyEvent(self.d, shift_code, 1, 0)
+        self.xt.XTestFakeKeyEvent(self.d, code, 1, 0)
+        self.xt.XTestFakeKeyEvent(self.d, code, 0, 0)
+        if shift:
+            self.xt.XTestFakeKeyEvent(self.d, shift_code, 0, 0)
+        self.x.XFlush(self.d)
+        time.sleep(0.04)
+
+    def key(self, name: str) -> None:
+        self._tap(name)
+
+    def center_pointer(self, w: int, h: int) -> None:
+        self.xt.XTestFakeMotionEvent(self.d, -1, w // 2, h // 2, 0)
+        self.x.XFlush(self.d)
+
+    def command(self, text: str) -> None:
+        """Types `/text` in the chat and sends it ('/' opens the chat with the slash typed)."""
+        self._tap("slash")
+        time.sleep(1.5)
+        for ch in text.lstrip("/"):
+            self._tap(self.NAMES.get(ch, ch))
+        time.sleep(0.5)
+        self._tap("Return")
+        time.sleep(1.0)
+
+
+def scene_commands(scene: str, pose: dict) -> list[str]:
+    """The commands that set up one named scene; the same lines replay it in Horizon (see `pose_notes`)."""
+    x, y, z = pose["x"], pose["y"], pose["z"]
+    def tp(px, py, pz, pitch=None):
+        return f"/tp Player {px} {py} {pz} {pose['yaw']} {pose['pitch'] if pitch is None else pitch}"
+
+    if scene == "noon":
+        return ["/time set 6000", tp(x, y, z)]
+    if scene == "dusk":
+        return ["/time set 13000", tp(x, y, z)]
+    if scene == "underwater":
+        # Deepen the pool by three blocks (air only) and stand on its sand floor, eyes ~2.4 below the
+        # surface, looking level at the wall.
+        return ["/time set 6000",
+                f"/fill {x - 6} {y} {z - 14} {x + 6} {y + 2} {z - 3} minecraft:water replace minecraft:air",
+                tp(x, y - 1, z - 5, pitch=0)]
+    raise SystemExit(f"unknown scene {scene!r} (noon, dusk, underwater)")
+
+
+SCENE_SETTLE = {"noon": 8, "dusk": 10, "underwater": 25}
+
+
 def run(args) -> int:
     mcdir = Path(args.mcdir)
     version = json.loads((mcdir / "versions" / MC / f"{MC}.json").read_text())
@@ -398,6 +483,7 @@ def run(args) -> int:
         return r.returncode == 0 and path.exists()
 
     status = "timeout"
+    shots: list[Path] = []
     try:
         deadline = time.time() + args.timeout
         loaded_at = None
@@ -424,8 +510,28 @@ def run(args) -> int:
                 break
             time.sleep(1)
         probe.unlink(missing_ok=True)
-        if status in ("ok", "timeout") and grab(out) and args.mask_hud:
-            mask_hud(out, w, h)
+        if status == "ok" and args.scenes:
+            pose = json.loads((world / "oracle-pose.json").read_text())
+            xin = XInput(f":{display}")
+            xin.center_pointer(w, h)
+            if args.hide_gui:
+                xin.key("F1")
+            for scene in args.scenes.split(","):
+                for cmd in scene_commands(scene, pose):
+                    xin.command(cmd)
+                time.sleep(SCENE_SETTLE.get(scene, 10))
+                path = out.with_name(f"{out.stem}-{scene}.png")
+                if grab(path):
+                    if args.mask_hud and not args.hide_gui:
+                        mask_hud(path, w, h)
+                    shots.append(path)
+                if game_proc.poll() is not None:
+                    status = f"exited {game_proc.returncode}"
+                    break
+        elif status in ("ok", "timeout") and grab(out):
+            if args.mask_hud:
+                mask_hud(out, w, h)
+            shots.append(out)
     finally:
         try:
             os.killpg(game_proc.pid, signal.SIGTERM)
@@ -444,10 +550,10 @@ def run(args) -> int:
             continue
         if "Using shaderpack" in line or "ERROR" in line or "Exception" in line or "compil" in line.lower():
             print(line[:300])
-    print(status, out if out.exists() else "(no screenshot)")
+    print(status, *(shots or ["(no screenshot)"]))
     if not args.keep:
         shutil.rmtree(game_dir / "saves", ignore_errors=True)
-    return 0 if status == "ok" and out.exists() else 1
+    return 0 if status == "ok" and shots else 1
 
 
 # ---------------------------------------------------------------- world
@@ -512,7 +618,7 @@ def build_world(args) -> int:
         ]
         for f in fills:
             c("command", f)
-        c("tp", str(x), str(y + 1), str(z))
+        c("tp", str(x), str(y), str(z))
         c("look", "180", "25")
         time.sleep(4)
         if args.shot:
@@ -529,7 +635,11 @@ def build_world(args) -> int:
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(save, out)
-    print("world", out)
+    (out / "session.lock").unlink(missing_ok=True)
+    # The pose `run --scenes` re-applies (and Horizon replays): feet position, yaw, pitch.
+    pose = {"x": x, "y": y, "z": z, "yaw": 180, "pitch": 25, "time": args.time}
+    (out / "oracle-pose.json").write_text(json.dumps(pose) + "\n")
+    print("world", out, pose)
     return 0
 
 
@@ -607,6 +717,9 @@ def main() -> int:
     r.add_argument("--env", action="append", help="extra environment `K=V`")
     r.add_argument("--game-arg", action="append", help="extra game argument")
     r.add_argument("--keep", action="store_true", help="keep the copied save")
+    r.add_argument("--scenes", help="comma list of noon, dusk, underwater: typed as commands in one game, one "
+                   "picture each (OUT-<scene>.png); needs <world>/oracle-pose.json")
+    r.add_argument("--no-hide-gui", dest="hide_gui", action="store_false", help="with --scenes: do not press F1")
     r.add_argument("--no-mask-hud", dest="mask_hud", action="store_false", help="leave the hotbar and crosshair visible")
     args = ap.parse_args()
     if args.cmd == "prepare":
