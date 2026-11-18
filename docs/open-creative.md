@@ -260,6 +260,8 @@ translates every packet:
   cow, a fox as a pig, a bat as a chicken...), with only the data every mob shares (flags, health;
   entries below 16). Anything else (boats, minecarts, projectiles, golems, ghasts, villagers...)
   is never spawned for the open player, and its later packets are dropped.
+- **Attributes**: renumbered by name to the bundle's `attributes.json` order (the open wire ids);
+  attributes the bundle lacks are dropped, so none is read as another.
 - **Dropped**: sounds, particles, block entities (sign text, chest lids), mob effects, recipes and
   the recipe book, advancements, tags, statistics, maps, trades, explosions (no knockback),
   waypoints, transfers and dialogs. Chat, commands, the tab list, scoreboards, titles, time, health,
