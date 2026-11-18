@@ -76,13 +76,17 @@ pub struct PackReport {
 impl PackReport {
     /// Recomputes [`Self::status`] from the rest: refused, failed (an
     /// essential program has an error is the caller's call: it sets
-    /// `Failed` itself), partial when anything was skipped or a used feature
-    /// is missing, else works.
+    /// `Failed` itself), partial when anything was skipped or fell back
+    /// after a failure, a used feature is missing or the GPU's compiler
+    /// complained, else works.
     pub fn settle(&mut self) {
         if self.refusal.is_some() {
             self.status = PackStatus::Refused;
         } else if self.status != PackStatus::Failed {
-            let partial = self.programs.iter().any(|p| p.error.is_some())
+            let partial = self
+                .programs
+                .iter()
+                .any(|p| p.error.is_some() || !p.failed.is_empty())
                 || self.features.iter().any(|f| !f.supported)
                 || !self.gpu_errors.is_empty();
             self.status = if partial {

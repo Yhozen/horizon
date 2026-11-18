@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::plan::{BufferFormat, PackPlan};
+use crate::plan::{BufferFormat, FragOutput, PackPlan};
 
 /// The texture index of a colour buffer name: `colortex0..15` and the
 /// legacy names `gcolor`, `gdepth`, `gnormal`, `composite`, `gaux1..4`.
@@ -356,6 +356,98 @@ pub fn mipmaps(raw_fragment: &str, preprocessed_fragment: &str) -> BTreeSet<u8> 
     out
 }
 
+/// The draw buffers a fragment source's live `DRAWBUFFERS` / `RENDERTARGETS`
+/// directive names: `raw` is the source with includes expanded and comments
+/// kept; a directive in a branch its `#if`s drop does not count. When the
+/// branches cannot be evaluated, the last directive of the raw text wins.
+pub fn live_draw_buffers(
+    raw: &str,
+    file: &str,
+    files: &crate::PackFiles,
+    macros: &BTreeMap<String, String>,
+) -> Option<Vec<u8>> {
+    match crate::shaders_properties::live_lines(raw, file, files, macros, true) {
+        Ok(live) => crate::properties::draw_buffers(&live),
+        Err(_) => crate::properties::draw_buffers(raw),
+    }
+}
+
+/// The fragment outputs a preprocessed fragment source declares at top
+/// level (`out vec4 color;`, `layout(location = 2) out vec2 data;`), in
+/// declaration order.
+pub fn fragment_outputs(preprocessed: &str) -> Vec<FragOutput> {
+    let mut out = Vec::new();
+    for statement in preprocessed.split(';') {
+        let s = statement
+            .rsplit(['{', '}'])
+            .next()
+            .unwrap_or(statement)
+            .trim();
+        let (location, rest) = match s.strip_prefix("layout") {
+            Some(rest) => {
+                let rest = rest.trim_start();
+                let Some(inner) = rest.strip_prefix('(') else {
+                    continue;
+                };
+                let Some(close) = inner.find(')') else {
+                    continue;
+                };
+                let location = inner[..close].split(',').find_map(|q| {
+                    let (k, v) = q.split_once('=')?;
+                    (k.trim() == "location").then(|| v.trim().parse::<u32>().ok())?
+                });
+                (location, &inner[close + 1..])
+            }
+            None => (None, s),
+        };
+        if rest.contains(['(', '[', '=']) {
+            continue;
+        }
+        let words: Vec<&str> = rest
+            .split(|c: char| c.is_whitespace() || c == ',')
+            .filter(|w| !w.is_empty())
+            .collect();
+        let Some(at) = words.iter().position(|w| *w == "out") else {
+            continue;
+        };
+        let before_ok = words[..at].iter().all(|w| {
+            matches!(
+                *w,
+                "flat" | "smooth" | "noperspective" | "centroid" | "invariant"
+            )
+        });
+        let mut rest = words[at + 1..]
+            .iter()
+            .skip_while(|w| matches!(**w, "highp" | "mediump" | "lowp"));
+        let (Some(ty), true) = (rest.next(), before_ok) else {
+            continue;
+        };
+        for (k, name) in rest.enumerate() {
+            out.push(FragOutput {
+                index: out.len(),
+                name: name.to_string(),
+                ty: ty.to_string(),
+                // Further names of one declaration take the next locations.
+                location: location.map(|l| l + k as u32),
+            });
+        }
+    }
+    out
+}
+
+/// The highest output a fragment source writes: `gl_FragData[i]` (i < 16)
+/// or a declared output's location; `None` when it writes neither.
+pub fn highest_output(preprocessed: &str) -> Option<u8> {
+    let data = (0..16u8)
+        .rev()
+        .find(|i| preprocessed.contains(&format!("gl_FragData[{i}]")));
+    let outs = fragment_outputs(preprocessed)
+        .iter()
+        .map(|o| o.slot().min(15) as u8)
+        .max();
+    data.max(outs)
+}
+
 pub use crate::shaders_properties::{ShadersProperties, shaders_properties};
 
 #[cfg(test)]
@@ -530,6 +622,7 @@ mod tests {
                 moon: true,
                 separate_ao: true,
                 old_hand_light: false,
+                ..PackProperties::default()
             }
         );
         let t: Vec<_> = p
