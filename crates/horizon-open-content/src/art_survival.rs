@@ -13,19 +13,19 @@ const GENERATOR: &str = "art";
 const SPRITES: &str = "assets/minecraft/textures/gui/sprites";
 
 // The light panel palette shared with the creative screen (art.rs).
-const PANEL_EDGE: [u8; 4] = [0xa9, 0xac, 0xbb, 255];
-const PANEL: [u8; 4] = [0xf3, 0xf3, 0xf8, 255];
-const PANEL_SOFT: [u8; 4] = [0xd6, 0xd8, 0xe4, 255];
-const SHADE: [u8; 4] = [0x8a, 0x8e, 0x9e, 255];
-const WHITE: [u8; 4] = [0xff, 0xff, 0xff, 255];
-const SLOT_FILL: [u8; 4] = [0xc4, 0xc7, 0xd4, 255];
-const PLATE: [u8; 4] = [0x20, 0x22, 0x2c, 255];
-const RULE: [u8; 4] = [0x3a, 0x3d, 0x4a, 255];
-const ACCENT: [u8; 4] = [0x9a, 0x86, 0xff, 255];
-const INK: [u8; 4] = [0xec, 0xed, 0xf3, 255];
-const CLEAR: [u8; 4] = [0, 0, 0, 0];
+pub(crate) const PANEL_EDGE: [u8; 4] = [0xa9, 0xac, 0xbb, 255];
+pub(crate) const PANEL: [u8; 4] = [0xf3, 0xf3, 0xf8, 255];
+pub(crate) const PANEL_SOFT: [u8; 4] = [0xd6, 0xd8, 0xe4, 255];
+pub(crate) const SHADE: [u8; 4] = [0x8a, 0x8e, 0x9e, 255];
+pub(crate) const WHITE: [u8; 4] = [0xff, 0xff, 0xff, 255];
+pub(crate) const SLOT_FILL: [u8; 4] = [0xc4, 0xc7, 0xd4, 255];
+pub(crate) const PLATE: [u8; 4] = [0x20, 0x22, 0x2c, 255];
+pub(crate) const RULE: [u8; 4] = [0x3a, 0x3d, 0x4a, 255];
+pub(crate) const ACCENT: [u8; 4] = [0x9a, 0x86, 0xff, 255];
+pub(crate) const INK: [u8; 4] = [0xec, 0xed, 0xf3, 255];
+pub(crate) const CLEAR: [u8; 4] = [0, 0, 0, 0];
 
-fn lighten(c: [u8; 4], by: u8) -> [u8; 4] {
+pub(crate) fn lighten(c: [u8; 4], by: u8) -> [u8; 4] {
     [
         c[0].saturating_add(by),
         c[1].saturating_add(by),
@@ -34,7 +34,7 @@ fn lighten(c: [u8; 4], by: u8) -> [u8; 4] {
     ]
 }
 
-fn darken(c: [u8; 4], by: u8) -> [u8; 4] {
+pub(crate) fn darken(c: [u8; 4], by: u8) -> [u8; 4] {
     [
         c[0].saturating_sub(by),
         c[1].saturating_sub(by),
@@ -44,7 +44,7 @@ fn darken(c: [u8; 4], by: u8) -> [u8; 4] {
 }
 
 /// An image from rows of characters, each mapped to a colour ('.' is clear).
-fn pattern(rows: &[&str], palette: &[(char, [u8; 4])]) -> Rgba {
+pub(crate) fn pattern(rows: &[&str], palette: &[(char, [u8; 4])]) -> Rgba {
     let h = rows.len() as u32;
     let w = rows.iter().map(|r| r.len()).max().unwrap_or(0) as u32;
     let mut image = Rgba::new(w, h);
@@ -59,19 +59,19 @@ fn pattern(rows: &[&str], palette: &[(char, [u8; 4])]) -> Rgba {
 }
 
 /// A recessed slot (dark top-left, light bottom-right), `size` square.
-fn slot(image: &mut Rgba, x: u32, y: u32, size: u32) {
+pub(crate) fn slot(image: &mut Rgba, x: u32, y: u32, size: u32) {
     image.fill(x, y, size, size, SHADE);
     image.fill(x + 1, y + 1, size - 1, size - 1, WHITE);
     image.fill(x + 1, y + 1, size - 2, size - 2, SLOT_FILL);
 }
 
-fn framed(w: u32, h: u32, fill: [u8; 4], border: [u8; 4]) -> Rgba {
+pub(crate) fn framed(w: u32, h: u32, fill: [u8; 4], border: [u8; 4]) -> Rgba {
     let mut image = Rgba::filled(w, h, border);
     image.fill(1, 1, w - 2, h - 2, fill);
     image
 }
 
-fn put(bundle: &mut Bundle, name: &str, image: &Rgba) -> Result<()> {
+pub(crate) fn put(bundle: &mut Bundle, name: &str, image: &Rgba) -> Result<()> {
     bundle.png(
         format!("{SPRITES}/{name}.png"),
         image,
@@ -93,7 +93,7 @@ fn nine_slice(
     )
 }
 
-fn texture(bundle: &mut Bundle, path: &str, image: &Rgba) -> Result<()> {
+pub(crate) fn texture(bundle: &mut Bundle, path: &str, image: &Rgba) -> Result<()> {
     bundle.png(
         format!("assets/minecraft/textures/{path}.png"),
         image,
@@ -548,7 +548,7 @@ fn container_panel() -> Rgba {
 }
 
 /// A right-pointing arrow between a grid and its result.
-fn arrow(image: &mut Rgba, x: u32, y: u32) {
+pub(crate) fn arrow(image: &mut Rgba, x: u32, y: u32) {
     image.fill(x, y + 6, 16, 4, SHADE);
     for i in 0..8u32 {
         image.fill(x + 15 + i, y + i, 1, 16 - 2 * i, SHADE);

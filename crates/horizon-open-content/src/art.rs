@@ -109,6 +109,7 @@ pub fn write(bundle: &mut Bundle) -> Result<()> {
     gui(bundle)?;
     sky(bundle)?;
     crate::art_survival::write(bundle)?;
+    crate::screens::write(bundle)?;
     Ok(())
 }
 
