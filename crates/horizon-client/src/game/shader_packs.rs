@@ -600,6 +600,21 @@ impl Game<'_> {
                 }
             }
         }
+        // The GPU rejected the running pack (in the browser, frames later).
+        if let Some(error) = self.renderer.as_mut().and_then(|r| r.shader_pack_error())
+            && let Some(applied) = self.shader_packs.applied.take()
+        {
+            let file = applied.target.file.clone();
+            let report = self.shader_packs.reports.entry(file.clone()).or_default();
+            report.status = PackStatus::Failed;
+            report.gpu_errors.push(("GPU".into(), error.clone()));
+            log::warn!("Horizon: shader pack {file} turned off by the GPU: {error}");
+            self.shader_packs.failed = Some(applied.target);
+            self.set_shader_pack_tags(None);
+            self.system_message(horizon_client::text::Text::literal(format!(
+                "Shader pack {file} was turned off: the GPU rejected it (see its report)."
+            )));
+        }
         if self.shader_packs.job.is_some() {
             return;
         }
