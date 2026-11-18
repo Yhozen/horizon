@@ -233,6 +233,10 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             let outline: Vec<[f64; 6]> =
                 serde_json::from_value(row["outline"].clone()).unwrap_or_default();
             row["outline_edges"] = json!(edges(&outline));
+            let speed = crate::cubes::speed_factor(b.id);
+            if speed != 1.0 {
+                row["speed_factor"] = json!(speed);
+            }
             if let Some(sh) = &shaped[id] {
                 shaped_facts(&mut row, b, sh);
             }

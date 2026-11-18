@@ -34,6 +34,8 @@ pub struct Cube {
     /// drawn translucent), `spin_y` / `spin_xy` (turned at random as sand
     /// and netherrack), `axis`, `pillar` or `facing`.
     pub layout: &'static str,
+    /// How much it slows walking (soul sand 0.4, else 1).
+    pub speed_factor: f32,
 }
 
 impl Cube {
@@ -112,6 +114,204 @@ pub fn variants(id: &str, model: &str) -> Value {
     Value::Array(list)
 }
 
+const VARIANTS: &str = include_str!("../data/blocks/cube_variants.txt");
+
+/// One block-state variant, or multipart part, of a `variants` block
+/// (`cube_variants.txt`).
+struct Variant {
+    block: &'static str,
+    /// A multipart part (mushroom blocks) rather than a variant.
+    part: bool,
+    /// The state key (`facing=north,open=true`) or the part's condition;
+    /// empty for every state.
+    key: &'static str,
+    model: &'static str,
+    x: u16,
+    y: u16,
+    uvlock: bool,
+}
+
+/// A model of `cube_variants.txt`: its box's corners and its faces (down,
+/// up, north, south, west, east; `-` for a face it lacks).
+type BoxModel = [&'static str; 8];
+
+/// The `variants` blocks' variants, and their models by name.
+type VariantTables = (Vec<Variant>, HashMap<&'static str, BoxModel>);
+
+fn variant_tables() -> &'static VariantTables {
+    static TABLES: OnceLock<VariantTables> = OnceLock::new();
+    TABLES.get_or_init(|| {
+        let (mut variants, mut models) = (Vec::new(), HashMap::new());
+        for line in VARIANTS.lines().filter(|l| !l.is_empty()) {
+            let f: Vec<&'static str> = line.split('\t').collect();
+            let num = |s: &str| -> u16 { s.parse().expect("cube_variants.txt: a turn") };
+            if f[0] == "model" {
+                assert_eq!(f.len(), 10, "cube_variants.txt: {line}");
+                models.insert(f[1], [f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9]]);
+                continue;
+            }
+            assert_eq!(f.len(), 7, "cube_variants.txt: {line}");
+            variants.push(Variant {
+                block: f[1],
+                part: f[0] == "part",
+                key: if f[2] == "-" { "" } else { f[2] },
+                model: f[3],
+                x: num(f[4]),
+                y: num(f[5]),
+                uvlock: f[6] == "1",
+            });
+        }
+        (variants, models)
+    })
+}
+
+/// A face of `cube_variants.txt`: `texture/u1,v1,u2,v2/rotation/tintindex/cullface`
+/// (`-` for an unset UV or cull face).
+fn variant_face(spec: &'static str) -> (&'static str, Value) {
+    let p: Vec<&str> = spec.split('/').collect();
+    assert_eq!(p.len(), 5, "cube_variants.txt: face {spec}");
+    let mut face = json!({});
+    if p[1] != "-" {
+        let uv: Vec<f64> = p[1].split(',').map(|v| v.parse().unwrap()).collect();
+        face["uv"] = json!(uv);
+    }
+    let rotation: u16 = p[2].parse().unwrap();
+    if rotation != 0 {
+        face["rotation"] = json!(rotation);
+    }
+    let tint: i32 = p[3].parse().unwrap();
+    if tint >= 0 {
+        face["tintindex"] = json!(tint);
+    }
+    if p[4] != "-" {
+        face["cullface"] = json!(p[4]);
+    }
+    (p[0], face)
+}
+
+/// Where a `variants` model is written (`block/cube/<block>/<model>`: its
+/// names are Minecraft's, some of them other blocks' names or shared).
+fn variant_model_path(block: &str, model: &str) -> String {
+    format!("block/cube/{block}/{model}")
+}
+
+fn variant_model(model: &BoxModel) -> Value {
+    let corner = |s: &str| -> Vec<f64> { s.split(',').map(|v| v.parse().unwrap()).collect() };
+    let dirs = ["down", "up", "north", "south", "west", "east"];
+    let mut textures = serde_json::Map::new();
+    let mut faces = serde_json::Map::new();
+    for (dir, spec) in dirs.iter().zip(&model[2..]) {
+        if *spec == "-" {
+            continue;
+        }
+        let (texture, mut face) = variant_face(spec);
+        textures.insert((*dir).into(), json!(format!("minecraft:block/{texture}")));
+        face["texture"] = json!(format!("#{dir}"));
+        faces.insert((*dir).into(), face);
+    }
+    let particle = textures.values().next().cloned().unwrap_or(Value::Null);
+    textures.insert("particle".into(), particle);
+    json!({
+        "parent": "minecraft:block/open_base",
+        "textures": textures,
+        "elements": [{"from": corner(model[0]), "to": corner(model[1]), "faces": faces}],
+    })
+}
+
+/// A `variants` block's models (its default one again as `block/<id>`, for
+/// its item) and its block-state definition; None for other blocks.
+pub fn variant_models(block: &Block) -> Option<(Vec<(String, Value)>, Option<Value>)> {
+    if layouts().get(block.id) != Some(&"variants") {
+        return None;
+    }
+    let (variants, models) = variant_tables();
+    let mine: Vec<&Variant> = variants.iter().filter(|v| v.block == block.id).collect();
+    let mut out = Vec::new();
+    let mut definition = serde_json::Map::new();
+    let mut parts = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for v in &mine {
+        if seen.insert(v.model) {
+            out.push((
+                variant_model_path(block.id, v.model),
+                variant_model(&models[v.model]),
+            ));
+        }
+        let path = variant_model_path(block.id, v.model);
+        let mut entry = json!({ "model": format!("minecraft:{path}") });
+        if v.x != 0 {
+            entry["x"] = json!(v.x);
+        }
+        if v.y != 0 {
+            entry["y"] = json!(v.y);
+        }
+        if v.uvlock {
+            entry["uvlock"] = json!(true);
+        }
+        if v.part {
+            let when: serde_json::Map<String, Value> = v
+                .key
+                .split(',')
+                .filter_map(|c| c.split_once('='))
+                .map(|(k, val)| (k.to_owned(), json!(val)))
+                .collect();
+            parts.push(json!({"when": when, "apply": entry}));
+            continue;
+        }
+        match definition.get_mut(v.key) {
+            Some(Value::Array(list)) => list.push(entry),
+            Some(first) => *first = json!([first.clone(), entry]),
+            None => {
+                definition.insert(v.key.into(), entry);
+            }
+        }
+    }
+    // The item shows the default state's model, or (a multipart) the
+    // block's faces as a cube.
+    let default = mine.iter().find(|v| {
+        !v.part
+            && v.key.split(',').filter(|c| !c.is_empty()).all(|c| {
+                c.split_once('=')
+                    .is_some_and(|(k, val)| block.defaults.contains(&(k, val)))
+            })
+    });
+    let item = match (default, block.faces) {
+        (Some(v), _) => variant_model(&models[v.model]),
+        (None, Faces::Cube(faces)) => {
+            let specs: Vec<&'static str> = ["down", "up", "north", "south", "west", "east"]
+                .iter()
+                .zip(faces)
+                .map(|(d, t)| &*Box::leak(format!("{t}/-/0/-1/{d}").into_boxed_str()))
+                .collect();
+            let mut model: BoxModel = ["0,0,0", "16,16,16", "", "", "", "", "", ""];
+            model[2..].copy_from_slice(&specs);
+            variant_model(&model)
+        }
+        (None, _) => return None,
+    };
+    out.push((format!("block/{}", block.id), item));
+    let definition = if parts.is_empty() {
+        json!({ "variants": definition })
+    } else {
+        json!({ "multipart": parts })
+    };
+    Some((out, Some(definition)))
+}
+
+/// Every texture a `variants` block's models use.
+pub fn variant_textures(id: &str) -> Vec<&'static str> {
+    let (variants, models) = variant_tables();
+    let mut out: Vec<&'static str> = variants
+        .iter()
+        .filter(|v| v.block == id)
+        .flat_map(|v| models[v.model][2..].iter().filter(|s| **s != "-"))
+        .map(|spec| variant_face(spec).0)
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 fn leak<T>(v: Vec<T>) -> &'static [T] {
     Box::leak(v.into_boxed_slice())
 }
@@ -124,7 +324,7 @@ pub fn cubes() -> Vec<Cube> {
         .filter(|line| !line.is_empty())
         .map(|line| {
             let f: Vec<&'static str> = line.split('\t').collect();
-            assert_eq!(f.len(), 21, "cubes.txt: {line}");
+            assert_eq!(f.len(), 22, "cubes.txt: {line}");
             let num = |i: usize| -> f32 {
                 f[i].parse()
                     .unwrap_or_else(|_| panic!("cubes.txt: {} field {i}", f[0]))
@@ -163,6 +363,7 @@ pub fn cubes() -> Vec<Cube> {
                 },
                 faces,
                 layout: f[13],
+                speed_factor: num(21),
             }
         })
         .collect()
@@ -248,6 +449,9 @@ fn category(cube: &Cube) -> Category {
         "moss_block",
         "rooted_dirt",
         "ice",
+        "mycelium",
+        "podzol",
+        "sculk",
     ];
     if COLORS.iter().any(|c| id.starts_with(&format!("{c}_"))) {
         Category::Colored
@@ -323,8 +527,35 @@ fn id_base(id: &str) -> Option<&str> {
         .filter(|b| b.ends_with("_ore"))
 }
 
+/// The speed factor of a block of this file (1 for the others).
+pub fn speed_factor(id: &str) -> f32 {
+    static SPEEDS: OnceLock<HashMap<&'static str, f32>> = OnceLock::new();
+    let speeds = SPEEDS.get_or_init(|| {
+        cubes()
+            .into_iter()
+            .filter(|c| c.speed_factor != 1.0)
+            .map(|c| (c.id, c.speed_factor))
+            .collect()
+    });
+    speeds.get(id).copied().unwrap_or(1.0)
+}
+
+/// The shapes of a `sunken` cube (soul sand, mud): a full outline and
+/// occlusion over a collision box 14 sixteenths tall
+/// (`SoulSandBlock.SHAPE`, `MudBlock.SHAPE`).
+pub fn sunken() -> crate::shapes::StateShape {
+    use crate::shapes::{StateShape, cuboid, full};
+    StateShape {
+        collision: cuboid(0.0, 0.0, 0.0, 16.0, 14.0, 16.0),
+        ..StateShape::solid(full(), false, false)
+    }
+}
+
 fn set_facts(block: &mut Block, cube: &Cube) {
     block.faces = cube.faces;
+    if cube.layout == "sunken" {
+        block.form = Form::Shaped;
+    }
     if cube.clear() {
         block.form = Form::SeeThroughCube;
         block.layer = if cube.layout == "glass" {
@@ -386,7 +617,9 @@ mod tests {
         for cube in cubes() {
             let block = blocks.iter().find(|b| b.id == cube.id).unwrap();
             assert_eq!(block.tier, Tier::Palette, "{}", cube.id);
-            let form = if cube.clear() {
+            let form = if cube.layout == "sunken" {
+                Form::Shaped
+            } else if cube.clear() {
                 Form::SeeThroughCube
             } else {
                 Form::Cube
@@ -395,5 +628,38 @@ mod tests {
             assert!(!block.textures().is_empty(), "{}", cube.id);
         }
         assert_eq!(title("blast_furnace"), "Blast Furnace");
+    }
+
+    #[test]
+    fn variant_blocks_keep_minecraft_states_models_and_turns() {
+        assert_eq!(layouts().values().filter(|l| **l == "variants").count(), 50);
+        let blocks = crate::blocks::defined();
+        let block = |id: &str| blocks.iter().find(|b| b.id == id).unwrap();
+        let (models, definition) = variant_models(block("white_glazed_terracotta")).unwrap();
+        let definition = definition.unwrap();
+        assert_eq!(definition["variants"]["facing=north"]["y"], 180);
+        assert!(definition["variants"]["facing=south"]["y"].is_null());
+        // Its own model, and the default one again for the item.
+        assert_eq!(models.len(), 2);
+        let (_, definition) = variant_models(block("observer")).unwrap();
+        assert_eq!(
+            definition.unwrap()["variants"].as_object().unwrap().len(),
+            12
+        );
+        let (_, definition) = variant_models(block("sculk")).unwrap();
+        assert_eq!(
+            definition.unwrap()["variants"][""]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+        assert!(variant_textures("mycelium").contains(&"grass_block_snow"));
+        let (_, definition) = variant_models(block("red_mushroom_block")).unwrap();
+        assert_eq!(
+            definition.unwrap()["multipart"].as_array().unwrap().len(),
+            12
+        );
+        assert!(variant_models(block("stone")).is_none());
     }
 }

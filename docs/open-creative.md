@@ -176,10 +176,20 @@ hay), the furnace, blast furnace and smoker, and 126 blocks of other classes who
 draws one plain cube model (ores, stained glass, leaves, copper, coral blocks, concrete powder,
 sand, netherrack, magma, pumpkins). Their layout says how: unturned (`cube`; `clear` when light
 shows through, as grates; `leaves` when its faces also carry a tint index; `glass` when its
-sprites are drawn translucent), turned at
-random among the turns Minecraft picks (`spin_y` for sand, `spin_xy` for netherrack), or by a
-horizontal `facing`. Only their default state's numbers are written: the states of such a block
-differ at most in light, by `lit` (redstone ore). One line per block, numbers and names only:
+sprites are drawn translucent), turned at random among the turns Minecraft picks (`spin_y` for
+sand, `spin_xy` for netherrack), or by a horizontal `facing`; soul sand and mud are `sunken`
+(a full outline over a collision box 14 sixteenths tall, from the shape library), and soul sand
+keeps its speed factor of 0.4. Only their default state's numbers are written: the states of
+such a block differ at most in light, by `lit` (redstone ore).
+
+The `variants` layout covers 50 more blocks whose states draw full-cube models with any UVs and
+turns, or a multipart of single boxes: glazed terracotta (its faces' UVs turn), mycelium and
+podzol (the snowy model), observers, dispensers, droppers, barrels, crafters, copper bulbs,
+redstone lamps, beehives, sculk, sculk catalysts, infested stone and deepslate (mirrored
+models), suspicious sand and gravel, the creaking heart, command blocks and the three mushroom
+blocks (six faces, each a part). `data/blocks/cube_variants.txt` lists each block's variants or
+parts (state key or condition, model, x and y turns, uvlock) and each model's box and faces
+(texture, UV, rotation, tint index, cull face); `cubes.rs` writes them in the bundle's format. One line per block, numbers and names only:
 class chain, destroy time, resistance, light (and lit light), dampening, friction, map colour,
 sound type, mining tool and level, and the texture names of its six faces (the lit front last).
 `cubes.rs` reads it: a block the crate already authors keeps its name, tab and drop and takes
