@@ -248,6 +248,15 @@ fn locations_are_sorted_and_limited() {
             ..vertex
         },
         Rewritten {
+            // The fragment stage reads them all (unread varyings get no location).
+            body: format!(
+                "{}\nfloat hz_sum() {{ return {}; }}\n",
+                fragment.body,
+                (0..16)
+                    .map(|i| format!("v{i}"))
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            ),
             varyings: many,
             builtins: set(&[]),
             ..fragment

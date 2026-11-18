@@ -107,6 +107,10 @@ impl Interface {
         let mut by_name = BTreeMap::new();
         let mut zeroed = Vec::new();
         for f in &fragment.varyings {
+            // A varying the fragment stage never reads costs no location.
+            if !uses(&fragment.body, &f.name) {
+                continue;
+            }
             let Some(v) = vertex.varyings.iter().find(|v| v.name == f.name) else {
                 zeroed.push(f.clone());
                 continue;
@@ -327,6 +331,13 @@ impl Interface {
             .unwrap();
         }
     }
+}
+
+/// Whether `body` mentions the identifier `name`.
+fn uses(body: &str, name: &str) -> bool {
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    body.match_indices(name)
+        .any(|(i, _)| !body[..i].ends_with(ident) && !body[i + name.len()..].starts_with(ident))
 }
 
 pub(super) fn declare(out: &mut String, var: &Var) {
@@ -627,5 +638,32 @@ mod tests {
             }
             glsl_to_wgsl(&vs, Stage::Vertex).unwrap_or_else(|e| panic!("{e}\n{vs}"));
         }
+    }
+}
+
+#[cfg(test)]
+mod unread_tests {
+    use super::*;
+
+    #[test]
+    fn unread_varyings_get_no_location() {
+        let v = |name: &str| Var {
+            name: name.into(),
+            ty: "vec3".into(),
+            flat: false,
+            array_len: None,
+        };
+        let vertex = Rewritten {
+            varyings: vec![v("used"), v("unused"), v("used_2")],
+            ..Default::default()
+        };
+        let fragment = Rewritten {
+            body: "void hz_pack_main() { hz_gl_FragData[0] = vec4(used + used_2, 1.0); }".into(),
+            varyings: vec![v("used"), v("unused"), v("used_2")],
+            ..Default::default()
+        };
+        let i = Interface::new(&vertex, &fragment, Geometry::Fullscreen, 16).unwrap();
+        let names: Vec<&str> = i.slots.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["hz_v_used", "hz_v_used_2"]);
     }
 }
