@@ -1,7 +1,11 @@
 //! The open content's blocks, authored here. Identifiers reuse the familiar
-//! `minecraft:` names the shared gameplay code looks blocks up by; the states,
-//! their numeric ids and every fact about them are this crate's own and imply
-//! no compatibility with Minecraft worlds.
+//! `minecraft:` names the shared gameplay code looks blocks up by, and the
+//! bundle numbers blocks and their states exactly as Minecraft 26.3 does
+//! ([`crate::numbering`]): every Minecraft block is registered, those this
+//! crate does not define as inert support blocks. The facts about each block
+//! are this crate's own.
+use crate::numbering::{self, BlockStates};
+use std::collections::{HashMap, HashSet};
 
 /// What a block is for in this edition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -10,8 +14,9 @@ pub enum Tier {
     Palette,
     /// Terrain the preset generates but players cannot pick (air, water, grass).
     Terrain,
-    /// Required by name by the shared loaders, never generated or offered:
-    /// one inert state with no model, item, collision or light.
+    /// A Minecraft block without content yet, registered so the numbering is
+    /// Minecraft's: never generated or offered, every state inert, with no
+    /// model, item, collision or light.
     Support,
 }
 
@@ -181,9 +186,10 @@ pub struct Block {
     pub layer: Layer,
     pub faces: Faces,
     /// Properties in key order with their values in state order; states are
-    /// their cartesian product, the last property varying fastest.
+    /// their cartesian product, the last property varying fastest. [`defined`]
+    /// and [`all`] set them to Minecraft's.
     pub properties: &'static [(&'static str, &'static [&'static str])],
-    /// The default state's values, by key.
+    /// The default state's values, by key (Minecraft's, as `properties`).
     pub defaults: &'static [(&'static str, &'static str)],
     /// Destroy time; -1 is unbreakable outside creative.
     pub hardness: f32,
@@ -498,8 +504,25 @@ const fn plant(id: &'static str, name: &'static str, map_color: u32) -> Block {
     }
 }
 
-/// Every block the open content defines itself, air first, in registry order.
+/// Every block the open content defines itself, with Minecraft's properties
+/// and default state, in the order this file lists them.
 pub fn defined() -> Vec<Block> {
+    let vanilla: HashMap<&str, &BlockStates> =
+        numbering::blocks().iter().map(|b| (b.name, b)).collect();
+    authored()
+        .into_iter()
+        .map(|mut block| {
+            let states = vanilla
+                .get(block.id)
+                .unwrap_or_else(|| panic!("{} is not a Minecraft 26.3 block", block.id));
+            block.properties = states.properties;
+            block.defaults = states.defaults;
+            block
+        })
+        .collect()
+}
+
+fn authored() -> Vec<Block> {
     use Category::*;
     let mut blocks = vec![
         Block {
@@ -932,33 +955,8 @@ pub fn defined() -> Vec<Block> {
     blocks
 }
 
-type Properties = &'static [(&'static str, &'static [&'static str])];
-type Defaults = &'static [(&'static str, &'static str)];
-const DISTANCE: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7"];
-const BOOLEAN: &[&str] = &["true", "false"];
-
-/// Properties a support block keeps because shared code validates them by
-/// the block's name (`FluidBlockBindings`, `ScaffoldingCollision`, ...).
-fn support_properties(id: &str) -> (Properties, Defaults) {
-    match id {
-        "lava" => (LEVELS, &[("level", "0")]),
-        "scaffolding" => (
-            &[
-                ("bottom", BOOLEAN),
-                ("distance", DISTANCE),
-                ("waterlogged", BOOLEAN),
-            ],
-            &[
-                ("bottom", "false"),
-                ("distance", "7"),
-                ("waterlogged", "false"),
-            ],
-        ),
-        _ => (NO_PROPERTIES, &[]),
-    }
-}
-
-/// The inert stand-in for a name the shared loaders require.
+/// The inert stand-in for a Minecraft block without content ([`all`] gives
+/// it Minecraft's properties).
 pub fn support(id: &'static str) -> Block {
     let air = matches!(id, "cave_air" | "void_air");
     Block {
@@ -968,8 +966,8 @@ pub fn support(id: &'static str) -> Block {
         form: if air { Form::Air } else { Form::Inert },
         layer: Layer::Solid,
         faces: Faces::None,
-        properties: support_properties(id).0,
-        defaults: support_properties(id).1,
+        properties: NO_PROPERTIES,
+        defaults: &[],
         hardness: 0.0,
         resistance: 0.0,
         light: 0,
@@ -1005,15 +1003,29 @@ impl Block {
         }
         states
     }
+    /// The default state's index among [`Self::states`]: its values' places,
+    /// read as digits with the last property least significant.
     pub fn default_index(&self) -> usize {
-        self.states()
-            .iter()
-            .position(|state| {
-                state
-                    .iter()
-                    .all(|(k, v)| self.defaults.iter().any(|(dk, dv)| dk == k && dv == v))
-            })
-            .expect("a default state among the states")
+        self.properties.iter().fold(0, |index, (key, values)| {
+            let value = self
+                .defaults
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v)
+                .unwrap_or_else(|| panic!("{}: no default {key}", self.id));
+            let place = values
+                .iter()
+                .position(|v| v == value)
+                .unwrap_or_else(|| panic!("{}: default {key}={value} is not a value", self.id));
+            index * values.len() + place
+        })
+    }
+    pub fn state_count(&self) -> usize {
+        numbering::state_count(self.properties)
+    }
+    /// Whether it has a property of that name.
+    pub fn has_property(&self, key: &str) -> bool {
+        self.properties.iter().any(|(k, _)| *k == key)
     }
     pub fn is_air(&self) -> bool {
         self.form == Form::Air
@@ -1056,23 +1068,33 @@ impl Block {
     }
 }
 
-/// The open bundle's blocks: its own, then the support stand-ins for the
-/// names the shared behaviour loader requires that it does not define.
+/// The open bundle's blocks in Minecraft's registry order: its own, and an
+/// inert support block for every other Minecraft block, each with
+/// Minecraft's properties, so block and state ids are Minecraft's. A name the
+/// shared loaders require that Minecraft lacks would follow, sorted.
 pub fn all() -> Vec<Block> {
-    let mut blocks = defined();
-    let mut support: Vec<&'static str> = horizon_world::level::data::NAMED_BLOCKS
+    let mut own: HashMap<&str, Block> = defined().into_iter().map(|b| (b.id, b)).collect();
+    let mut blocks: Vec<Block> = numbering::blocks()
+        .iter()
+        .map(|states| {
+            let mut block = own
+                .remove(states.name)
+                .unwrap_or_else(|| support(states.name));
+            block.properties = states.properties;
+            block.defaults = states.defaults;
+            block
+        })
+        .collect();
+    let known: HashSet<&str> = blocks.iter().map(|b| b.id).collect();
+    let mut extra: Vec<&'static str> = horizon_world::level::data::NAMED_BLOCKS
         .iter()
         .map(|name| name.strip_prefix("minecraft:").expect("a minecraft: name"))
-        .filter(|id| !blocks.iter().any(|b| b.id == *id))
+        .filter(|id| !known.contains(id))
         .collect();
-    support.sort_unstable();
-    support.dedup();
-    blocks.extend(support.into_iter().map(support_block));
+    extra.sort_unstable();
+    extra.dedup();
+    blocks.extend(extra.into_iter().map(support));
     blocks
-}
-
-fn support_block(id: &'static str) -> Block {
-    support(id)
 }
 
 #[cfg(test)]

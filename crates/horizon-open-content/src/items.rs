@@ -360,7 +360,10 @@ fn shapeless(ingredients: &[&str], result: &str, count: u32, category: &str) -> 
 pub fn recipes(blocks: &[Block]) -> Vec<(String, Value)> {
     let mut out: Vec<(String, Value)> = Vec::new();
     let m = |id: &str| format!("minecraft:{id}");
-    for b in blocks.iter().filter(|b| b.id.ends_with("_log")) {
+    for b in blocks
+        .iter()
+        .filter(|b| b.has_item() && b.id.ends_with("_log"))
+    {
         let species = b.id.trim_end_matches("_log");
         out.push((
             format!("{species}_planks"),

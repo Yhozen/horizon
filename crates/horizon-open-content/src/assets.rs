@@ -148,7 +148,7 @@ fn models(block: &Block) -> (Vec<(String, Value)>, Option<Value>) {
                     ("east", "side"),
                 ],
             );
-            if block.properties.is_empty() {
+            if !block.has_property("axis") {
                 // A column that never turns (bookshelf, cactus).
                 return (
                     vec![(format!("block/{id}"), model)],
@@ -395,6 +395,12 @@ pub fn write(
             2
         }
     };
+    // Definition order is blocks.rs's, not the registry's.
+    let defined: BTreeMap<&str, usize> = crate::blocks::defined()
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.id, i))
+        .collect();
     let mut palette: Vec<(Category, String, String)> = Vec::new();
     for category in Category::ALL {
         let mut entries: Vec<(&str, String)> = blocks
@@ -402,7 +408,7 @@ pub fn write(
             .filter(|b| b.has_item() && b.category == Some(category))
             .map(|b| (b.id, b.name.to_owned()))
             .collect();
-        entries.sort_by_key(|(id, _)| rank(id));
+        entries.sort_by_key(|(id, _)| (rank(id), defined.get(id).copied()));
         entries.extend(
             items
                 .iter()

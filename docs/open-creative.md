@@ -82,7 +82,8 @@ The checks live at the boundaries, not through the game:
   go through the same code.
 - **Servers** (`assets::server_brand`): an open server's `minecraft:brand` is `horizon-open/`
   and the start of its provenance record's SHA-256. Both ends number blocks, items, entities and
-  the other network registries from the bundle's `registries.json`, so an open player leaves any
+  the other network registries from the bundle's `registries.json` (Minecraft's numbers, see
+  [Numbering](#numbering)), but content can still differ, so an open player leaves any
   server whose brand differs (a Minecraft server, or an open one with other content), and a
   Minecraft-backed player leaves an open server, before their numbers could disagree.
 - **Worlds** (`check_world`): a world made with the open bundle carries `horizon-content.json`.
@@ -123,17 +124,70 @@ The generator is `crates/horizon-open-content`:
 | `art_survival.rs` | original art: hearts (every kind the HUD draws), food, air, armour, experience and jump bars, the inventory, crafting table, recipe book and game-mode switcher screens, empty equipment slots, toasts, menu icons, world and server list icons, statistics headers, the vignette, the title's wordmark and panorama, the crafting table's faces |
 | `lang.rs` | the English interface text: menus, survival, death messages, joining and leaving, statistics, the allowed commands' replies and errors |
 | `sources.rs` | `content/open/sources.json`: inputs, checksums, credits and notices |
+| `numbering.rs`, `network.rs` | Minecraft's numbering from `data/` ([Numbering](#numbering)) and `registries.json` |
+| `coverage.rs` | `horizon-open-coverage.json` ([Coverage](#coverage)) |
 
 Building fails on a missing or changed input, a licence whose text is not vendored, a vendored
 file nobody attributed, or an unresolved model, texture, parent or item reference.
 
+### Numbering
+
+The bundle numbers everything as Minecraft 26.3 does, so a packet means the same to an open
+client and to a Minecraft one. The numbers come from name lists committed in
+`crates/horizon-open-content/data/` (names only, no other fact of Minecraft's), written by
+`python3 tools/open_registry_names.py` from the data generator's reports of the player's own
+server jar (`--check` fails if a list is out of date):
+
+- `registries/<registry>.txt`: one name per line in protocol order (line n is id n), without
+  the `minecraft:` namespace (others keep theirs: `brigadier:bool`). Each becomes a registry of
+  `registries.json` with every name, content or not: attributes, blocks, block entity types,
+  command argument types, custom statistics, data components, entity types, items, map
+  decorations, menus, mob effects, particles, the recipe book's categories, recipe and slot
+  displays, sound events, statistic types, villager professions and types.
+- `blocks/states.txt`: one block per line in registry order: its name, then each property as
+  `key=v1,v2,...`, keys sorted, values in Minecraft's order, the default value marked `*`
+  (`oak_leaves distance=1,2,3,4,5,6,*7 persistent=true,*false waterlogged=true,*false`). A
+  block's states are the product of its properties with the last key varying fastest, and its
+  first state follows the previous block's last: this is Minecraft's state numbering, and
+  `facts.json`'s rows follow it (35,723 states).
+
+`attributes.json` lists all 40 attributes in registry order (the index is the network id).
+`numbering.rs` reads the lists; a test checks every name the bundle defines and every state id
+against them.
+
 ### Support blocks
 
-The shared block-behaviour loader resolves about 280 vanilla blocks by name
-(`horizon_world::level::data::NAMED_BLOCKS`). The bundle gives each name it does not define an
-inert support block: one state (a few keep the properties shared code validates by name, such as
-lava's levels), no model, item, collision or light, never generated and never offered. The
-manifest counts them (`support_blocks`).
+Every Minecraft block the bundle does not define is an inert support block: all of Minecraft's
+states (so the numbering stays exact), each with the same inert facts: no model, item,
+collision or light, never generated and never offered. Cave air and void air are air. Blocks
+the bundle defines take Minecraft's properties too (leaves have their distances, grass its
+`snowy`); states the bundle's content doesn't use share the block's facts and model. The
+manifest counts the support blocks (`support_blocks`).
+
+### Coverage
+
+`horizon-open-coverage.json` says which registered names have content, so the relay can keep a
+stand-in for the others and players never see a hole; it is also the count of what is finished:
+
+```json
+{"schema": 1, "registries": {
+  "minecraft:block": {"total": 1286, "content": ["minecraft:air", "minecraft:stone", ...]},
+  "minecraft:item": {"total": 1658, "content": ["minecraft:air", "minecraft:stone", ...]},
+  "minecraft:attribute": {"total": 40, "missing": []}
+}}
+```
+
+Each registry of `registries.json` has an entry with `total` (its number of names) and exactly
+one of `content` (the names with content) or `missing` (the names without), whichever is
+shorter (`missing` on a tie), full names in protocol order; every other name of the registry is
+in the other set. Content means: a block the bundle defines, or cave and void air (all of its
+states); an item with a prototype in `items.json`; an entity type the bundle can show (player,
+item, experience orb, falling block and the mobs); a menu whose screen background is in the bundle (all
+25 since the container screens). Attributes, command argument types, custom statistics, data components, the recipe
+book's categories, recipe and slot displays and statistic types are complete: the shared code
+handles every name. Block entity types, map decorations, mob effects, particles, sound events
+and villager professions and types have no content yet. A name without content still loads:
+an inert block, an item drawn as the missing model, an entity with no model.
 
 ### Provenance
 
@@ -307,8 +361,8 @@ invisible and can still hurt, the server
 sees every relayed player at the relay's address (IP bans apply to the relay), and the client's
 mining speed comes from its stand-in tool, so the server may undo a break it thinks was too fast.
 
-The vanilla numbers come from the server's own data generator at runtime, never from the
-repository: `horizon-open-relay vanilla-data --out DIR` downloads Mojang's official server jar
+The relay reads the vanilla numbers from the server's own data generator at runtime (the bundle's
+committed name lists, [Numbering](#numbering), give the same ones): `horizon-open-relay vanilla-data --out DIR` downloads Mojang's official server jar
 (SHA-1 checked against Mojang's manifest; `--jar` uses one you have) and keeps
 `reports/blocks.json` and `reports/registries.json`. `serve --vanilla-data DIR` does this on first
 start.

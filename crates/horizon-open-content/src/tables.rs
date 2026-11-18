@@ -128,7 +128,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
     let mut first = 0usize;
     for block in blocks {
         defaults.insert(block.key(), first + block.default_index());
-        first += block.states().len();
+        first += block.state_count();
     }
     if states.len() != first {
         return Err("state count mismatch".into());
@@ -147,7 +147,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             ])
         })
         .collect();
-    bundle.json(
+    bundle.compact_json(
         "facts.json",
         &json!({"states": rows, "defaults": defaults}),
         GENERATOR,
@@ -192,7 +192,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             row
         })
         .collect();
-    bundle.json(
+    bundle.compact_json(
         "gameplay-facts.json",
         &json!({"states": gameplay}),
         GENERATOR,
@@ -248,7 +248,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             )
         })
         .collect();
-    bundle.json(
+    bundle.compact_json(
         "block-behaviours.json",
         &json!({
             "blocks": behaviour_blocks,
@@ -260,11 +260,11 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
         GENERATOR,
     )?;
 
-    // Tags.
+    // Tags, of the blocks with content (inert support blocks are in none).
     let names = |filter: &dyn Fn(&Block) -> bool| -> Vec<String> {
         blocks
             .iter()
-            .filter(|b| filter(b))
+            .filter(|b| b.form != Form::Inert && filter(b))
             .map(Block::key)
             .collect()
     };
@@ -380,7 +380,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             )
         })
         .collect();
-    bundle.json("render-definitions.json", &json!(render), GENERATOR)?;
+    bundle.compact_json("render-definitions.json", &json!(render), GENERATOR)?;
 
     // model-states.json: each block's property schema and state order.
     let model_states: BTreeMap<String, Value> = blocks
@@ -391,12 +391,16 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
                 .properties
                 .iter()
                 .map(|(k, values)| {
+                    // As Minecraft's export writes them: integer properties
+                    // as their range, the others' values sorted.
                     let numeric: Option<Vec<i64>> = values.iter().map(|v| v.parse().ok()).collect();
                     let value = match numeric {
-                        Some(n) if *k == "level" => {
-                            json!({"integer": [n[0], n[n.len() - 1]]})
+                        Some(n) => json!({"integer": [n[0], n[n.len() - 1]]}),
+                        None => {
+                            let mut sorted = values.to_vec();
+                            sorted.sort_unstable();
+                            json!({"named": sorted})
                         }
-                        _ => json!({"named": values}),
                     };
                     (*k, value)
                 })
@@ -658,24 +662,48 @@ pub const PLAYER_ATTRIBUTES: &[(&str, f64, Option<(f64, f64)>, bool)] = &[
     ("water_movement_efficiency", 0.0, Some((0.0, 1.0)), true),
     ("waypoint_receive_range", 0.0, Some((0.0, 6.0e7)), false),
     ("waypoint_transmit_range", 0.0, Some((0.0, 6.0e7)), false),
+    // Name tag distances: a player's name shows within 64 blocks, its
+    // scoreboard line below the name within 10.
+    ("below_name_distance", 10.0, Some((0.0, 256.0)), true),
+    ("name_tag_distance", 64.0, Some((0.0, 256.0)), true),
+];
+
+/// Attributes only mobs have; the player's own table leaves them out.
+pub const MOB_ATTRIBUTES: &[(&str, f64, Option<(f64, f64)>, bool)] = &[
+    ("spawn_reinforcements", 0.0, Some((0.0, 1.0)), false),
+    ("tempt_range", 10.0, Some((0.0, 2048.0)), false),
 ];
 
 fn bits(v: f64) -> String {
     format!("{:016x}", v.to_bits())
 }
 
+/// `attributes.json`: every attribute in Minecraft's registry order (the
+/// index is the network id, as `Catalog::from_json` reads it), and the
+/// player's values.
 pub fn attributes(bundle: &mut Bundle) -> Result<()> {
-    let list: Vec<Value> = PLAYER_ATTRIBUTES
+    let all: BTreeMap<&str, _> = PLAYER_ATTRIBUTES
         .iter()
-        .map(|(id, default, range, sync)| {
+        .chain(MOB_ATTRIBUTES)
+        .map(|a| (a.0, a))
+        .collect();
+    let list: Vec<Value> = crate::numbering::names("attribute")
+        .iter()
+        .map(|name| {
+            let (id, default, range, sync) = all
+                .get(name)
+                .ok_or_else(|| format!("attributes: no values for {name}"))?;
             let mut a = json!({"id": format!("minecraft:{id}"), "default": bits(*default), "syncable": sync});
             if let Some((min, max)) = range {
                 a["min"] = json!(bits(*min));
                 a["max"] = json!(bits(*max));
             }
-            a
+            Ok(a)
         })
-        .collect();
+        .collect::<Result<_>>()?;
+    if list.len() != all.len() {
+        return Err("attributes: a value set names no Minecraft attribute".into());
+    }
     let player: BTreeMap<String, String> = PLAYER_ATTRIBUTES
         .iter()
         .map(|(id, default, _, _)| (format!("minecraft:{id}"), bits(*default)))
@@ -770,7 +798,7 @@ pub fn health(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
         .iter()
         .map(|b| (b.key(), json!({"fall": "Block", "bounce": false})))
         .collect();
-    bundle.json("landing-definitions.json", &json!(landing), GENERATOR)?;
+    bundle.compact_json("landing-definitions.json", &json!(landing), GENERATOR)?;
     // What each block drops in survival.
     for b in blocks {
         if let Some(table) = crate::items::loot_table(b) {

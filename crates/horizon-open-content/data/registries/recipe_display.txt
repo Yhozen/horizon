@@ -1,0 +1,5 @@
+crafting_shapeless
+crafting_shaped
+furnace
+stonecutter
+smithing
