@@ -5,7 +5,7 @@
 //! table schema; the bundle's own content revision is in its manifest.
 use crate::{
     Bundle, Origin, Result,
-    blocks::{Block, Form, Layer, Tier, Tool},
+    blocks::{Block, Form, Layer, Sound, Tier, Tool},
 };
 use horizon_world::{
     DATA_VERSION,
@@ -111,6 +111,28 @@ fn sound(block: &Block) -> Value {
     })
 }
 
+/// A `gameplay-facts.json` row without the fields whose value is what the
+/// readers (`horizon_client::blocks`, `horizon_world::level::data`) assume
+/// when a field is missing: false flags, zero numbers, no item, a model
+/// render shape, the push-pull reaction, no sound. A support block's row is
+/// then its id, friction, outline and the few facts that differ, a fifth
+/// of the full row, and every state has one.
+fn without_defaults(row: Value) -> Value {
+    let Value::Object(map) = row else {
+        return row;
+    };
+    let keep = |key: &str, value: &Value| match (key, value) {
+        ("id" | "friction" | "outline" | "outline_edges", _) => true,
+        (_, Value::Null | Value::Bool(false)) => false,
+        (_, Value::Number(n)) => n.as_f64() != Some(0.0),
+        ("item", v) => v != "minecraft:air",
+        ("render_shape", v) => v != "MODEL",
+        ("push", v) => v != "PUSH_PULL",
+        _ => true,
+    };
+    Value::Object(map.into_iter().filter(|(k, v)| keep(k, v)).collect())
+}
+
 fn map_color(block: &Block) -> u32 {
     block.map_color
 }
@@ -181,7 +203,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
                 "friction": b.friction,
                 "explosion_resistance": b.resistance,
                 "item": if b.has_item() { b.key() } else { "minecraft:air".to_owned() },
-                "sound": sound(b),
+                "sound": if b.sound == Sound::None { Value::Null } else { sound(b) },
                 "offset": b.id == "short_grass",
                 "outline_offset": b.id == "short_grass",
                 "map_color": map_color(b),
@@ -189,7 +211,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             });
             let edges = edges(&b.outline());
             row["outline_edges"] = json!(edges);
-            row
+            without_defaults(row)
         })
         .collect();
     bundle.compact_json(

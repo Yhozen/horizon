@@ -111,7 +111,7 @@ cargo run --profile fast -p horizon-client -- --resources /tmp/open-resources --
 
 `horizon-prepare open` dispatches before any Minecraft, launcher or JDK discovery: it needs no
 Java and no network. It is the `open` feature of horizon-prepare (on by default); the launcher links
-the preparer's library with `default-features = false`, so it carries none of the generator. `--archive FILE` also writes the browser's data archive. Preparing twice from
+the preparer's library with `default-features = false`, so it carries none of the generator. `--archive FILE` also writes the browser's data archive: the bundle's files as one stream of records, gzip-compressed (about 1.3 MB; the page inflates it with the browser's `DecompressionStream`, `inflateArchive` in `web/cache.js`, before the game mounts it). The per-state tables leave out the fields their readers default (`gameplay-facts.json` rows keep only what differs from a false flag, a zero, no item, a model shape, push-pull and no sound). Preparing twice from
 the same inputs gives byte-identical files.
 
 The generator is `crates/horizon-open-content`:

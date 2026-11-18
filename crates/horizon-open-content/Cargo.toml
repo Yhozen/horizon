@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "Horizon Open Creative: builds the independent resource bundle (open artwork, original data) the client loads without any Minecraft files"
 
 [dependencies]
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs", "runtime_detection"] }
 horizon-core = { path = "../horizon-core" }
 horizon-protocol = { path = "../horizon-protocol" }
 horizon-world = { path = "../horizon-world" }

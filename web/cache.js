@@ -48,6 +48,15 @@ export async function loadAsset(asset, {
   return bytes;
 }
 
+/** A resource archive as the game mounts it: the open bundle's archive is gzip
+ * (`horizon-prepare open --archive`), inflated here; any other is returned as is. */
+export async function inflateArchive(bytes) {
+  const head = new Uint8Array(bytes, 0, Math.min(2, bytes.byteLength));
+  if (head[0] !== 0x1f || head[1] !== 0x8b) return bytes;
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Response(stream).arrayBuffer();
+}
+
 // Only a successfully started release advances retention; a failed update keeps its predecessor.
 export async function retainRelease(release, storage = globalThis.caches,
   origin = globalThis.location?.origin) {
