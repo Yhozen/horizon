@@ -643,3 +643,27 @@ fn integer_levels_and_biases() {
     let body = "    c += textureLod(colortex1, uv, 0) + texture(colortex1, uv, 1) + vec4(textureLod(shadowtex0, vec3(uv, 0.5), 0));";
     deferred(&sampling_pack(decls, body, "", &[])).unwrap();
 }
+
+#[test]
+fn a_3d_override_leaves_the_2d_buffer() {
+    let decls =
+        "uniform sampler3D colortex6;\nuniform sampler2D colortex7;\nuniform sampler3D colortex8;";
+    let body = "    c += texture(colortex6, vec3(uv, 0.5)) + texture(colortex7, uv) + texture(colortex8, vec3(uv, 0.5));";
+    let properties = "texture.deferred.colortex6.1=a.dat TEXTURE_3D R8 4 4 4 RED UNSIGNED_BYTE\n\
+                      texture.deferred.colortex7=a.dat TEXTURE_3D R8 4 4 4 RED UNSIGNED_BYTE\n";
+    let p = deferred(&sampling_pack(decls, body, properties, &[])).unwrap();
+    let got: Vec<(u32, TextureSource, TexDim)> = p
+        .textures
+        .iter()
+        .map(|t| (t.binding, t.source.clone(), t.dimension))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (8, TextureSource::Custom(0), TexDim::D3),
+            (9, TextureSource::Buffer(7), TexDim::D2),
+        ]
+    );
+    // colortex8 has no 3D texture: the default, with a note.
+    assert_eq!(p.notes.len(), 1, "{:?}", p.notes);
+}

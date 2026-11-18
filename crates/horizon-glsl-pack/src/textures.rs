@@ -155,6 +155,11 @@ pub fn custom_texture(
 ) -> Option<CustomTexture> {
     let words: Vec<&str> = value.split_whitespace().collect();
     let first = *words.first()?;
+    // `colortex6.1`: a suffix some packs write after the sampler; the sampler is the same.
+    let sampler = match sampler.rsplit_once('.') {
+        Some((base, n)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => base,
+        _ => sampler,
+    };
     let sampler = canonical_sampler(sampler);
     if words.len() == 1 && first.contains(':') {
         return Some(CustomTexture {

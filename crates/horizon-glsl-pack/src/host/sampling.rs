@@ -308,13 +308,22 @@ pub const CUSTOM_BINDING: u32 = 64;
 
 /// The plan's custom texture for `sampler` in this program, as an entry at `binding`
 /// (`None`: at [`CUSTOM_BINDING`] + its index).
-fn custom_entry(sampler: &str, binding: Option<u32>, spec: &ProgramSpec) -> Option<Entry> {
+/// Only a texture of the declared dimension: GL binds 2D and 3D textures to
+/// separate targets of a unit, so a 3D override leaves the 2D buffer in place.
+fn custom_entry(
+    sampler: &str,
+    dim: TexDim,
+    binding: Option<u32>,
+    spec: &ProgramSpec,
+) -> Option<Entry> {
     let (i, c) = spec
         .plan
         .custom_textures
         .iter()
         .enumerate()
-        .find(|(_, c)| c.sampler == sampler && custom_applies(c.stage, sampler, spec))?;
+        .find(|(_, c)| {
+            c.sampler == sampler && c.dim() == dim && custom_applies(c.stage, sampler, spec)
+        })?;
     let binding = binding.unwrap_or(CUSTOM_BINDING + i as u32);
     let float = c.sample() == SampleKind::Float;
     Some(Entry {
@@ -326,10 +335,12 @@ fn custom_entry(sampler: &str, binding: Option<u32>, spec: &ProgramSpec) -> Opti
     })
 }
 
-/// What `name` reads for the operation `op` in this program. `depth2_is_1`:
-/// `depthtex2` reads `depthtex1` (they hold the same without a hand program).
+/// What `name` (declared with dimension `dim`) reads for the operation `op`
+/// in this program. `depth2_is_1`: `depthtex2` reads `depthtex1` (they hold
+/// the same without a hand program).
 pub(super) fn resolve(
     name: &str,
+    dim: TexDim,
     op: &str,
     spec: &ProgramSpec,
     watershadow: bool,
@@ -338,7 +349,7 @@ pub(super) fn resolve(
     let fullscreen = spec.geometry == Geometry::Fullscreen;
     let Some(canon) = canonical(name, watershadow) else {
         // The pack's own name: a custom texture, else the 1×1 default.
-        return Ok(custom_entry(name, None, spec).map_or(Source::Default, Source::Pack));
+        return Ok(custom_entry(name, dim, None, spec).map_or(Source::Default, Source::Pack));
     };
     let canon = match canon.as_str() {
         "gtexture" | "lightmap" if fullscreen => "colortex0".to_string(),
@@ -349,8 +360,12 @@ pub(super) fn resolve(
         _ => canon,
     };
     let base = sampler_binding(&canon).ok_or_else(|| format!("unknown sampler {name}"))?;
-    if let Some(entry) = custom_entry(&canon, Some(base), spec) {
+    if let Some(entry) = custom_entry(&canon, dim, Some(base), spec) {
         return Ok(Source::Pack(entry));
+    }
+    if dim == TexDim::D3 {
+        // Every built-in texture is 2D: nothing is bound to the unit's 3D target.
+        return Ok(Source::Default);
     }
     let entry = Entry::new;
     let shadow = spec.plan.shadow;
@@ -509,7 +524,7 @@ pub(super) fn sampling_notes(
         .filter_map(|c| parse_sampling_call(c))
         .filter(|c| {
             matches!(
-                resolve(c.name, c.op, spec, watershadow, alias),
+                resolve(c.name, c.dim, c.op, spec, watershadow, alias),
                 Ok(Source::Default)
             )
         })
@@ -559,7 +574,7 @@ pub(super) fn sampling(
                 declared_type(c.dim, c.sample)
             )
         };
-        let (signature, body) = match resolve(name, op, spec, watershadow, alias)? {
+        let (signature, body) = match resolve(name, c.dim, op, spec, watershadow, alias)? {
             Source::Sprites if !declared_2d_float => return Err(group0("the block atlas")),
             Source::Atlas | Source::Lightmap if !declared_2d_float => {
                 return Err(group0("Horizon's own texture"));
