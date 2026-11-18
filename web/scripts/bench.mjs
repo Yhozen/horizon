@@ -83,10 +83,13 @@ try {
     if (values.verbose || /error|panic|Failed/i.test(text)) console.log(`[${s.toFixed(1)}] ${text.slice(0, 300)}`);
   });
   page.on("pageerror", (error) => console.log("pageerror", error.message));
-  const query = new URLSearchParams();
+  const query = new URLSearchParams({ name: "Bench" });
   if (values.args) query.set("args", values.args);
   if (values.shaderpack) query.set("shaderpack", `${origin}/bench-shaderpack.zip`);
-  await page.goto(`${origin}/${query.size ? `?${query}` : ""}`);
+  await page.goto(`${origin}/?${query}`);
+  // The start page waits for its Play button.
+  const play = page.getByRole("button", { name: /^Play/ });
+  await play.first().waitFor({ timeout: 30000 }).then(() => play.first().click(), () => {});
   await page.waitForFunction(() => window.horizonStarted || window.horizonError, null, { timeout: 300000 });
   const wait = (fraction) => new Promise((done) => setTimeout(done, seconds * 1000 * fraction));
   if (values.profile) {
