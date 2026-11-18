@@ -544,3 +544,18 @@ fn dfdy_is_negated_in_fragment_shaders() {
     let vs = "void main() { gl_Position = vec4(0.0); }\n";
     assert!(!rewrite(vs, Stage::Vertex).unwrap().body.contains("hz_dFdy"));
 }
+
+#[test]
+fn uniform_initializers() {
+    // GLSL 330: Horizon's value wins for its own uniforms; others keep the pack's value.
+    let src = "uniform float viewWidth = 1.0, heavyFog = max(0.25, 0.5);\n\
+               uniform vec2 offset = vec2(1.0, -2.0);\n\
+               out vec4 color;\n\
+               void main() { color = vec4(viewWidth, heavyFog, offset); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    let names: Vec<_> = rw.uniforms.iter().map(|u| u.name.as_str()).collect();
+    assert_eq!(names, ["viewWidth"], "{}", rw.body);
+    assert!(rw.body.contains("float heavyFog = max ( 0.25 , 0.5 );"), "{}", rw.body);
+    assert!(rw.body.contains("vec2 offset = vec2 ( 1.0 , - 2.0 );"), "{}", rw.body);
+    naga(&rw, Stage::Fragment);
+}
