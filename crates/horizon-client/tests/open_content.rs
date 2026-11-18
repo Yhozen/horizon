@@ -51,6 +51,8 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
         use horizon_open_content::{blocks::Form, connected::Family};
         let least = match block.form {
             Form::Cross => 2,
+            // A rail is one flat plane, both sides drawn.
+            _ if name.ends_with("rail") => 2,
             // A door's lower half has no top face.
             Form::Connected(Family::Door) => 5,
             _ => 6,
