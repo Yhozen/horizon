@@ -215,7 +215,7 @@ fn every_open_mob_loads_with_its_models_and_skins() {
     let root = bundle("mobs");
     let types = MobTypes::load(&root).unwrap();
     let names = horizon_open_content::mobs::names();
-    assert_eq!(names.len(), 13);
+    assert_eq!(names.len(), 83);
     for name in names {
         let id = format!("minecraft:{name}");
         let kind = std::sync::Arc::new(

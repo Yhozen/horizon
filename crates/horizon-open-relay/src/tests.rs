@@ -364,7 +364,7 @@ fn creatures_the_bundle_lacks_show_as_a_stand_in_with_only_shared_data() {
     use horizon_protocol::entity_data::{Value, serializer as s};
     let t = tables();
     let mut c = playing(&t);
-    // A wither skeleton (vanilla 5) spawns as the bundle's skeleton (open 4).
+    // A parched (vanilla 5) spawns as the bundle's skeleton (open 4).
     let play::Clientbound::AddEntity(p) = decode(send(&mut c, add_entity(9, 5, 0))) else {
         panic!()
     };

@@ -59,7 +59,28 @@ texture origins and mirrored boxes as the Java model, on a skin of the Java text
 skin from a Minecraft-layout resource pack fits it. The skins are painted by the generator,
 Horizon's own: a painter colours each face of each box. The young are the adults' boxes scaled about
 the feet, the head less, on the adult skin layout (Minecraft's young have models and skins of their
-own). Open players see these on any server they reach through the relay; the shared world's own
+own).
+
+The other creatures players meet (`crates/horizon-open-content/src/creatures.rs`): villagers,
+the wandering trader, zombie villagers, iron, snow and copper golems, the witch and every
+illager (pillager, vindicator, evoker, illusioner, ravager, vex), horses, donkeys, mules, zombie
+and skeleton horses, wolves, cats, ocelots, foxes, rabbits, bats, parrots, squid and glow squid,
+cod, salmon, tropical fish, pufferfish, dolphins, turtles, llamas and trader llamas, goats, bees,
+polar bears, pandas, mooshrooms, camels, sniffers, armadillos, allays, frogs, tadpoles, axolotls,
+slimes, magma cubes, piglins, piglin brutes, zombified piglins, hoglins, zoglins, striders, the
+ghast, blaze, wither skeleton, bogged, phantom, silverfish, endermite, both guardians, the giant,
+shulker, breeze, creaking, warden and wither. Their facts are in `data/mobs/creatures.txt`, which
+`tools/open_mob_layouts.py` writes from the prepared vanilla tables (numbers and names only): the
+entity type's hit box, category and default attributes, and every model layer the renderer draws
+(the young's own models too) as Minecraft's parts, poses and boxes, which the tool recovers from
+the baked polygons and checks by rebuilding them. `creatures::tests` compares every rebuilt layer
+with the prepared `entity-models.json`, corner for corner, when it is at hand. Each texture
+the renderer may ask for is the vendored pack's at Minecraft's path when it has one of that layout
+(a whole multiple of Minecraft's size), else painted by the generator on the model's boxes (overlays
+such as professions mostly clear). The relay shows these as themselves; its stand-ins
+(`rules.rs` `STAND_INS`) are left for the types still without content.
+
+Open players see these on any server they reach through the relay; the shared world's own
 server spawns no mobs (the open profile turns spawning off). The private preview lays its own mob
 skins over these when it plays on the open bundle, but for the young (`web.rs`'s overlay skips
 `textures/entity/**/*_baby.png`), whose layouts wouldn't fit.
