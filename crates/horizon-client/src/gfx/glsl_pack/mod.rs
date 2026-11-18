@@ -26,8 +26,8 @@ use horizon_glsl_pack::{
     CompiledPack, PackFiles, PackPlan, PackUniforms, ProgramKind, SamplerKind, TextureSource,
 };
 
-pub(super) use uniforms::PackUniformInputs;
 pub(crate) use probation::Probation;
+pub(super) use uniforms::PackUniformInputs;
 
 use horizon_glsl_pack::schedule::Side;
 use pipelines::Program;
@@ -53,6 +53,10 @@ pub(crate) struct PackRenderer {
     uniforms: UniformBuffers,
     formats: [wgpu::TextureFormat; 16],
     needs: [Need; 16],
+    /// `size.buffer.colortexN`.
+    sizes: [horizon_glsl_pack::plan::BufferSize; 16],
+    /// `scale.<program>` of full-screen passes.
+    pub(super) scales: BTreeMap<ProgramKind, horizon_glsl_pack::plan::Scale>,
     screen_format: wgpu::TextureFormat,
     mips: mips::Mips,
     schedule: horizon_glsl_pack::schedule::FrameSchedule,
@@ -64,9 +68,20 @@ pub(crate) struct PackRenderer {
     empty_group: wgpu::BindGroup,
     /// The sky box (entity vertices) for `gbuffers_skybasic`.
     sky: wgpu::Buffer,
+    /// The custom uniform block (group 1, binding 1) and what computes it,
+    /// when the pack has custom uniforms.
+    custom: Option<CustomBlock>,
     /// Frames drawn, for `frameCounter`.
     pub(super) frames: u32,
     pub(super) history: uniforms::History,
+}
+
+/// The custom uniforms' buffer, their state between frames and a scratch
+/// buffer for their bytes.
+struct CustomBlock {
+    buffer: wgpu::Buffer,
+    uniforms: horizon_glsl_pack::custom_uniforms::CustomUniforms,
+    bytes: Vec<u8>,
 }
 
 fn uniform_buffer(device: &wgpu::Device, label: &str) -> wgpu::Buffer {
@@ -169,7 +184,18 @@ impl PackRenderer {
         });
         let color = |i: u8| formats[usize::from(i).min(15)];
         let shadow_color = |i: u8| shadow_formats[usize::from(i).min(1)];
+        let custom = (!pack.custom_uniforms.is_empty()).then(|| CustomBlock {
+            buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Shader pack custom uniforms"),
+                size: pack.custom_uniforms.size() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            uniforms: pack.custom_uniforms.clone(),
+            bytes: Vec::new(),
+        });
         let layouts = pipelines::Layouts {
+            custom_uniforms: custom.is_some(),
             terrain: group0.terrain,
             entity: group0.entity,
             empty: &empty,
@@ -179,7 +205,8 @@ impl PackRenderer {
         };
         let mut programs = BTreeMap::new();
         for (&kind, program) in &pack.programs {
-            programs.insert(kind, pipelines::build(device, kind, program, &layouts)?);
+            let state = pack.plan.state(kind);
+            programs.insert(kind, pipelines::build(device, kind, program, &state, &layouts)?);
         }
         let textures = textures::Textures::new(device, queue, &plan, files)?;
         Ok(Self {
@@ -192,6 +219,13 @@ impl PackRenderer {
             },
             formats,
             needs,
+            sizes: std::array::from_fn(|i| pack.plan.buffers[i].size),
+            scales: pack
+                .programs
+                .keys()
+                .filter(|k| k.is_fullscreen())
+                .filter_map(|&k| Some((k, pack.plan.state(k).scale?)))
+                .collect(),
             screen_format,
             mips,
             schedule: horizon_glsl_pack::schedule::FrameSchedule::new(&plan),
@@ -201,6 +235,7 @@ impl PackRenderer {
             textures,
             empty_group,
             sky: frame::sky_box(device),
+            custom,
             frames: 0,
             history: Default::default(),
             plan,
@@ -215,6 +250,18 @@ impl PackRenderer {
             return None;
         }
         Some(uniforms::shadow_clip(frame, &self.plan))
+    }
+
+    /// Computes the custom uniforms for this frame from the camera's block
+    /// (`main`) and writes them; one copy serves every pass.
+    pub(super) fn write_custom_uniforms(&mut self, queue: &wgpu::Queue, main: &PackUniforms) {
+        let Some(custom) = &mut self.custom else {
+            return;
+        };
+        custom
+            .uniforms
+            .evaluate(&|name| main.get(name), main.frame_time, &mut custom.bytes);
+        queue.write_buffer(&custom.buffer, 0, &custom.bytes);
     }
 
     pub fn has(&self, kind: ProgramKind) -> bool {
@@ -237,6 +284,7 @@ impl PackRenderer {
             size,
             &self.needs,
             &self.formats,
+            &self.sizes,
             &mut self.mips,
         ));
     }
@@ -264,6 +312,12 @@ impl PackRenderer {
             binding: 0,
             resource: uniforms.as_entire_binding(),
         }];
+        if let Some(custom) = &self.custom {
+            entries.push(wgpu::BindGroupEntry {
+                binding: horizon_glsl_pack::custom_uniforms::CUSTOM_BINDING,
+                resource: custom.buffer.as_entire_binding(),
+            });
+        }
         for t in &program.textures {
             let view = match t.source {
                 TextureSource::Buffer(b) => match targets.buffer(b) {

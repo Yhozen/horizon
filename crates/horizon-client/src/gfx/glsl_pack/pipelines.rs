@@ -27,11 +27,14 @@ pub(super) struct Layouts<'a> {
     pub shadow_color: &'a dyn Fn(u8) -> wgpu::TextureFormat,
     /// The world view's format (`final` draws into it).
     pub screen: wgpu::TextureFormat,
+    /// The pack has custom uniforms: every group 1 has their block at
+    /// binding 1.
+    pub custom_uniforms: bool,
 }
 
-fn uniform_entry() -> wgpu::BindGroupLayoutEntry {
+fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
-        binding: 0,
+        binding,
         visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
         ty: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
@@ -92,8 +95,52 @@ fn blend(kind: ProgramKind) -> Option<wgpu::BlendState> {
     }
 }
 
+/// A `blend.<program>[.<buffer>]` setting as wgpu state (`None`: off).
+fn pack_blend(blend: horizon_glsl_pack::plan::Blend) -> Option<wgpu::BlendState> {
+    use horizon_glsl_pack::plan::{Blend, BlendFactor as P};
+    use wgpu::{BlendComponent, BlendFactor as F, BlendOperation as Op};
+    let factor = |f: P| match f {
+        P::Zero => F::Zero,
+        P::One => F::One,
+        P::SrcColor => F::Src,
+        P::OneMinusSrcColor => F::OneMinusSrc,
+        P::DstColor => F::Dst,
+        P::OneMinusDstColor => F::OneMinusDst,
+        P::SrcAlpha => F::SrcAlpha,
+        P::OneMinusSrcAlpha => F::OneMinusSrcAlpha,
+        P::DstAlpha => F::DstAlpha,
+        P::OneMinusDstAlpha => F::OneMinusDstAlpha,
+        P::SrcAlphaSaturate => F::SrcAlphaSaturated,
+    };
+    match blend {
+        Blend::Off => None,
+        Blend::On {
+            src,
+            dst,
+            src_alpha,
+            dst_alpha,
+        } => Some(wgpu::BlendState {
+            color: BlendComponent {
+                src_factor: factor(src),
+                dst_factor: factor(dst),
+                operation: Op::Add,
+            },
+            alpha: BlendComponent {
+                src_factor: factor(src_alpha),
+                dst_factor: factor(dst_alpha),
+                operation: Op::Add,
+            },
+        }),
+    }
+}
+
 fn blendable(format: wgpu::TextureFormat) -> bool {
-    !matches!(
+    let integer = matches!(
+        format.sample_type(None, None),
+        Some(wgpu::TextureSampleType::Sint | wgpu::TextureSampleType::Uint)
+    );
+    !integer
+        && !matches!(
         format,
         wgpu::TextureFormat::R32Float
             | wgpu::TextureFormat::Rg32Float
@@ -105,10 +152,16 @@ pub(super) fn build(
     device: &wgpu::Device,
     kind: ProgramKind,
     program: &CompiledProgram,
+    state: &horizon_glsl_pack::plan::ProgramState,
     layouts: &Layouts,
 ) -> Result<Program, String> {
     let geometry = kind.geometry();
-    let mut entries = vec![uniform_entry()];
+    let mut entries = vec![uniform_entry(0)];
+    if layouts.custom_uniforms {
+        entries.push(uniform_entry(
+            horizon_glsl_pack::custom_uniforms::CUSTOM_BINDING,
+        ));
+    }
     let mut samplers: Vec<SamplerKind> = Vec::new();
     for t in &program.textures {
         let compare = t.sampler == SamplerKind::Compare;
@@ -205,6 +258,8 @@ pub(super) fn build(
             } else {
                 (layouts.color)(i)
             };
+            // `blend.<program>[.<buffer>]` wins over the slot's default.
+            let blend = state.blend_of(i).map_or(blend, pack_blend);
             Some(wgpu::ColorTargetState {
                 format,
                 blend: blend.filter(|_| blendable(format)),

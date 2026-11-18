@@ -143,14 +143,43 @@ impl SamplerKind {
     }
 }
 
+/// A texture's dimension.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TexDim {
+    #[default]
+    D2,
+    D3,
+}
+
+/// What a texture binding's texels are, which decides its WGSL type:
+/// `texture_2d<f32>`, `texture_depth_2d`, `texture_2d<i32>`, `texture_2d<u32>`
+/// (and the 3D forms).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SampleKind {
+    /// Float, filterable unless its sampler is [`SamplerKind::Point`] or
+    /// [`SamplerKind::PointRepeat`] (depth textures read as unfilterable float).
+    #[default]
+    Float,
+    /// A depth texture read with a depth compare (`texture_depth_2d`).
+    Depth,
+    /// Signed integer texels, read with `textureLoad` only.
+    Sint,
+    /// Unsigned integer texels, read with `textureLoad` only.
+    Uint,
+}
+
 /// One texture a program reads from group 1, at `binding` (see
-/// [`host::sampler_binding`]); the WGSL declares it as a `texture_2d<f32>`
-/// (`texture_depth_2d` when `sampler` is [`SamplerKind::Compare`]).
+/// [`host::sampler_binding`]; custom textures at 64 + their index in
+/// `PackPlan::custom_textures`); the WGSL declares it by `dimension` and
+/// `sample` (`texture_2d<f32>`, `texture_depth_2d` when `sampler` is
+/// [`SamplerKind::Compare`], `texture_3d<f32>`, `texture_2d<u32>`…).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextureBinding {
     pub binding: u32,
     pub source: TextureSource,
     pub sampler: SamplerKind,
+    pub dimension: TexDim,
+    pub sample: SampleKind,
     /// The stages that read it.
     pub vertex: bool,
     pub fragment: bool,
@@ -178,6 +207,9 @@ pub struct CompiledProgram {
     pub textures: Vec<TextureBinding>,
     /// Uniforms the pack declares that Horizon does not provide (read as zero).
     pub unknown_uniforms: BTreeSet<String>,
+    /// Things that translated but may not look as in Iris (a sampler nothing
+    /// provides reads a 1×1 default…), for the pack report.
+    pub notes: Vec<String>,
 }
 
 /// A compiled pack.
@@ -198,6 +230,9 @@ pub struct CompiledPack {
     pub entities: crate::properties::IdMap,
     /// `item.properties`: item names to `currentRenderedItemId` ids.
     pub items: crate::properties::IdMap,
+    /// The custom uniforms to evaluate every frame (a copy of
+    /// `plan.custom_uniforms` the client keeps the per-frame state in).
+    pub custom_uniforms: crate::custom_uniforms::CustomUniforms,
     /// The shadow map's settings (derived from `plan.shadow`; kept until the
     /// client reads the plan).
     pub shadow: ShadowSettings,

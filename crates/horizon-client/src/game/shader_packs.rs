@@ -227,6 +227,8 @@ pub(super) struct Target {
     pub path: PathBuf,
     pub dimension: &'static str,
     pub overrides: Vec<(String, Option<String>)>,
+    /// Programs the GPU rejected earlier: their slots fall back.
+    pub excluded: std::collections::BTreeSet<String>,
 }
 
 /// A compiled pack, kept so a rebuilt renderer gets it back without compiling again.
@@ -247,8 +249,9 @@ pub(super) struct Job {
 
 #[cfg(target_arch = "wasm32")]
 enum WebJob {
-    /// Compiled on the next frame, so the screen can first say "Compiling".
+    /// The files are read on the next frame, so the screen can first say "Compiling".
     Start(HostParams),
+    Running(Box<horizon_glsl_pack::session::Session>, Arc<PackFiles>),
     Done,
 }
 
@@ -286,12 +289,41 @@ impl Job {
         }
         #[cfg(target_arch = "wasm32")]
         match std::mem::replace(&mut self.state, WebJob::Done) {
-            WebJob::Start(host) => Some(compile_target(&self.target, &host)),
+            WebJob::Start(host) => {
+                let files = match read_files(&self.target.path) {
+                    Ok(f) => Arc::new(f),
+                    Err(e) => return Some((None, failed_report(&e), None)),
+                };
+                let session = horizon_glsl_pack::session::Session::new(
+                    &files,
+                    self.target.dimension,
+                    &pack_options(&self.target),
+                    &host,
+                );
+                self.state = WebJob::Running(Box::new(session), files);
+                None
+            }
+            WebJob::Running(mut session, files) => {
+                // About two frames' worth of work at a time, so the page stays alive.
+                let started = web_time::Instant::now();
+                while started.elapsed().as_millis() < 30 {
+                    if session.step() {
+                        let (compiled, report) = session.finish();
+                        return Some((compiled, report, Some(files)));
+                    }
+                }
+                self.state = WebJob::Running(session, files);
+                None
+            }
             WebJob::Done => None,
         }
     }
 
     pub fn progress(&self) -> Option<(usize, usize)> {
+        #[cfg(target_arch = "wasm32")]
+        if let WebJob::Running(session, _) = &self.state {
+            return Some(session.progress());
+        }
         None
     }
 }
@@ -308,8 +340,20 @@ fn failed_report(why: &str) -> PackReport {
 fn pack_options(target: &Target) -> PackOptions {
     PackOptions {
         overrides: target.overrides.clone(),
+        excluded: target.excluded.clone(),
         ..PackOptions::default()
     }
+}
+
+/// The programs a GPU error names (pipelines and shader modules are
+/// labelled with their program's pack path).
+fn programs_named(error: &str, compiled: &CompiledPack) -> Vec<String> {
+    compiled
+        .programs
+        .values()
+        .map(|p| p.source.clone())
+        .filter(|source| error.contains(source.as_str()))
+        .collect()
 }
 
 /// Reads and compiles a pack (a worker thread natively).
@@ -318,41 +362,13 @@ fn compile_target(target: &Target, host: &HostParams) -> JobResult {
         Ok(f) => Arc::new(f),
         Err(e) => return (None, failed_report(&e), None),
     };
-    let (compiled, report) = compile_report(&files, target.dimension, &pack_options(target), host);
+    let (compiled, report) = horizon_glsl_pack::session::compile_report(
+        &files,
+        target.dimension,
+        &pack_options(target),
+        host,
+    );
     (compiled, report, Some(files))
-}
-
-/// Until the crate's staged session lands: one compile, its result as a report.
-fn compile_report(
-    files: &PackFiles,
-    dimension: &str,
-    options: &PackOptions,
-    host: &HostParams,
-) -> (Option<CompiledPack>, PackReport) {
-    match horizon_glsl_pack::compile(files, dimension, options, host) {
-        Ok(compiled) => {
-            let mut report = PackReport::default();
-            for (kind, why) in &compiled.skipped {
-                report.programs.push(horizon_glsl_pack::report::ProgramOutcome {
-                    slot: kind.name(),
-                    file: None,
-                    failed: Vec::new(),
-                    error: Some(why.clone()),
-                });
-            }
-            let mut unknown: Vec<String> = compiled
-                .programs
-                .values()
-                .flat_map(|p| p.unknown_uniforms.iter().cloned())
-                .collect();
-            unknown.sort();
-            unknown.dedup();
-            report.unknown_uniforms = unknown;
-            report.settle();
-            (Some(compiled), report)
-        }
-        Err(e) => (None, failed_report(&e.to_string())),
-    }
 }
 
 /// The manager's state, in `Game`.
@@ -371,6 +387,12 @@ pub(super) struct ShaderPacks {
     pub applied: Option<Applied>,
     /// The last target that failed, not retried until something changes.
     pub failed: Option<Target>,
+    /// Each pack's option screens, read when its settings are first shown.
+    pub models: BTreeMap<String, Arc<horizon_glsl_pack::screens::OptionModel>>,
+    /// The settings sub-screen shown (`None`: the root).
+    pub settings_screen: Option<String>,
+    /// Per pack, programs the GPU rejected (retried without them).
+    pub excluded: BTreeMap<String, std::collections::BTreeSet<String>>,
     loaded: bool,
 }
 
@@ -447,6 +469,29 @@ impl ShaderPacks {
         self.values.insert(file.to_string(), values);
     }
 
+    /// A pack's options and screens (read from its files once).
+    pub fn model_of(&mut self, file: &str) -> Option<Arc<horizon_glsl_pack::screens::OptionModel>> {
+        if let Some(m) = self.models.get(file) {
+            return Some(m.clone());
+        }
+        let pack = self
+            .library
+            .iter()
+            .chain(self.cli.iter())
+            .find(|p| p.file == file)?
+            .clone();
+        let files = match read_files(&pack.path) {
+            Ok(f) => f,
+            Err(e) => {
+                log::warn!("Horizon: shader pack {file}: {e}");
+                return None;
+            }
+        };
+        let model = Arc::new(horizon_glsl_pack::screens::option_model(&files));
+        self.models.insert(file.to_string(), model.clone());
+        Some(model)
+    }
+
     /// The chosen pack, if shaders are on.
     pub fn chosen(&self) -> Option<LibraryPack> {
         if let Some(cli) = &self.cli {
@@ -469,6 +514,7 @@ impl ShaderPacks {
                 .into_iter()
                 .map(|(k, v)| (k, Some(v)))
                 .collect(),
+            excluded: self.excluded.get(&pack.file).cloned().unwrap_or_default(),
             file: pack.file,
             path: pack.path,
             dimension: dimension_id(dim),
@@ -572,6 +618,12 @@ impl Game<'_> {
                             files,
                         }),
                         Err(e) => {
+                            if self.exclude_rejected(&target.file, &e, &compiled) {
+                                // Compiled again without them on the next frame.
+                                report.gpu_errors.push(("pipelines".into(), e));
+                                self.shader_packs.reports.insert(target.file.clone(), report);
+                                return;
+                            }
                             report.status = PackStatus::Failed;
                             report.gpu_errors.push(("pipelines".into(), e));
                             None
@@ -605,15 +657,17 @@ impl Game<'_> {
             && let Some(applied) = self.shader_packs.applied.take()
         {
             let file = applied.target.file.clone();
-            let report = self.shader_packs.reports.entry(file.clone()).or_default();
-            report.status = PackStatus::Failed;
-            report.gpu_errors.push(("GPU".into(), error.clone()));
-            log::warn!("Horizon: shader pack {file} turned off by the GPU: {error}");
-            self.shader_packs.failed = Some(applied.target);
             self.set_shader_pack_tags(None);
-            self.system_message(horizon_client::text::Text::literal(format!(
-                "Shader pack {file} was turned off: the GPU rejected it (see its report)."
-            )));
+            if !self.exclude_rejected(&file, &error, &applied.compiled) {
+                let report = self.shader_packs.reports.entry(file.clone()).or_default();
+                report.status = PackStatus::Failed;
+                report.gpu_errors.push(("GPU".into(), error.clone()));
+                log::warn!("Horizon: shader pack {file} turned off by the GPU: {error}");
+                self.shader_packs.failed = Some(applied.target);
+                self.system_message(horizon_client::text::Text::literal(format!(
+                    "Shader pack {file} was turned off: the GPU rejected it (see its report)."
+                )));
+            }
         }
         if self.shader_packs.job.is_some() {
             return;
@@ -635,6 +689,21 @@ impl Game<'_> {
                 }
             }
         }
+    }
+
+    /// Programs a GPU error names are left out of the next compile (their
+    /// slots fall back); false when it names none that are not already out.
+    fn exclude_rejected(&mut self, file: &str, error: &str, compiled: &CompiledPack) -> bool {
+        let named = programs_named(error, compiled);
+        let excluded = self.shader_packs.excluded.entry(file.to_string()).or_default();
+        let before = excluded.len();
+        excluded.extend(named);
+        let more = excluded.len() > before;
+        if more {
+            log::warn!("Horizon: shader pack {file}: the GPU rejected {excluded:?}; compiling without them");
+            self.shader_packs.failed = None;
+        }
+        more
     }
 
     /// Puts a compiled pack into the renderer and its tags into the mesher.
