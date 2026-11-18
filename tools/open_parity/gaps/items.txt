@@ -1,6 +1,5 @@
 minecraft:acacia_hanging_sign
 minecraft:acacia_shelf
-minecraft:acacia_sign
 minecraft:apple
 minecraft:azalea
 minecraft:bamboo
@@ -8,14 +7,12 @@ minecraft:bamboo_fence
 minecraft:bamboo_fence_gate
 minecraft:bamboo_hanging_sign
 minecraft:bamboo_shelf
-minecraft:bamboo_sign
 minecraft:barrier
 minecraft:beacon
 minecraft:bell
 minecraft:big_dripleaf
 minecraft:birch_hanging_sign
 minecraft:birch_shelf
-minecraft:birch_sign
 minecraft:black_banner
 minecraft:blue_banner
 minecraft:brewing_stand
@@ -25,7 +22,6 @@ minecraft:calibrated_sculk_sensor
 minecraft:campfire
 minecraft:cherry_hanging_sign
 minecraft:cherry_shelf
-minecraft:cherry_sign
 minecraft:chiseled_bookshelf
 minecraft:chorus_flower
 minecraft:chorus_plant
@@ -43,11 +39,9 @@ minecraft:copper_sword
 minecraft:creeper_head
 minecraft:crimson_hanging_sign
 minecraft:crimson_shelf
-minecraft:crimson_sign
 minecraft:cyan_banner
 minecraft:dark_oak_hanging_sign
 minecraft:dark_oak_shelf
-minecraft:dark_oak_sign
 minecraft:daylight_detector
 minecraft:decorated_pot
 minecraft:diamond
@@ -84,7 +78,6 @@ minecraft:iron_sword
 minecraft:jigsaw
 minecraft:jungle_hanging_sign
 minecraft:jungle_shelf
-minecraft:jungle_sign
 minecraft:lectern
 minecraft:light
 minecraft:light_blue_banner
@@ -95,7 +88,6 @@ minecraft:mangrove_hanging_sign
 minecraft:mangrove_propagule
 minecraft:mangrove_roots
 minecraft:mangrove_shelf
-minecraft:mangrove_sign
 minecraft:netherite_axe
 minecraft:netherite_hoe
 minecraft:netherite_pickaxe
@@ -103,12 +95,10 @@ minecraft:netherite_shovel
 minecraft:netherite_sword
 minecraft:oak_hanging_sign
 minecraft:oak_shelf
-minecraft:oak_sign
 minecraft:orange_banner
 minecraft:oxidized_copper_golem_statue
 minecraft:pale_oak_hanging_sign
 minecraft:pale_oak_shelf
-minecraft:pale_oak_sign
 minecraft:piglin_head
 minecraft:pink_banner
 minecraft:pink_petals
@@ -118,7 +108,6 @@ minecraft:player_head
 minecraft:pointed_dripstone
 minecraft:poplar_hanging_sign
 minecraft:poplar_shelf
-minecraft:poplar_sign
 minecraft:purple_banner
 minecraft:raw_copper
 minecraft:raw_gold
@@ -140,7 +129,6 @@ minecraft:spawner
 minecraft:spore_blossom
 minecraft:spruce_hanging_sign
 minecraft:spruce_shelf
-minecraft:spruce_sign
 minecraft:stick
 minecraft:sticky_piston
 minecraft:stone_axe
@@ -158,7 +146,6 @@ minecraft:turtle_egg
 minecraft:vault
 minecraft:warped_hanging_sign
 minecraft:warped_shelf
-minecraft:warped_sign
 minecraft:waxed_copper_golem_statue
 minecraft:waxed_exposed_copper_golem_statue
 minecraft:waxed_oxidized_copper_golem_statue

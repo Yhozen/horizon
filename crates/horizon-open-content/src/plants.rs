@@ -402,7 +402,7 @@ pub fn add(blocks: &mut Vec<Block>) {
                 } else if plant.classes[0] == "BedBlock" {
                     Category::Colored
                 } else if plant.classes.iter().any(|c| {
-                    ["Torch", "Lantern", "Chain", "Chest"]
+                    ["Torch", "Lantern", "Chain", "Chest", "Sign"]
                         .iter()
                         .any(|kind| c.contains(kind))
                 }) {
@@ -946,6 +946,64 @@ fn layout(name: &str) -> Option<(Vec<Value>, bool)> {
                 elements.push(mixed(*from, *to, faces));
             }
             (elements, false)
+        }
+        // A sign: Minecraft's sign board (24 by 12 by 2 pixels) and post (2
+        // by 14 by 2) at two thirds of their size on the sign texture's
+        // layout; standing, the board tops the post and the model turns a
+        // sixteenth of a turn per step (the block state turns it further);
+        // on a wall, the board alone against the wall's side.
+        _ if name.starts_with("template_sign_rot_") || name == "template_wall_sign" => {
+            // Written to five places, as Minecraft's model files write them
+            // (a turned corner lands where Minecraft's does).
+            let third = |v: f64| (v * 2.0 / 3.0 * 1e5).round() / 1e5;
+            let board_faces = |wall: bool| {
+                vec![
+                    ("north", [0.0, 8.0, 12.0, 14.0], None),
+                    ("east", [12.0, 1.0, 13.0, 7.0], wall.then_some("east")),
+                    ("south", [0.0, 1.0, 12.0, 7.0], None),
+                    ("west", [12.0, 8.0, 13.0, 14.0], wall.then_some("west")),
+                    ("up", [0.0, 0.0, 12.0, 1.0], None),
+                    ("down", [0.0, 14.0, 12.0, 15.0], None),
+                ]
+            };
+            if name == "template_wall_sign" {
+                let board = plain(
+                    "#all",
+                    [0.0, third(12.5) - third(6.0), 1.0 - third(1.0)],
+                    [16.0, third(12.5) + third(6.0), 1.0 + third(1.0)],
+                    None,
+                    &board_faces(true),
+                    false,
+                );
+                return Some((vec![board], false));
+            }
+            let step = f64::from(name.as_bytes()[name.len() - 1] - b'0');
+            // Minecraft's first step turns by a hair, not by nothing.
+            let angle = if step == 0.0 { 0.0001 } else { -22.5 * step };
+            let turn = Some(([8.0, 0.0, 8.0], "y", angle, false));
+            let post = plain(
+                "#all",
+                [8.0 - third(1.0), 0.0, 8.0 - third(1.0)],
+                [8.0 + third(1.0), third(14.0), 8.0 + third(1.0)],
+                (step != 0.0).then_some(turn).flatten(),
+                &[
+                    ("north", [14.0, 8.0, 15.0, 15.0], None),
+                    ("east", [15.0, 0.0, 16.0, 7.0], None),
+                    ("south", [14.0, 0.0, 15.0, 7.0], None),
+                    ("west", [15.0, 8.0, 16.0, 15.0], None),
+                    ("down", [14.0, 15.0, 15.0, 16.0], Some("down")),
+                ],
+                false,
+            );
+            let board = plain(
+                "#all",
+                [0.0, third(14.0), 8.0 - third(1.0)],
+                [16.0, third(26.0), 8.0 + third(1.0)],
+                turn,
+                &board_faces(false),
+                false,
+            );
+            (vec![post, board], false)
         }
         // A chain: two narrow strips of its texture crossed at 45 degrees.
         "template_chain" => {
