@@ -299,7 +299,17 @@ impl Pp<'_> {
     }
 
     fn run(&mut self, text: &str, file: &str) -> Result<(), PackError> {
+        // A code line whose macro call continues on the next lines, joined.
+        let mut pending = String::new();
         for (n, line) in strip_comments(text).lines().enumerate() {
+            let joined;
+            let line = if pending.is_empty() || line.trim_start().starts_with('#') {
+                self.flush(&mut pending);
+                line
+            } else {
+                joined = format!("{} {}", std::mem::take(&mut pending), line.trim());
+                joined.as_str()
+            };
             let at = |m: String| PackError::new(file, format!("line {}: {m}", n + 1));
             let trimmed = line.trim();
             if let Some(target) = include_target(trimmed) {
@@ -324,12 +334,40 @@ impl Pp<'_> {
                     .unwrap_or(d.len());
                 self.directive(&d[..split], d[split..].trim()).map_err(at)?;
             } else if self.live() && !trimmed.is_empty() {
+                if self.open_call(line) {
+                    pending = line.to_string();
+                    continue;
+                }
                 let line = self.expand(line, &mut Vec::new());
                 self.out.push_str(line.trim_end());
                 self.out.push('\n');
             }
         }
+        self.flush(&mut pending);
         Ok(())
+    }
+
+    /// Expands and writes a pending joined line as it is.
+    fn flush(&mut self, pending: &mut String) {
+        if !pending.is_empty() {
+            let line = self.expand(&std::mem::take(pending), &mut Vec::new());
+            self.out.push_str(line.trim_end());
+            self.out.push('\n');
+        }
+    }
+
+    /// Whether `line` calls a function-like macro whose `)` is on a later line.
+    fn open_call(&self, line: &str) -> bool {
+        let toks = lex(line);
+        toks.iter().enumerate().any(|(i, &(k, s))| {
+            k == K::Ident && self.macros.get(s).is_some_and(|m| m.params.is_some()) && {
+                let mut j = i + 1;
+                while toks.get(j).is_some_and(|t| t.0 == K::Space) {
+                    j += 1;
+                }
+                toks.get(j).is_some_and(|t| t.1 == "(") && call_args(&toks, i + 1).is_none()
+            }
+        })
     }
 
     fn directive(&mut self, name: &str, args: &str) -> Result<(), String> {
@@ -472,7 +510,7 @@ impl Pp<'_> {
                             Some(p) if k == K::Ident => args[p].clone(),
                             _ => t.to_string(),
                         };
-                        lex(&m.body).into_iter().map(subst).collect()
+                        paste(&lex(&m.body).into_iter().map(subst).collect::<String>())
                     }
                     // Not a call (or a wrong arity): the name stays, as in C.
                     _ => {
@@ -496,6 +534,17 @@ impl Pp<'_> {
         }
         out
     }
+}
+
+/// `a ## b` → `ab` (token pasting in a macro body).
+fn paste(body: &str) -> String {
+    let mut out = body.to_string();
+    while let Some(at) = out.find("##") {
+        let left = out[..at].trim_end().len();
+        let right = at + 2 + (out[at + 2..].len() - out[at + 2..].trim_start().len());
+        out.replace_range(left..right, "");
+    }
+    out
 }
 
 /// A call's arguments on the same line, split at top-level commas, and the
@@ -640,6 +689,16 @@ mod tests {
         let words: Vec<&str> = out.split_whitespace().collect();
         assert_eq!(words, ["I", "0", "4", "0", "40", "16", "2"]);
         assert_eq!(BIOMES[40], "plains");
+    }
+
+    #[test]
+    fn macro_calls_across_lines_and_pasting() {
+        let text = "#define max0(x) max(x, 0.0)\n#define CAT(a, b) a ## b\n#define F(i) v ## i\n\
+                    float y = max0(\n    a\n    + b\n);\nfloat CAT(fo, o) = F(2);\nfloat z = max0(c);\n";
+        let out = pp(text);
+        assert!(out.contains("float y = max(a + b, 0.0);"), "{out}");
+        assert!(out.contains("float foo = v2;"), "{out}");
+        assert!(out.contains("float z = max(c, 0.0);"), "{out}");
     }
 
     #[test]
