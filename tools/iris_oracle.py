@@ -688,11 +688,69 @@ def decode(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- index
+
+# Log errors every run has (offline account, no Realms, no narrator), left out of summaries.
+LOG_NOISE = ("Failed to fetch user properties", "Realms", "narrator", "Failed to fetch", "XDG_RUNTIME_DIR",
+             "libflite", "sessionserver", "Couldn't find matching GLX", "Failed to create backend")
+
+
+def summarize_log(log: Path) -> str:
+    """One line: Iris's own errors and shader warnings in a run's log."""
+    import re
+
+    text = log.read_text(errors="replace")
+    errors: list[str] = []
+    warned: set[str] = set()
+    for line in text.splitlines():
+        m = re.search(r"Shader compilation log for (\S+?):", line)
+        if m:
+            warned.add(m[1])
+            continue
+        if re.search(r"/(ERROR|FATAL)\]", line) and not any(n in line for n in LOG_NOISE):
+            msg = re.sub(r"^\[[^]]*\] \[[^]]*\]: ", "", line).strip()
+            if msg not in errors:
+                errors.append(msg[:160])
+    parts = []
+    if "Using shaderpack" not in text:
+        parts.append("pack not loaded")
+    if "FATAL ERROR" in text or "Game crashed" in text or "crash report" in text.lower():
+        parts.append("game crashed")
+    if errors:
+        parts.append(f"{len(errors)} error(s): " + " | ".join(errors[:3]))
+    if warned:
+        parts.append(f"compile warnings in {len(warned)} program(s) ({', '.join(sorted(warned)[:4])}{', ...' if len(warned) > 4 else ''})")
+    return "; ".join(parts) or "clean"
+
+
+def index(args) -> int:
+    d = Path(args.dir)
+    rows = ["# Iris reference screenshots", "",
+            "Iris 1.11.7 + Sodium 0.9.2, Minecraft 26.3, Mesa llvmpipe, 854x480, default pack options, HUD and "
+            "hand hidden (F1). Made by `tools/iris_oracle.py run --scenes noon,dusk,underwater`.", "",
+            "| Pack | Scene | File | Iris log (errors / warnings) |", "|---|---|---|---|"]
+    for log in sorted(d.glob("*.log")):
+        pack = log.stem
+        summary = summarize_log(log).replace("|", "\\|")
+        shots = sorted(d.glob(f"{pack}-*.png"), key=lambda p: ["noon", "dusk", "underwater"].index(p.stem.rsplit("-", 1)[1])
+                       if p.stem.rsplit("-", 1)[1] in ("noon", "dusk", "underwater") else 9)
+        if not shots:
+            rows.append(f"| {pack} | - | (none) | {summary} |")
+        for shot in shots:
+            rows.append(f"| {pack} | {shot.stem.rsplit('-', 1)[1]} | `{shot.name}` | {summary} |")
+    (d / "index.md").write_text("\n".join(rows) + "\n" + (Path(args.notes).read_text() if args.notes else ""))
+    print(d / "index.md")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mcdir", default=str(MCDIR))
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("prepare")
+    ix = sub.add_parser("index", help="write index.md for a folder of run outputs")
+    ix.add_argument("--dir", required=True)
+    ix.add_argument("--notes", help="markdown appended to the index")
     de = sub.add_parser("decode", help="read the value rows a probe pack painted")
     de.add_argument("--png", required=True)
     de.add_argument("--fsh", default=str(ROOT / "tools" / "shader_probe_packs" / "macros" / "shaders" / "final.fsh"), help="the probe pack's final.fsh (its `// row` comments)")
@@ -725,6 +783,8 @@ def main() -> int:
     if args.cmd == "prepare":
         prepare(args)
         return 0
+    if args.cmd == "index":
+        return index(args)
     if args.cmd == "decode":
         return decode(args)
     if args.cmd == "world":
