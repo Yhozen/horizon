@@ -847,16 +847,13 @@ gui/title/mojangstudios.png
 gui/title/realms.png
 item/acacia_door.png
 item/acacia_hanging_sign.png
-item/acacia_sign.png
 item/bamboo.png
 item/bamboo_door.png
 item/bamboo_hanging_sign.png
-item/bamboo_sign.png
 item/barrier.png
 item/bell.png
 item/birch_door.png
 item/birch_hanging_sign.png
-item/birch_sign.png
 item/black_bundle_open_back.png
 item/black_bundle_open_front.png
 item/black_candle.png
@@ -878,7 +875,6 @@ item/candle.png
 item/cauldron.png
 item/cherry_door.png
 item/cherry_hanging_sign.png
-item/cherry_sign.png
 item/clock_00.png
 item/clock_01.png
 item/clock_02.png
@@ -980,7 +976,6 @@ item/copper_door.png
 item/copper_spear_in_hand.png
 item/crimson_door.png
 item/crimson_hanging_sign.png
-item/crimson_sign.png
 item/crossbow_arrow.png
 item/crossbow_firework.png
 item/crossbow_pulling_0.png
@@ -991,7 +986,6 @@ item/cyan_bundle_open_front.png
 item/cyan_candle.png
 item/dark_oak_door.png
 item/dark_oak_hanging_sign.png
-item/dark_oak_sign.png
 item/diamond_spear_in_hand.png
 item/elytra_broken.png
 item/experience_bottle.png
@@ -1011,7 +1005,6 @@ item/iron_door.png
 item/iron_spear_in_hand.png
 item/jungle_door.png
 item/jungle_hanging_sign.png
-item/jungle_sign.png
 item/leather_boots_overlay.png
 item/leather_chestplate_overlay.png
 item/leather_helmet_overlay.png
@@ -1049,18 +1042,15 @@ item/magenta_candle.png
 item/mangrove_door.png
 item/mangrove_hanging_sign.png
 item/mangrove_propagule.png
-item/mangrove_sign.png
 item/netherite_spear_in_hand.png
 item/oak_door.png
 item/oak_hanging_sign.png
-item/oak_sign.png
 item/orange_bundle_open_back.png
 item/orange_bundle_open_front.png
 item/orange_candle.png
 item/oxidized_copper_door.png
 item/pale_oak_door.png
 item/pale_oak_hanging_sign.png
-item/pale_oak_sign.png
 item/pink_bundle_open_back.png
 item/pink_bundle_open_front.png
 item/pink_candle.png
@@ -1069,7 +1059,6 @@ item/pitcher_plant.png
 item/pointed_dripstone.png
 item/poplar_door.png
 item/poplar_hanging_sign.png
-item/poplar_sign.png
 item/potion.png
 item/purple_bundle_open_back.png
 item/purple_bundle_open_front.png
@@ -1116,7 +1105,6 @@ item/soul_campfire.png
 item/splash_potion.png
 item/spruce_door.png
 item/spruce_hanging_sign.png
-item/spruce_sign.png
 item/spyglass_model.png
 item/stone_spear_in_hand.png
 item/structure_void.png
@@ -1126,7 +1114,6 @@ item/totem_of_undying.png
 item/turtle_egg.png
 item/warped_door.png
 item/warped_hanging_sign.png
-item/warped_sign.png
 item/weathered_copper_door.png
 item/wheat.png
 item/white_bundle_open_back.png

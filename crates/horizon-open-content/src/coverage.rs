@@ -101,10 +101,12 @@ fn content(
         // block does (chests through the block-entity renderer).
         "block_entity_type" => names
             .filter(|n| {
-                matches!(
-                    **n,
-                    "chest" | "trapped_chest" | "ender_chest" | "shulker_box"
-                ) && blocks.iter().any(|b| b.id == **n && block_content(b))
+                let has = |id: &str| blocks.iter().any(|b| b.id == id && block_content(b));
+                match **n {
+                    "chest" | "trapped_chest" | "ender_chest" | "shulker_box" => has(n),
+                    "sign" => has("oak_sign"),
+                    _ => false,
+                }
             })
             .map(|n| n.to_string())
             .collect(),

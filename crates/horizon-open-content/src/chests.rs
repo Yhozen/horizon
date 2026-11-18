@@ -179,8 +179,28 @@ fn skin(bundle: &mut Bundle, sources: &Sources, destination: String, color: [u8;
     bundle.png(destination, &image, origin)
 }
 
-/// Writes the chest and shulker box skins.
+/// Writes the chest and shulker box skins, and the sign editor's board for
+/// each wood the signs come in (`gui/signs/<wood>.png`, 24 by 26).
 pub fn write(bundle: &mut Bundle, sources: &Sources) -> Result<()> {
+    for plant in &crate::plants::facts().plants {
+        let Some(wood) = plant
+            .id
+            .strip_suffix("_sign")
+            .filter(|_| plant.classes[0] == "StandingSignBlock")
+        else {
+            continue;
+        };
+        let destination = format!("assets/minecraft/textures/gui/signs/{wood}.png");
+        let (image, origin) = if sources.provides(&destination) {
+            sources.image(&destination)?
+        } else {
+            (
+                crate::image::Rgba::filled(24, 26, [150, 112, 64, 255]),
+                Origin::Generator("art"),
+            )
+        };
+        bundle.png(destination, &image, origin)?;
+    }
     for dye in std::iter::once("").chain(DYES.iter().copied()) {
         let name = if dye.is_empty() {
             "shulker".to_owned()

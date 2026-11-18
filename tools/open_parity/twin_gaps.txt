@@ -4,9 +4,7 @@ attributes:minecraft:waypoint_receive_range
 attributes:minecraft:waypoint_transmit_range
 blocks:minecraft:acacia_hanging_sign
 blocks:minecraft:acacia_shelf
-blocks:minecraft:acacia_sign
 blocks:minecraft:acacia_wall_hanging_sign
-blocks:minecraft:acacia_wall_sign
 blocks:minecraft:attached_melon_stem
 blocks:minecraft:attached_pumpkin_stem
 blocks:minecraft:azalea
@@ -16,9 +14,7 @@ blocks:minecraft:bamboo_fence_gate
 blocks:minecraft:bamboo_hanging_sign
 blocks:minecraft:bamboo_sapling
 blocks:minecraft:bamboo_shelf
-blocks:minecraft:bamboo_sign
 blocks:minecraft:bamboo_wall_hanging_sign
-blocks:minecraft:bamboo_wall_sign
 blocks:minecraft:barrier
 blocks:minecraft:beacon
 blocks:minecraft:bell
@@ -26,9 +22,7 @@ blocks:minecraft:big_dripleaf
 blocks:minecraft:big_dripleaf_stem
 blocks:minecraft:birch_hanging_sign
 blocks:minecraft:birch_shelf
-blocks:minecraft:birch_sign
 blocks:minecraft:birch_wall_hanging_sign
-blocks:minecraft:birch_wall_sign
 blocks:minecraft:black_banner
 blocks:minecraft:black_wall_banner
 blocks:minecraft:blue_banner
@@ -40,9 +34,7 @@ blocks:minecraft:calibrated_sculk_sensor
 blocks:minecraft:campfire
 blocks:minecraft:cherry_hanging_sign
 blocks:minecraft:cherry_shelf
-blocks:minecraft:cherry_sign
 blocks:minecraft:cherry_wall_hanging_sign
-blocks:minecraft:cherry_wall_sign
 blocks:minecraft:chiseled_bookshelf
 blocks:minecraft:chorus_flower
 blocks:minecraft:chorus_plant
@@ -54,16 +46,12 @@ blocks:minecraft:creeper_head
 blocks:minecraft:creeper_wall_head
 blocks:minecraft:crimson_hanging_sign
 blocks:minecraft:crimson_shelf
-blocks:minecraft:crimson_sign
 blocks:minecraft:crimson_wall_hanging_sign
-blocks:minecraft:crimson_wall_sign
 blocks:minecraft:cyan_banner
 blocks:minecraft:cyan_wall_banner
 blocks:minecraft:dark_oak_hanging_sign
 blocks:minecraft:dark_oak_shelf
-blocks:minecraft:dark_oak_sign
 blocks:minecraft:dark_oak_wall_hanging_sign
-blocks:minecraft:dark_oak_wall_sign
 blocks:minecraft:daylight_detector
 blocks:minecraft:decorated_pot
 blocks:minecraft:dragon_egg
@@ -91,9 +79,7 @@ blocks:minecraft:hopper
 blocks:minecraft:jigsaw
 blocks:minecraft:jungle_hanging_sign
 blocks:minecraft:jungle_shelf
-blocks:minecraft:jungle_sign
 blocks:minecraft:jungle_wall_hanging_sign
-blocks:minecraft:jungle_wall_sign
 blocks:minecraft:lectern
 blocks:minecraft:light
 blocks:minecraft:light_blue_banner
@@ -108,25 +94,19 @@ blocks:minecraft:mangrove_hanging_sign
 blocks:minecraft:mangrove_propagule
 blocks:minecraft:mangrove_roots
 blocks:minecraft:mangrove_shelf
-blocks:minecraft:mangrove_sign
 blocks:minecraft:mangrove_wall_hanging_sign
-blocks:minecraft:mangrove_wall_sign
 blocks:minecraft:melon_stem
 blocks:minecraft:moving_piston
 blocks:minecraft:nether_portal
 blocks:minecraft:oak_hanging_sign
 blocks:minecraft:oak_shelf
-blocks:minecraft:oak_sign
 blocks:minecraft:oak_wall_hanging_sign
-blocks:minecraft:oak_wall_sign
 blocks:minecraft:orange_banner
 blocks:minecraft:orange_wall_banner
 blocks:minecraft:oxidized_copper_golem_statue
 blocks:minecraft:pale_oak_hanging_sign
 blocks:minecraft:pale_oak_shelf
-blocks:minecraft:pale_oak_sign
 blocks:minecraft:pale_oak_wall_hanging_sign
-blocks:minecraft:pale_oak_wall_sign
 blocks:minecraft:piglin_head
 blocks:minecraft:piglin_wall_head
 blocks:minecraft:pink_banner
@@ -141,9 +121,7 @@ blocks:minecraft:player_wall_head
 blocks:minecraft:pointed_dripstone
 blocks:minecraft:poplar_hanging_sign
 blocks:minecraft:poplar_shelf
-blocks:minecraft:poplar_sign
 blocks:minecraft:poplar_wall_hanging_sign
-blocks:minecraft:poplar_wall_sign
 blocks:minecraft:potted_acacia_sapling
 blocks:minecraft:potted_allium
 blocks:minecraft:potted_azalea_bush
@@ -206,9 +184,7 @@ blocks:minecraft:spawner
 blocks:minecraft:spore_blossom
 blocks:minecraft:spruce_hanging_sign
 blocks:minecraft:spruce_shelf
-blocks:minecraft:spruce_sign
 blocks:minecraft:spruce_wall_hanging_sign
-blocks:minecraft:spruce_wall_sign
 blocks:minecraft:sticky_piston
 blocks:minecraft:stonecutter
 blocks:minecraft:straw_bed
@@ -222,9 +198,7 @@ blocks:minecraft:turtle_egg
 blocks:minecraft:vault
 blocks:minecraft:warped_hanging_sign
 blocks:minecraft:warped_shelf
-blocks:minecraft:warped_sign
 blocks:minecraft:warped_wall_hanging_sign
-blocks:minecraft:warped_wall_sign
 blocks:minecraft:waxed_copper_golem_statue
 blocks:minecraft:waxed_exposed_copper_golem_statue
 blocks:minecraft:waxed_oxidized_copper_golem_statue
@@ -287,7 +261,6 @@ items:minecraft:acacia_fence_gate
 items:minecraft:acacia_hanging_sign
 items:minecraft:acacia_pressure_plate
 items:minecraft:acacia_shelf
-items:minecraft:acacia_sign
 items:minecraft:acacia_slab
 items:minecraft:acacia_stairs
 items:minecraft:acacia_trapdoor
@@ -311,7 +284,6 @@ items:minecraft:bamboo_mosaic_slab
 items:minecraft:bamboo_mosaic_stairs
 items:minecraft:bamboo_pressure_plate
 items:minecraft:bamboo_shelf
-items:minecraft:bamboo_sign
 items:minecraft:bamboo_slab
 items:minecraft:bamboo_stairs
 items:minecraft:bamboo_trapdoor
@@ -329,7 +301,6 @@ items:minecraft:birch_fence_gate
 items:minecraft:birch_hanging_sign
 items:minecraft:birch_pressure_plate
 items:minecraft:birch_shelf
-items:minecraft:birch_sign
 items:minecraft:birch_slab
 items:minecraft:birch_stairs
 items:minecraft:birch_trapdoor
@@ -408,7 +379,6 @@ items:minecraft:cherry_leaves
 items:minecraft:cherry_pressure_plate
 items:minecraft:cherry_sapling
 items:minecraft:cherry_shelf
-items:minecraft:cherry_sign
 items:minecraft:cherry_slab
 items:minecraft:cherry_stairs
 items:minecraft:cherry_trapdoor
@@ -459,7 +429,6 @@ items:minecraft:crimson_nylium
 items:minecraft:crimson_pressure_plate
 items:minecraft:crimson_roots
 items:minecraft:crimson_shelf
-items:minecraft:crimson_sign
 items:minecraft:crimson_slab
 items:minecraft:crimson_stairs
 items:minecraft:crimson_trapdoor
@@ -492,7 +461,6 @@ items:minecraft:dark_oak_leaves
 items:minecraft:dark_oak_pressure_plate
 items:minecraft:dark_oak_sapling
 items:minecraft:dark_oak_shelf
-items:minecraft:dark_oak_sign
 items:minecraft:dark_oak_slab
 items:minecraft:dark_oak_stairs
 items:minecraft:dark_oak_trapdoor
@@ -629,7 +597,6 @@ items:minecraft:jungle_fence_gate
 items:minecraft:jungle_hanging_sign
 items:minecraft:jungle_pressure_plate
 items:minecraft:jungle_shelf
-items:minecraft:jungle_sign
 items:minecraft:jungle_slab
 items:minecraft:jungle_stairs
 items:minecraft:jungle_trapdoor
@@ -712,7 +679,6 @@ items:minecraft:mangrove_pressure_plate
 items:minecraft:mangrove_propagule
 items:minecraft:mangrove_roots
 items:minecraft:mangrove_shelf
-items:minecraft:mangrove_sign
 items:minecraft:mangrove_slab
 items:minecraft:mangrove_stairs
 items:minecraft:mangrove_trapdoor
@@ -748,7 +714,6 @@ items:minecraft:oak_fence_gate
 items:minecraft:oak_hanging_sign
 items:minecraft:oak_pressure_plate
 items:minecraft:oak_shelf
-items:minecraft:oak_sign
 items:minecraft:oak_slab
 items:minecraft:oak_stairs
 items:minecraft:oak_trapdoor
@@ -795,7 +760,6 @@ items:minecraft:pale_oak_leaves
 items:minecraft:pale_oak_pressure_plate
 items:minecraft:pale_oak_sapling
 items:minecraft:pale_oak_shelf
-items:minecraft:pale_oak_sign
 items:minecraft:pale_oak_slab
 items:minecraft:pale_oak_stairs
 items:minecraft:pale_oak_trapdoor
@@ -856,7 +820,6 @@ items:minecraft:poplar_hanging_sign
 items:minecraft:poplar_pressure_plate
 items:minecraft:poplar_sapling
 items:minecraft:poplar_shelf
-items:minecraft:poplar_sign
 items:minecraft:poplar_slab
 items:minecraft:poplar_stairs
 items:minecraft:poplar_trapdoor
@@ -965,7 +928,6 @@ items:minecraft:spruce_fence_gate
 items:minecraft:spruce_hanging_sign
 items:minecraft:spruce_pressure_plate
 items:minecraft:spruce_shelf
-items:minecraft:spruce_sign
 items:minecraft:spruce_slab
 items:minecraft:spruce_stairs
 items:minecraft:spruce_trapdoor
@@ -1025,7 +987,6 @@ items:minecraft:warped_nylium
 items:minecraft:warped_pressure_plate
 items:minecraft:warped_roots
 items:minecraft:warped_shelf
-items:minecraft:warped_sign
 items:minecraft:warped_slab
 items:minecraft:warped_stairs
 items:minecraft:warped_trapdoor
