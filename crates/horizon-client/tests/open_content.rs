@@ -34,7 +34,8 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
     assert_eq!(assets.profile, ContentProfile::OpenCreative);
     let render = assets.reload(&root).unwrap();
     // Every palette block bakes faces, each on a sprite the bundle has:
-    // six for cubes, at least two for plants (a lily pad's two sides).
+    // six for cubes, at least two for plants (a lily pad's two sides), none
+    // for the blocks the block-entity renderer draws.
     let palette = palette_blocks();
     assert_eq!(palette.len(), 977);
     for block in &palette {
@@ -50,6 +51,9 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
         let faces: usize = models.iter().map(|(_, m)| m.faces.len()).sum();
         use horizon_open_content::{blocks::Form, connected::Family};
         let least = match block.form {
+            // Chests and shulker boxes are drawn by the block-entity
+            // renderer, as Minecraft's are: their block models bake nothing.
+            _ if name.ends_with("chest") || name.ends_with("shulker_box") => 0,
             Form::Cross => 2,
             // A rail is one flat plane, both sides drawn.
             _ if name.ends_with("rail") => 2,
@@ -212,8 +216,11 @@ fn every_open_mob_loads_with_its_models_and_skins() {
     use horizon_client::mobs::{Mob, MobTypes, render};
     let root = bundle("mobs");
     let types = MobTypes::load(&root).unwrap();
-    let names = horizon_open_content::mobs::names();
-    assert_eq!(names.len(), 13);
+    // The boats, minecarts, arrows and armor stands have renderers of their own.
+    let objects = horizon_open_content::creatures::object_names();
+    let mut names = horizon_open_content::mobs::names();
+    names.retain(|n| !objects.iter().any(|o| o == n));
+    assert_eq!((names.len(), objects.len()), (83, 32));
     for name in names {
         let id = format!("minecraft:{name}");
         let kind = std::sync::Arc::new(

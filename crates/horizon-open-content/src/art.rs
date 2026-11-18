@@ -128,7 +128,7 @@ pub fn ui_strings() -> Vec<(&'static str, &'static str)> {
 }
 
 /// The interface, sky and player artwork.
-pub fn write(bundle: &mut Bundle) -> Result<()> {
+pub fn write(bundle: &mut Bundle, sources: &crate::sources::Sources) -> Result<()> {
     let art = Origin::Generator(GENERATOR);
     bundle.png(
         "assets/minecraft/textures/entity/player/wide/steve.png",
@@ -136,7 +136,7 @@ pub fn write(bundle: &mut Bundle) -> Result<()> {
         art.clone(),
     )?;
     // The player's model, and every mob's (crate::mobs).
-    let (mobs, types) = crate::mobs::write(bundle)?;
+    let (mobs, types) = crate::mobs::write(bundle, sources)?;
     let mut models = entity_models();
     models.as_object_mut().expect("an object").extend(mobs);
     // The chests the block-entity renderer draws (crate::chests).
