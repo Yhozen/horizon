@@ -433,3 +433,132 @@ fn attributes_take_the_bundle_numbers() {
         .is_none()
     );
 }
+
+/// Every packet id after login, as `phase/direction/name`, with its rule.
+fn every_rule() -> Vec<(String, crate::policy::Rule)> {
+    use horizon_protocol::{Direction, ids};
+    let tables = [
+        (
+            Phase::Configuration,
+            Direction::Clientbound,
+            "configuration/clientbound",
+            ids::configuration::clientbound::NAMES,
+        ),
+        (
+            Phase::Configuration,
+            Direction::Serverbound,
+            "configuration/serverbound",
+            ids::configuration::serverbound::NAMES,
+        ),
+        (
+            Phase::Play,
+            Direction::Clientbound,
+            "play/clientbound",
+            ids::play::clientbound::NAMES,
+        ),
+        (
+            Phase::Play,
+            Direction::Serverbound,
+            "play/serverbound",
+            ids::play::serverbound::NAMES,
+        ),
+    ];
+    let mut out = Vec::new();
+    for (phase, direction, prefix, names) in tables {
+        for (id, name) in names.iter().enumerate() {
+            let rule = crate::policy::policy(phase, direction, id as i32);
+            out.push((format!("{prefix}/{name}"), rule));
+        }
+    }
+    out
+}
+
+fn listed(text: &str) -> Vec<String> {
+    let lines: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(String::from)
+        .collect();
+    let mut sorted = lines.clone();
+    sorted.sort();
+    assert_eq!(lines, sorted, "keep the list sorted");
+    lines
+}
+
+/// The dropped packets are exactly `dropped.txt`, and every built-in registry
+/// a forwarded packet carries is renumbered or a known gap (`gaps.txt`): a
+/// packet newly passed or dropped, or a new gap, shows up here.
+#[test]
+fn every_packet_has_a_policy_and_the_lists_match() {
+    use crate::policy::{Policy, TRANSLATED};
+    let rules = every_rule();
+    assert_eq!(
+        rules.len(),
+        21 + 10 + 144 + 69,
+        "protocol 777 packet counts"
+    );
+    let mut dropped: Vec<String> = rules
+        .iter()
+        .filter(|(_, r)| r.policy == Policy::Drop)
+        .map(|(n, _)| n.clone())
+        .collect();
+    dropped.sort();
+    let mut gaps: Vec<String> = Vec::new();
+    for (name, rule) in &rules {
+        if rule.policy == Policy::Drop {
+            assert!(
+                rule.carries.is_empty(),
+                "{name} is dropped: it carries nothing"
+            );
+        }
+        for registry in rule.carries {
+            let renumbered = rule.policy == Policy::Translate && TRANSLATED.contains(registry);
+            if !renumbered {
+                gaps.push(format!("{name} {registry}"));
+            }
+        }
+    }
+    gaps.sort();
+    let show = |v: &[String]| v.join("\n") + "\n";
+    assert_eq!(
+        show(&dropped),
+        show(&listed(include_str!("dropped.txt"))),
+        "dropped packets differ from src/dropped.txt; the left side is the new list"
+    );
+    assert_eq!(
+        show(&gaps),
+        show(&listed(include_str!("gaps.txt"))),
+        "registry gaps differ from src/gaps.txt; the left side is the new list"
+    );
+}
+
+#[test]
+fn clicks_send_component_ids_back() {
+    let t = tables();
+    let mut s = Serverbound::new(&t);
+    assert!(s.translate(3, &[]).is_some(), "finish configuration");
+    let click = play::Serverbound::ContainerClick(play::ContainerClick {
+        container: 0,
+        state: 1,
+        slot: 36,
+        button: 0,
+        input: 0,
+        changed: vec![],
+        carried: Some(Hashed {
+            item: 4,
+            count: 1,
+            // max_stack_size (1) has a vanilla twin; 7 is no open component.
+            added: vec![(1, 123), (7, 456)],
+            removed: vec![0, 7],
+        }),
+    });
+    let (id, payload) = split(&click.encode());
+    let (id, payload) = split(&s.translate(id, &payload).unwrap());
+    let play::Serverbound::ContainerClick(p) = play::Serverbound::decode(id, &payload).unwrap()
+    else {
+        panic!()
+    };
+    let carried = p.carried.unwrap();
+    assert_eq!((carried.added, carried.removed), (vec![(1, 123)], vec![0]));
+}
