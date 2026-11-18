@@ -53,6 +53,10 @@ pub(crate) struct PackRenderer {
     uniforms: UniformBuffers,
     formats: [wgpu::TextureFormat; 16],
     needs: [Need; 16],
+    /// `size.buffer.colortexN`.
+    sizes: [horizon_glsl_pack::plan::BufferSize; 16],
+    /// `scale.<program>` of full-screen passes.
+    pub(super) scales: BTreeMap<ProgramKind, horizon_glsl_pack::plan::Scale>,
     screen_format: wgpu::TextureFormat,
     mips: mips::Mips,
     schedule: horizon_glsl_pack::schedule::FrameSchedule,
@@ -179,7 +183,8 @@ impl PackRenderer {
         };
         let mut programs = BTreeMap::new();
         for (&kind, program) in &pack.programs {
-            programs.insert(kind, pipelines::build(device, kind, program, &layouts)?);
+            let state = pack.plan.state(kind);
+            programs.insert(kind, pipelines::build(device, kind, program, &state, &layouts)?);
         }
         let textures = textures::Textures::new(device, queue, &plan, files)?;
         Ok(Self {
@@ -192,6 +197,13 @@ impl PackRenderer {
             },
             formats,
             needs,
+            sizes: std::array::from_fn(|i| pack.plan.buffers[i].size),
+            scales: pack
+                .programs
+                .keys()
+                .filter(|k| k.is_fullscreen())
+                .filter_map(|&k| Some((k, pack.plan.state(k).scale?)))
+                .collect(),
             screen_format,
             mips,
             schedule: horizon_glsl_pack::schedule::FrameSchedule::new(&plan),
@@ -237,6 +249,7 @@ impl PackRenderer {
             size,
             &self.needs,
             &self.formats,
+            &self.sizes,
             &mut self.mips,
         ));
     }

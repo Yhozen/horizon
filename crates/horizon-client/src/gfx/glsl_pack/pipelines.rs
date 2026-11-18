@@ -92,8 +92,52 @@ fn blend(kind: ProgramKind) -> Option<wgpu::BlendState> {
     }
 }
 
+/// A `blend.<program>[.<buffer>]` setting as wgpu state (`None`: off).
+fn pack_blend(blend: horizon_glsl_pack::plan::Blend) -> Option<wgpu::BlendState> {
+    use horizon_glsl_pack::plan::{Blend, BlendFactor as P};
+    use wgpu::{BlendComponent, BlendFactor as F, BlendOperation as Op};
+    let factor = |f: P| match f {
+        P::Zero => F::Zero,
+        P::One => F::One,
+        P::SrcColor => F::Src,
+        P::OneMinusSrcColor => F::OneMinusSrc,
+        P::DstColor => F::Dst,
+        P::OneMinusDstColor => F::OneMinusDst,
+        P::SrcAlpha => F::SrcAlpha,
+        P::OneMinusSrcAlpha => F::OneMinusSrcAlpha,
+        P::DstAlpha => F::DstAlpha,
+        P::OneMinusDstAlpha => F::OneMinusDstAlpha,
+        P::SrcAlphaSaturate => F::SrcAlphaSaturated,
+    };
+    match blend {
+        Blend::Off => None,
+        Blend::On {
+            src,
+            dst,
+            src_alpha,
+            dst_alpha,
+        } => Some(wgpu::BlendState {
+            color: BlendComponent {
+                src_factor: factor(src),
+                dst_factor: factor(dst),
+                operation: Op::Add,
+            },
+            alpha: BlendComponent {
+                src_factor: factor(src_alpha),
+                dst_factor: factor(dst_alpha),
+                operation: Op::Add,
+            },
+        }),
+    }
+}
+
 fn blendable(format: wgpu::TextureFormat) -> bool {
-    !matches!(
+    let integer = matches!(
+        format.sample_type(None, None),
+        Some(wgpu::TextureSampleType::Sint | wgpu::TextureSampleType::Uint)
+    );
+    !integer
+        && !matches!(
         format,
         wgpu::TextureFormat::R32Float
             | wgpu::TextureFormat::Rg32Float
@@ -105,6 +149,7 @@ pub(super) fn build(
     device: &wgpu::Device,
     kind: ProgramKind,
     program: &CompiledProgram,
+    state: &horizon_glsl_pack::plan::ProgramState,
     layouts: &Layouts,
 ) -> Result<Program, String> {
     let geometry = kind.geometry();
@@ -205,6 +250,8 @@ pub(super) fn build(
             } else {
                 (layouts.color)(i)
             };
+            // `blend.<program>[.<buffer>]` wins over the slot's default.
+            let blend = state.blend_of(i).map_or(blend, pack_blend);
             Some(wgpu::ColorTargetState {
                 format,
                 blend: blend.filter(|_| blendable(format)),

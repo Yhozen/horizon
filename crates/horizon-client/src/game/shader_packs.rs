@@ -387,6 +387,10 @@ pub(super) struct ShaderPacks {
     pub applied: Option<Applied>,
     /// The last target that failed, not retried until something changes.
     pub failed: Option<Target>,
+    /// Each pack's option screens, read when its settings are first shown.
+    pub models: BTreeMap<String, Arc<horizon_glsl_pack::screens::OptionModel>>,
+    /// The settings sub-screen shown (`None`: the root).
+    pub settings_screen: Option<String>,
     /// Per pack, programs the GPU rejected (retried without them).
     pub excluded: BTreeMap<String, std::collections::BTreeSet<String>>,
     loaded: bool,
@@ -463,6 +467,29 @@ impl ShaderPacks {
             persist(&path, Some(text.as_bytes()));
         }
         self.values.insert(file.to_string(), values);
+    }
+
+    /// A pack's options and screens (read from its files once).
+    pub fn model_of(&mut self, file: &str) -> Option<Arc<horizon_glsl_pack::screens::OptionModel>> {
+        if let Some(m) = self.models.get(file) {
+            return Some(m.clone());
+        }
+        let pack = self
+            .library
+            .iter()
+            .chain(self.cli.iter())
+            .find(|p| p.file == file)?
+            .clone();
+        let files = match read_files(&pack.path) {
+            Ok(f) => f,
+            Err(e) => {
+                log::warn!("Horizon: shader pack {file}: {e}");
+                return None;
+            }
+        };
+        let model = Arc::new(horizon_glsl_pack::screens::option_model(&files));
+        self.models.insert(file.to_string(), model.clone());
+        Some(model)
     }
 
     /// The chosen pack, if shaders are on.

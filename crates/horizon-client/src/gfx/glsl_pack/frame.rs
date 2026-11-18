@@ -247,6 +247,25 @@ impl Renderer {
                         color_attachments: &attachments,
                         ..Default::default()
                     });
+                    // `scale.<program>`: the pass draws into part of its targets.
+                    if let Some(scale) = pack.scales.get(&p.kind) {
+                        let size = match p.writes.first() {
+                            Some(&(b, side)) if p.kind != ProgramKind::Final => t
+                                .buffer(b)
+                                .map(|buf| buf.side(side).texture.size())
+                                .map(|e| [e.width, e.height]),
+                            _ => Some(t.size),
+                        };
+                        if let Some([w, h]) = size {
+                            let (w, h) = (w as f32, h as f32);
+                            let s = scale.scale.clamp(0.0, 1.0);
+                            let x = (scale.offset[0].clamp(0.0, 1.0) * w).min(w - 1.0);
+                            let y = (scale.offset[1].clamp(0.0, 1.0) * h).min(h - 1.0);
+                            let vw = (s * w).min(w - x).max(1.0);
+                            let vh = (s * h).min(h - y).max(1.0);
+                            pass.set_viewport(x, y, vw, vh, 0.0, 1.0);
+                        }
+                    }
                     pass.set_pipeline(&program.pipeline);
                     pass.set_bind_group(0, &pack.empty_group, &[]);
                     pass.set_bind_group(1, &group, &[]);

@@ -171,16 +171,9 @@ pub(crate) fn live_lines(
     macros: &BTreeMap<String, String>,
     glsl: bool,
 ) -> Result<String, PackError> {
-    let mut lines = Vec::new();
-    let mut raw = text.lines();
-    while let Some(line) = raw.next() {
-        let mut line = line.to_string();
-        while line.ends_with('\\') {
-            line.pop();
-            line.push_str(raw.next().unwrap_or("").trim_start());
-        }
-        lines.push(line);
-    }
+    // Conditionals act on physical lines: a `\` before an `#else` must not
+    // pull the directive into the line before it.
+    let lines: Vec<&str> = text.lines().collect();
     let mut in_comment = false;
     let mut marked = String::new();
     for (i, l) in lines.iter().enumerate() {
@@ -189,19 +182,38 @@ pub(crate) fn live_lines(
             in_comment = ends_in_comment(l, in_comment);
         }
         if directive {
-            let d = if glsl { strip_comments(l) } else { l.as_str() };
-            marked.push_str(d);
+            marked.push_str(if glsl { strip_comments(l) } else { l });
         } else {
             marked.push_str(&format!("hz_line_{i}"));
         }
         marked.push('\n');
     }
     let kept = preprocess::preprocess_text(&marked, file, files, macros, &[])?;
-    Ok(kept
+    // Then the live lines' continuations are joined.
+    let mut out = String::new();
+    let mut open = false;
+    for i in kept
         .lines()
         .filter_map(|m| m.trim().strip_prefix("hz_line_")?.parse::<usize>().ok())
-        .map(|i| format!("{}\n", lines[i]))
-        .collect())
+    {
+        let line = if open {
+            lines[i].trim_start()
+        } else {
+            lines[i]
+        };
+        match line.strip_suffix('\\') {
+            Some(head) => {
+                out.push_str(head);
+                open = true;
+            }
+            None => {
+                out.push_str(line);
+                out.push('\n');
+                open = false;
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Whether a block comment is open at the end of `line`, given whether one
