@@ -77,9 +77,13 @@ fn listed(list: &str, word: &str) -> bool {
     list.split_whitespace().any(|w| w == word)
 }
 
+mod dead;
 mod decl;
 mod emit;
+mod fixes;
 mod lex;
+mod mono;
+mod scope;
 #[cfg(test)]
 mod tests;
 
@@ -95,11 +99,19 @@ struct Ctx<'a> {
     frag_outs: BTreeMap<String, usize>,
     /// Pack-defined names that collide with GLSL 450 built-in functions.
     user_builtins: BTreeSet<String>,
+    /// Declarations the body needs ahead of it (dummy globals, helpers), deduplicated.
+    prelude: BTreeSet<String>,
 }
 
 /// Rewrites one preprocessed stage. See the module doc and the spec, section 3.
 pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
-    let toks = drop_unreachable(tokenize(source));
+    let mono = mono::monomorphise(source)?;
+    let source = mono.as_deref().unwrap_or(source);
+    let toks = dead::drop_dead_functions(drop_unreachable(tokenize(source)))?;
+    // Token passes that need new text: each yields the stage again, tokenized anew.
+    let scoped = scope::rename_shadowing(&toks)?;
+    let fixed = fixes::apply(&tokenize(&scoped))?;
+    let toks = tokenize(&fixed);
     let structs: BTreeSet<String> = toks
         .windows(3)
         .filter(|w| w[0].text == "struct" && w[2].kind == Kind::Ident)
@@ -124,6 +136,7 @@ pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
         sampler_shadow: BTreeMap::new(),
         frag_outs: BTreeMap::new(),
         user_builtins,
+        prelude: BTreeSet::new(),
     };
     let mut body = String::new();
     for (start, end) in top_level_items(&cx.toks)? {
@@ -145,6 +158,8 @@ pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
         }
         cx.emit(start, end, &mut body)?;
     }
-    cx.out.body = body;
+    let mut prelude: String = cx.prelude.iter().map(|l| format!("{l}\n")).collect();
+    prelude.push_str(&body);
+    cx.out.body = prelude;
     Ok(cx.out)
 }
