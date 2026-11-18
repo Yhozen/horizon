@@ -72,12 +72,12 @@ fn archive_entries(archive: &[u8]) -> Result<Vec<(&str, &[u8])>, JsValue> {
 /// `art`'s English text merged over the bundle's. Only names the bundle already
 /// uses are taken, so its data, models and network numbering stay its own; the
 /// files replaced are listed in `OVERLAY` for the bundle's integrity check.
-/// The open bundle's mob skins have their own layouts (crates/horizon-open-content's
-/// `mobs`), which another bundle's skin of the same name wouldn't fit: they stay the
-/// bundle's own. The player's skin shares the usual layout and is laid over.
+/// The open bundle's adult mobs use Minecraft's box layout (crates/horizon-open-content's
+/// `mobs`), so another bundle's skins fit them and are laid over. Its babies are the
+/// adults' models scaled down, which a Minecraft baby skin (a layout of its own)
+/// wouldn't fit: those stay the bundle's own.
 fn is_own_layout(name: &str) -> bool {
-    name.starts_with("assets/minecraft/textures/entity/")
-        && !name.starts_with("assets/minecraft/textures/entity/player/")
+    name.starts_with("assets/minecraft/textures/entity/") && name.ends_with("_baby.png")
 }
 
 pub fn overlay_art(root: &std::path::Path, art: &[u8]) -> Result<usize, JsValue> {
