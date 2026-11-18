@@ -351,12 +351,16 @@ fn models(block: &Block, tinting: Tinting) -> (Vec<(String, Value)>, Option<Valu
                 Some(json!({"variants": {"": {"model": format!("minecraft:block/{fluid}")}}})),
             )
         }
+        Faces::Slab { .. } | Faces::Stairs { .. } => {
+            let (models, definition) = crate::slabs::models(block);
+            (models, Some(definition))
+        }
         Faces::None => (Vec::new(), None),
     }
 }
 
 /// A unit cube with a texture per face: down, up, north, south, west, east.
-fn six_model(faces: [&str; 6]) -> Value {
+pub(crate) fn six_model(faces: [&str; 6]) -> Value {
     let dirs = ["down", "up", "north", "south", "west", "east"];
     let mut textures: BTreeMap<&str, String> =
         dirs.iter().zip(faces).map(|(d, t)| (*d, tex(t))).collect();

@@ -82,7 +82,7 @@ pub fn cubes() -> Vec<Cube> {
 }
 
 /// The sound types the authored blocks name by variant.
-fn sound(name: &'static str) -> Sound {
+pub(crate) fn sound(name: &'static str) -> Sound {
     match name {
         "stone" => Sound::Stone,
         "gravel" => Sound::Gravel,
@@ -96,7 +96,7 @@ fn sound(name: &'static str) -> Sound {
 }
 
 /// `blast_furnace` as "Blast Furnace".
-fn title(id: &str) -> &'static str {
+pub(crate) fn title(id: &str) -> &'static str {
     let words: Vec<String> = id
         .split('_')
         .map(|w| {

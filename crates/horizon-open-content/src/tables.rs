@@ -6,6 +6,7 @@
 use crate::{
     Bundle, Origin, Result,
     blocks::{Block, Form, Layer, Sound, Tier, Tool},
+    shapes::{self, StateShape},
 };
 use horizon_world::{
     DATA_VERSION,
@@ -163,6 +164,11 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
     if states.len() != first {
         return Err("state count mismatch".into());
     }
+    // The shapes of the states whose block is not a plain cube or plant.
+    let shaped: Vec<Option<StateShape>> = states
+        .iter()
+        .map(|s| shapes::of(s.block, &s.properties))
+        .collect();
 
     // facts.json: [name, air, fluid, description, state].
     let rows: Vec<Value> = states
@@ -219,6 +225,9 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             });
             let edges = edges(&b.outline());
             row["outline_edges"] = json!(edges);
+            if let Some(sh) = &shaped[id] {
+                shaped_facts(&mut row, b, sh);
+            }
             without_defaults(row)
         })
         .collect();
@@ -244,8 +253,12 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
         .collect();
     let behaviour_states: Vec<Value> = states
         .iter()
-        .map(|s| {
+        .enumerate()
+        .map(|(i, s)| {
             let b = s.block;
+            if let Some(sh) = &shaped[i] {
+                return shaped_behaviour(b, sh);
+            }
             let sturdy: u32 = if b.opaque() || b.form == Form::SeeThroughCube {
                 (1 << 18) - 1
             } else {
@@ -419,7 +432,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             };
             (
                 b.key(),
-                json!({"rule": rule, "can_occlude": b.opaque(), "bars_tag": false}),
+                json!({"rule": rule, "can_occlude": b.opaque() || b.form == Form::Shaped, "bars_tag": false}),
             )
         })
         .collect();
@@ -458,25 +471,29 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
         .collect();
     bundle.json("model-states.json", &json!(model_states), GENERATOR)?;
 
-    // Shapes: empty (canonical 1) and the full block (canonical 2).
+    // Shapes: each state's collision and light occlusion, each shape once.
     let table_states: Vec<Tag> = states.iter().map(state_nbt).collect();
-    let shape_table = |what: &str, occupied: &dyn Fn(&State) -> bool| -> Tag {
-        let cached: Vec<i32> = states
-            .iter()
-            .map(|s| if occupied(s) { 1 } else { 0 })
-            .collect();
-        let _ = what;
-        Tag::compound([
-            ("DataVersion", Tag::Int(DATA_VERSION)),
-            ("states", Tag::List(table_states.clone())),
-            ("shapes", Tag::List(vec![empty_shape(), block_shape()])),
-            ("cached_shapes", Tag::IntArray(cached)),
-        ])
-    };
-    let collision = shape_table("collision", &|s| s.block.collides());
-    nbt_file(bundle, "cached-collision.nbt", collision)?;
-    let occlusion = shape_table("occlusion", &|s| s.block.opaque());
-    nbt_file(bundle, "occlusion.nbt", occlusion)?;
+    let (mut collision, mut occlusion) = (shapes::Table::new(), shapes::Table::new());
+    let (full, none) = (shapes::full(), shapes::empty());
+    for (s, sh) in states.iter().zip(&shaped) {
+        let pick = |yes: bool| if yes { &full } else { &none };
+        match sh {
+            Some(sh) => {
+                collision.push(&sh.collision);
+                occlusion.push(&sh.occlusion);
+            }
+            None => {
+                collision.push(pick(s.block.collides()));
+                occlusion.push(pick(s.block.opaque()));
+            }
+        }
+    }
+    nbt_file(
+        bundle,
+        "cached-collision.nbt",
+        collision.tag(table_states.clone()),
+    )?;
+    nbt_file(bundle, "occlusion.nbt", occlusion.tag(table_states.clone()))?;
 
     // movement-properties.nbt: one entry per block.
     let movement = Tag::compound([
@@ -504,32 +521,50 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
     Ok(())
 }
 
-fn empty_shape() -> Tag {
-    Tag::compound([
-        ("canonical", Tag::Byte(1)),
-        ("x", Tag::LongArray(vec![0])),
-        ("y", Tag::LongArray(vec![0])),
-        ("z", Tag::LongArray(vec![0])),
-        ("occupied", Tag::ByteArray(vec![])),
-        ("cube", Tag::Byte(0)),
-        ("cube_axes", Tag::Byte(0)),
-        ("discrete_min", Tag::IntArray(vec![0; 3])),
-        ("discrete_max", Tag::IntArray(vec![0; 3])),
-    ])
+/// The `gameplay-facts.json` fields that follow from a state's shapes.
+fn shaped_facts(row: &mut Value, b: &Block, sh: &StateShape) {
+    let line = crate::slabs::line(b.id);
+    row["dampening"] = json!(sh.dampening());
+    row["skylight_down"] = json!(sh.skylight_down());
+    row["shape_occlusion"] = json!(sh.shape_occlusion);
+    row["can_occlude"] = json!(sh.can_occlude);
+    row["solid_render"] = json!(sh.solid_render());
+    row["full_collision"] = json!(sh.full_collision());
+    row["ignited_by_lava"] = json!(line.is_some_and(|l| l.ignited_by_lava));
+    // Copper that can still age ticks randomly.
+    row["random_ticks"] = json!(
+        b.classes.iter().any(|c| c.starts_with("Weathering")) && !b.id.starts_with("oxidized")
+    );
+    row["outline"] = json!(shapes::boxes(&sh.outline));
+    row["outline_edges"] = json!(shapes::edges(&sh.outline));
 }
 
-fn block_shape() -> Tag {
-    let coords = Tag::LongArray(vec![0, 1.0f64.to_bits() as i64]);
-    Tag::compound([
-        ("canonical", Tag::Byte(2)),
-        ("x", coords.clone()),
-        ("y", coords.clone()),
-        ("z", coords),
-        ("occupied", Tag::ByteArray(vec![1])),
-        ("cube", Tag::Byte(1)),
-        ("cube_axes", Tag::Byte(7)),
-        ("discrete_min", Tag::IntArray(vec![0; 3])),
-        ("discrete_max", Tag::IntArray(vec![1; 3])),
+/// A `block-behaviours.json` state row from a state's shapes: sturdy
+/// faces, flags (legacy solid, redstone conductor), its water and its
+/// note block instrument.
+fn shaped_behaviour(b: &Block, sh: &StateShape) -> Value {
+    let mut flags = 0u32;
+    if shapes::legacy_solid(&sh.collision) {
+        flags |= 1;
+    }
+    if sh.full_collision() {
+        flags |= 4;
+    }
+    if sh.collision.is_empty() {
+        flags |= 32;
+    }
+    let (kind, amount) = if sh.waterlogged { (2, 8) } else { (0, 0) };
+    let instrument = crate::slabs::line(b.id).map_or("HARP", |l| l.instrument);
+    json!([
+        shapes::sturdy(&sh.collision),
+        flags,
+        kind,
+        amount,
+        false,
+        0,
+        0,
+        false,
+        instrument
     ])
 }
 
