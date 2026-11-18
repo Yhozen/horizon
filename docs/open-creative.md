@@ -238,6 +238,16 @@ disabled it is checked but offered to nothing; once enabled, `Sources::image` an
 credits name the pack, ship its credit file and the CC BY-SA 4.0 text, and state the bundle's
 licence as soon as the bundle uses one of its files.
 
+Pixel Perfection Legacy is enabled. The generator takes each block and item texture from it when it
+has the name, else from Minetest Game, else from `art.rs`; water keeps Minetest Game's coloured
+art (`KEEP_MEDIA` in `assets.rs`), as the biome's water tint is white. A pack's textures are whole
+(the grass side and the ores are not composited) and its own `.mcmeta` ship with them. Its grass,
+fern, sugar cane and leaf textures are grey, as Minecraft's are: their models carry `tintindex` 0
+on the faces Minecraft's models tint (the grass block's top and a second, overlay cube on its
+sides with `grass_block_side_overlay`; every leaf face; both cross planes), their items carry
+`tints`, and the biome takes grass and foliage colours from the colormaps, which are Horizon's
+own gradients (`art::colormap`).
+
 ## The browser build
 
 ```sh

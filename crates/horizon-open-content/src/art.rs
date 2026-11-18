@@ -16,6 +16,45 @@ pub fn block_texture(name: &str) -> Option<Rgba> {
     }
 }
 
+/// The colours a biome's temperature and downfall give grey grass and
+/// foliage textures: Horizon's own gradient, from a blue-green cold edge to a
+/// dry olive and a wet green at the hot edge. The layout is the one the
+/// client reads: x = (1 - temperature) * 255, y = (1 - downfall * temperature)
+/// * 255. Each kind is `(cold, hot and dry, hot and wet)`.
+pub fn colormap(kind: &str) -> Option<Rgba> {
+    let [cold, dry, wet]: [[f32; 3]; 3] = match kind {
+        "grass" => [
+            [128.0, 180.0, 151.0],
+            [191.0, 183.0, 85.0],
+            [71.0, 205.0, 51.0],
+        ],
+        "foliage" => [
+            [96.0, 161.0, 123.0],
+            [174.0, 164.0, 42.0],
+            [26.0, 191.0, 0.0],
+        ],
+        _ => return None,
+    };
+    let mut image = Rgba::new(256, 256);
+    for y in 0..256 {
+        for x in 0..256 {
+            let temperature = 1.0 - x as f32 / 255.0;
+            let humidity = 1.0 - y as f32 / 255.0;
+            let downfall = if temperature > 0.0 {
+                (humidity / temperature).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let channel = |i: usize| {
+                let hot = dry[i] + (wet[i] - dry[i]) * downfall;
+                (cold[i] + (hot - cold[i]) * temperature).round() as u8
+            };
+            image.set(x, y, [channel(0), channel(1), channel(2), 255]);
+        }
+    }
+    Some(image)
+}
+
 /// Dark, coarse, high-contrast stone: unmistakably the world's floor.
 fn bedrock() -> Rgba {
     let mut image = Rgba::new(16, 16);

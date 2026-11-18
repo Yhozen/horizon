@@ -553,7 +553,9 @@ fn edges(boxes: &[[f64; 6]]) -> Vec<[f64; 6]> {
 /// The single biome, the one dimension and the day cycle, authored here.
 pub fn environment(bundle: &mut Bundle) -> Result<()> {
     const ENV: &str = "environment";
-    // The artwork is already coloured: tinting stays white.
+    // Grass and foliage take their colour from the colormaps (the pack's
+    // textures are grey, as Minecraft's are); dry foliage and water are
+    // already coloured, so their tint stays white.
     bundle.json(
         "data/minecraft/worldgen/biome/plains.json",
         &json!({
@@ -561,8 +563,6 @@ pub fn environment(bundle: &mut Bundle) -> Result<()> {
             "downfall": 0.4,
             "has_precipitation": false,
             "effects": {
-                "grass_color": 0xFFFFFF,
-                "foliage_color": 0xFFFFFF,
                 "dry_foliage_color": 0xFFFFFF,
                 "water_color": 0xFFFFFF,
             },
@@ -631,10 +631,14 @@ pub fn environment(bundle: &mut Bundle) -> Result<()> {
     )?;
     let white = crate::image::Rgba::filled(256, 256, [255, 255, 255, 255]);
     for map in ["grass", "foliage", "dry_foliage"] {
+        let (image, origin) = match crate::art::colormap(map) {
+            Some(image) => (image, Origin::Generator("art")),
+            None => (white.clone(), Origin::Generator(ENV)),
+        };
         bundle.png(
             format!("assets/minecraft/textures/colormap/{map}.png"),
-            &white,
-            Origin::Generator(ENV),
+            &image,
+            origin,
         )?;
     }
     Ok(())

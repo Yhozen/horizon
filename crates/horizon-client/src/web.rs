@@ -101,13 +101,9 @@ pub fn overlay_art(root: &std::path::Path, art: &[u8]) -> Result<usize, JsValue>
             if is_own_layout(name) {
                 continue;
             }
-            let bytes = match biome_tint(stem) {
-                // The bundle's models carry no tint: wear the texture as vanilla's
-                // default biome colours would draw it.
-                Some(color) => tinted(data, color).unwrap_or_else(|| data.to_vec()),
-                None => data.to_vec(),
-            };
-            horizon_core::fs::install(&target, bytes);
+            // Grey grass and foliage textures stay grey: the bundle's models tint
+            // them, with the colormaps this archive also lays over.
+            horizon_core::fs::install(&target, data.to_vec());
             replaced.push(name.to_string());
             let meta = format!("{name}.mcmeta");
             if !names.contains(meta.as_str()) && root.join(&meta).is_file_vfs() {
@@ -139,69 +135,6 @@ pub fn overlay_art(root: &std::path::Path, art: &[u8]) -> Result<usize, JsValue>
         serde_json::to_vec(&replaced).unwrap_or_default(),
     );
     Ok(count)
-}
-/// The colour a grey, biome-tinted texture is drawn with in a plains-like biome
-/// (grass and foliage colours), for block textures by name.
-fn biome_tint(stem: &str) -> Option<u32> {
-    const GRASS: u32 = 0x91BD59;
-    const FOLIAGE: u32 = 0x77AB2F;
-    match stem {
-        "spruce_leaves" => Some(0x619961),
-        "birch_leaves" => Some(0x80A755),
-        "oak_leaves" | "jungle_leaves" | "acacia_leaves" | "dark_oak_leaves"
-        | "mangrove_leaves" | "vine" => Some(FOLIAGE),
-        "short_grass"
-        | "fern"
-        | "tall_grass_top"
-        | "tall_grass_bottom"
-        | "large_fern_top"
-        | "large_fern_bottom"
-        | "grass_block_top"
-        | "grass_block_side_overlay"
-        | "sugar_cane" => Some(GRASS),
-        _ => None,
-    }
-}
-/// `png` with every pixel's colour multiplied by `color` (0xRRGGBB).
-fn tinted(png_bytes: &[u8], color: u32) -> Option<Vec<u8>> {
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
-    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = decoder.read_info().ok()?;
-    let mut buf = vec![0; reader.output_buffer_size()?];
-    let info = reader.next_frame(&mut buf).ok()?;
-    let (w, h) = (info.width, info.height);
-    let rgba: Vec<u8> = match info.color_type {
-        png::ColorType::Rgba => buf[..info.buffer_size()].to_vec(),
-        png::ColorType::Rgb => buf[..info.buffer_size()]
-            .chunks(3)
-            .flat_map(|p| [p[0], p[1], p[2], 255])
-            .collect(),
-        png::ColorType::GrayscaleAlpha => buf[..info.buffer_size()]
-            .chunks(2)
-            .flat_map(|p| [p[0], p[0], p[0], p[1]])
-            .collect(),
-        png::ColorType::Grayscale => buf[..info.buffer_size()]
-            .iter()
-            .flat_map(|&g| [g, g, g, 255])
-            .collect(),
-        png::ColorType::Indexed => return None,
-    };
-    let tint = [(color >> 16) as u8, (color >> 8) as u8, color as u8];
-    let out: Vec<u8> = rgba
-        .chunks(4)
-        .flat_map(|p| {
-            let m = |c: u8, t: u8| ((u16::from(c) * u16::from(t)) / 255) as u8;
-            [m(p[0], tint[0]), m(p[1], tint[1]), m(p[2], tint[2]), p[3]]
-        })
-        .collect();
-    let mut encoded = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut encoded, w, h);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder.write_header().ok()?.write_image_data(&out).ok()?;
-    }
-    Some(encoded)
 }
 
 /// The list of files `overlay_art` replaced, beside the resources.

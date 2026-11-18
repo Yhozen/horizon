@@ -2059,7 +2059,7 @@
     {
       "manifest": "packs/pixel_perfection_legacy/pack.json",
       "sha256": "35c723f4b470c1cc783bfd18447bf9eaeb1f4d42626a9eded8e2014c81bd4eb7",
-      "enabled": false
+      "enabled": true
     }
   ]
 }

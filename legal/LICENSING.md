@@ -60,7 +60,7 @@ licences in use:
 | --- | --- | --- |
 | `CC-BY-SA-3.0` | 119 | `content/open/licenses/CC-BY-SA-3.0.txt` |
 | `CC0-1.0` | 2 (`default_gravel.png`, `default_glass.png`) | `content/open/licenses/CC0-1.0.txt` |
-| `CC-BY-SA-4.0` | 3,056 textures of Pixel Perfection Legacy under `packs/` (not used by the bundle yet) | `content/open/licenses/CC-BY-SA-4.0.txt` |
+| `CC-BY-SA-4.0` | 3,056 textures of Pixel Perfection Legacy under `packs/` | `content/open/licenses/CC-BY-SA-4.0.txt` |
 
 Building the bundle fails if a media file is not listed in `sources.json`, if its checksum
 changed, or if its licence text is not vendored (`crates/horizon-open-content/src/sources.rs`).
