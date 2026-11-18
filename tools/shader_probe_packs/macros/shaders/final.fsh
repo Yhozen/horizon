@@ -11,8 +11,12 @@ uniform int worldTime;
 uniform int frameCounter;
 varying vec2 texcoord;
 
+// Pack options, to check that the option file (`shaderpacks/<pack>.txt`) is read.
+#define PROBE_OPTION 2 // [1 2 3 4]
+//#define PROBE_TOGGLE
+
 const float CELL = 8.0;
-const int ROWS = 42;
+const int ROWS = 44;
 
 void value(int row, out bool def, out float v) {
     def = false;
@@ -221,42 +225,54 @@ void value(int row, out bool def, out float v) {
         def = true; v = float(IRIS_FEATURE_TEXTURE_SHAPED_SAMPLERS + 0);
 #endif
     }
-    // row 34: #if MC_GL_VERSION >= 320 x1
+    // row 34: PROBE_OPTION x1
     if (row == 34) {
+#ifdef PROBE_OPTION
+        def = true; v = float(PROBE_OPTION + 0);
+#endif
+    }
+    // row 35: PROBE_TOGGLE x1
+    if (row == 35) {
+#ifdef PROBE_TOGGLE
+        def = true; v = float(PROBE_TOGGLE + 0);
+#endif
+    }
+    // row 36: #if MC_GL_VERSION >= 320 x1
+    if (row == 36) {
         def = true;
 #if MC_GL_VERSION >= 320
         v = 1.0;
 #endif
     }
-    // row 35: #if MC_GL_VERSION >= 45 x1
-    if (row == 35) {
+    // row 37: #if MC_GL_VERSION >= 45 x1
+    if (row == 37) {
         def = true;
 #if MC_GL_VERSION >= 45
         v = 1.0;
 #endif
     }
-    // row 36: #if MC_VERSION >= 12111 x1
-    if (row == 36) {
+    // row 38: #if MC_VERSION >= 12111 x1
+    if (row == 38) {
         def = true;
 #if MC_VERSION >= 12111
         v = 1.0;
 #endif
     }
-    // row 37: #if defined(MC_GL_VENDOR_MESA) || defined(MC_GL_VENDOR_OTHER) x1
-    if (row == 37) {
+    // row 39: #if defined(MC_GL_VENDOR_MESA) || defined(MC_GL_VENDOR_OTHER) x1
+    if (row == 39) {
         def = true;
 #if defined(MC_GL_VENDOR_MESA) || defined(MC_GL_VENDOR_OTHER)
         v = 1.0;
 #endif
     }
-    // row 38: uniform viewWidth x1
-    if (row == 38) { def = true; v = float(viewWidth); }
-    // row 39: uniform viewHeight x1
-    if (row == 39) { def = true; v = float(viewHeight); }
-    // row 40: uniform worldTime x1
-    if (row == 40) { def = true; v = float(worldTime); }
-    // row 41: uniform frameCounter>0 x1
-    if (row == 41) { def = true; v = float(frameCounter > 0); }
+    // row 40: uniform viewWidth x1
+    if (row == 40) { def = true; v = float(viewWidth); }
+    // row 41: uniform viewHeight x1
+    if (row == 41) { def = true; v = float(viewHeight); }
+    // row 42: uniform worldTime x1
+    if (row == 42) { def = true; v = float(worldTime); }
+    // row 43: uniform frameCounter>0 x1
+    if (row == 43) { def = true; v = float(frameCounter > 0); }
 }
 
 void main() {

@@ -23,7 +23,7 @@ MACROS = [
     ("IRIS_FEATURE_SSBO", 1), ("IRIS_FEATURE_COMPUTE_SHADERS", 1), ("IRIS_FEATURE_SEPARATE_HARDWARE_SAMPLERS", 1),
     ("IRIS_FEATURE_HIGHER_SHADOWCOLOR", 1), ("IRIS_FEATURE_ENTITY_TRANSLUCENT", 1), ("IRIS_FEATURE_FADE_VARIABLE", 1),
     ("IRIS_FEATURE_BLOCK_EMISSION_ATTRIBUTE", 1), ("IRIS_FEATURE_CHUNK_OFFSET", 1),
-    ("IRIS_FEATURE_TEXTURE_SHAPED_SAMPLERS", 1),
+    ("IRIS_FEATURE_TEXTURE_SHAPED_SAMPLERS", 1), ("PROBE_OPTION", 1), ("PROBE_TOGGLE", 1),
 ]
 # Preprocessor conditions, painted 1 when the `#if` holds.
 CONDITIONS = [
@@ -66,6 +66,10 @@ uniform float viewHeight;
 uniform int worldTime;
 uniform int frameCounter;
 varying vec2 texcoord;
+
+// Pack options, to check that the option file (`shaderpacks/<pack>.txt`) is read.
+#define PROBE_OPTION 2 // [1 2 3 4]
+//#define PROBE_TOGGLE
 
 const float CELL = 8.0;
 const int ROWS = {i};

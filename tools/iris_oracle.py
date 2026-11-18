@@ -229,7 +229,7 @@ def write_options(game_dir: Path, extra: list[str]) -> None:
         "simulationDistance": "5",
         "fov": "0.0",
         "pauseOnLostFocus": "false",
-        "guiScale": "2",
+        "guiScale": str(GUI_SCALE),
         "joinedFirstServer": "true",
         "skipMultiplayerWarning": "true",
         "narrator": "0",
@@ -268,6 +268,24 @@ def has_loading_bar(png: Path) -> bool:
             else:
                 run = 0
     return False
+
+
+GUI_SCALE = 2
+
+
+def mask_hud(png: Path, w: int, h: int) -> None:
+    """Paints the hotbar and the crosshair black (no way to hide the HUD without input injection).
+
+    Vanilla's hotbar is 182x22 GUI pixels (24 high with the selection frame) centred at the bottom, the
+    crosshair 15x15 at the centre; `options.txt` pins the GUI scale to `GUI_SCALE`."""
+    s = GUI_SCALE
+    hw, hh = 184 * s, 24 * s
+    cs = 16 * s
+    boxes = [((w - hw) // 2, h - hh, hw, hh), ((w - cs) // 2, (h - cs) // 2, cs, cs)]
+    filt = ",".join(f"drawbox=x={x}:y={y}:w={bw}:h={bh}:color=black:t=fill" for x, y, bw, bh in boxes)
+    tmp = png.with_suffix(".mask.png")
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(png), "-vf", filt, str(tmp)], check=True)
+    tmp.replace(png)
 
 
 def free_display() -> int:
@@ -403,8 +421,8 @@ def run(args) -> int:
                 break
             time.sleep(1)
         probe.unlink(missing_ok=True)
-        if status in ("ok", "timeout"):
-            grab(out)
+        if status in ("ok", "timeout") and grab(out) and args.mask_hud:
+            mask_hud(out, w, h)
     finally:
         try:
             os.killpg(game_proc.pid, signal.SIGTERM)
@@ -584,6 +602,7 @@ def main() -> int:
     r.add_argument("--env", action="append", help="extra environment `K=V`")
     r.add_argument("--game-arg", action="append", help="extra game argument")
     r.add_argument("--keep", action="store_true", help="keep the copied save")
+    r.add_argument("--no-mask-hud", dest="mask_hud", action="store_false", help="leave the hotbar and crosshair visible")
     args = ap.parse_args()
     if args.cmd == "prepare":
         prepare(args)
