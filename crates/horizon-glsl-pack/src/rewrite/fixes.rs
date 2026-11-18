@@ -10,6 +10,9 @@
 //!   functions, other non-constant globals): naga rejects them when `const`
 //!   and silently drops the initializer otherwise. Both lose the initializer
 //!   (and `const`) and get assigned, in source order, at the start of `main`.
+//!   So do initializers with `?:`, which naga cannot evaluate as constants.
+//! - `discard;` with statements after it in the same block: wrapped in an
+//!   `if (true)` so naga keeps those statements.
 
 use std::collections::BTreeSet;
 
@@ -67,7 +70,12 @@ pub(super) fn apply(toks: &[Tok]) -> Result<String, String> {
     Ok(texts.concat())
 }
 
-/// One function definition: `const` stripped, returns coerced.
+/// What `discard;` becomes: naga's GLSL front end drops the statements after
+/// a bare `discard` but keeps their expressions, which then fail validation
+/// ("Expression not visited"); behind an `if` the rest of the block stays.
+const DISCARD: &str = "{ if (true) discard; }";
+
+/// One function definition: `const` stripped, returns coerced, `discard` guarded.
 fn function(toks: &[Tok]) -> String {
     let sig: Vec<usize> = (0..toks.len())
         .filter(|&i| toks[i].kind != Kind::Space)
@@ -82,13 +90,25 @@ fn function(toks: &[Tok]) -> String {
     let mut returns: Vec<i32> = Vec::new();
     let mut parens = 0i32;
     let mut skip_space = false;
+    let mut after_discard = false;
     for t in toks {
         if skip_space && t.kind == Kind::Space {
             skip_space = false;
             continue;
         }
         skip_space = false;
+        if after_discard && t.kind != Kind::Space {
+            after_discard = false;
+            if t.text == ";" {
+                continue;
+            }
+        }
         match t.text {
+            "discard" => {
+                out.push_str(DISCARD);
+                after_discard = true;
+                continue;
+            }
             "const" => {
                 skip_space = true;
                 continue;
@@ -160,16 +180,18 @@ fn global<'a>(
         }
     }
     decls.push(&body[start..]);
+    // naga's constant evaluator has no `?:`: such initializers run in `main` too.
     let runtime = |init: &[&str], constants: &BTreeSet<&str>| {
-        init.iter().enumerate().any(|(k, w)| {
-            is_ident(w)
-                && !(k > 0 && init[k - 1] == ".")
-                && !is_type(w, structs)
-                && !matches!(*w, "true" | "false")
-                && !listed(BUILTIN_FUNCTIONS, w)
-                && !listed(NEW_BUILTINS, w)
-                && !constants.contains(w)
-        })
+        init.contains(&"?")
+            || init.iter().enumerate().any(|(k, w)| {
+                is_ident(w)
+                    && !(k > 0 && init[k - 1] == ".")
+                    && !is_type(w, structs)
+                    && !matches!(*w, "true" | "false")
+                    && !listed(BUILTIN_FUNCTIONS, w)
+                    && !listed(NEW_BUILTINS, w)
+                    && !constants.contains(w)
+            })
     };
     let mut moved = false;
     let mut kept = Vec::new();
@@ -236,5 +258,35 @@ mod tests {
             assert!(out.contains(&format!(" {op} ")), "{op} in {out}");
         }
         assert!(out.contains("void main() { g = "), "{out}");
+    }
+
+    #[test]
+    fn code_after_discard_is_kept() {
+        let src = "uniform sampler2D tex; varying vec2 uv; uniform float a;\n\
+                   void main() { if (a > 0.5) discard; else a; discard; gl_FragColor = texture2D(tex, uv); }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        assert!(
+            out.contains("if (a > 0.5) { if (true) discard; } else"),
+            "{out}"
+        );
+        let rw = crate::rewrite::rewrite(src, crate::Stage::Fragment).unwrap();
+        assert!(
+            rw.body.contains("{ if (true) discard; } hz_gl_FragData"),
+            "{}",
+            rw.body
+        );
+    }
+
+    #[test]
+    fn ternary_constants_run_in_main() {
+        let src = "const float a = 1.0 > 0.0 ? 1.2 : 0.0;\nconst float b = a * 2.0;\n\
+                   const float c = 3.0;\nvoid main() { }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        assert!(
+            out.contains("void main() { a = 1.0 > 0.0 ? 1.2 : 0.0; b = a * 2.0;"),
+            "{out}"
+        );
+        assert!(out.contains("const float c = 3.0;"), "{out}");
+        assert!(!out.contains("const float a"), "{out}");
     }
 }

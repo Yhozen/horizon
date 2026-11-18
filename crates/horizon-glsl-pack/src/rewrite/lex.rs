@@ -18,8 +18,8 @@ pub(super) struct Tok<'a> {
 
 /// GLSL's operators of more than one character, longest first.
 const OPERATORS: [&str; 22] = [
-    "<<=", ">>=", "||", "&&", "^^", "==", "!=", "<=", ">=", "<<", ">>", "++", "--", "+=", "-=", "*=",
-    "/=", "%=", "&=", "|=", "^=", "->",
+    "<<=", ">>=", "||", "&&", "^^", "==", "!=", "<=", ">=", "<<", ">>", "++", "--", "+=", "-=",
+    "*=", "/=", "%=", "&=", "|=", "^=", "->",
 ];
 
 pub(super) fn tokenize(src: &str) -> Vec<Tok<'_>> {
@@ -56,7 +56,10 @@ pub(super) fn tokenize(src: &str) -> Vec<Tok<'_>> {
             // Multi-character operators stay one token, so passes that rebuild text from
             // tokens with spaces between them keep `||`, `==`, `<<=`… intact.
             let op = OPERATORS.iter().find(|op| src[i..].starts_with(**op));
-            i += op.map_or_else(|| src[i..].chars().next().map_or(1, char::len_utf8), |op| op.len());
+            i += op.map_or_else(
+                || src[i..].chars().next().map_or(1, char::len_utf8),
+                |op| op.len(),
+            );
             Kind::Punct
         };
         toks.push(Tok {
@@ -167,7 +170,9 @@ mod tests {
             .collect();
         assert_eq!(
             texts,
-            ["a", "<<=", "b", "||", "c", "&&", "-", "d", "==", "e", ">>", "f", "<=", "g", "++"]
+            [
+                "a", "<<=", "b", "||", "c", "&&", "-", "d", "==", "e", ">>", "f", "<=", "g", "++"
+            ]
         );
     }
 }

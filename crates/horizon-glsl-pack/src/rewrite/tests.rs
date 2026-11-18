@@ -555,7 +555,15 @@ fn uniform_initializers() {
     let rw = rewrite(src, Stage::Fragment).unwrap();
     let names: Vec<_> = rw.uniforms.iter().map(|u| u.name.as_str()).collect();
     assert_eq!(names, ["viewWidth"], "{}", rw.body);
-    assert!(rw.body.contains("float heavyFog = max ( 0.25 , 0.5 );"), "{}", rw.body);
-    assert!(rw.body.contains("vec2 offset = vec2 ( 1.0 , - 2.0 );"), "{}", rw.body);
+    assert!(
+        rw.body.contains("float heavyFog = max ( 0.25 , 0.5 );"),
+        "{}",
+        rw.body
+    );
+    assert!(
+        rw.body.contains("vec2 offset = vec2 ( 1.0 , - 2.0 );"),
+        "{}",
+        rw.body
+    );
     naga(&rw, Stage::Fragment);
 }
