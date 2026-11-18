@@ -8,7 +8,8 @@ Reads the prepared vanilla tables (`.local/horizon-client/26.3`: `entity-models.
 creatures from. Only numbers and identifiers are written: no texture, model or other
 Mojang file. Each line is tab-separated:
 
-- `mob NAME WIDTH HEIGHT EYE_HEIGHT CATEGORY FIRE_IMMUNE`: an entity type and its hit box;
+- `mob NAME WIDTH HEIGHT EYE_HEIGHT CATEGORY FIRE_IMMUNE`: an entity type and its hit box
+  (`thing` for one that is not a mob: a boat, minecart, arrow or armor stand);
 - `attr NAME VALUE`: one of its default attributes;
 - `model KEY TEXTURE_WIDTH TEXTURE_HEIGHT`: a model layer it draws (`entity-models.json` key);
 - `part PATH X Y Z XROT YROT ZROT XSCALE YSCALE ZSCALE`: a part of the last model (its path
@@ -131,6 +132,24 @@ CREATURES = {
     "copper_golem": (["copper_golem#main", "copper_golem#eyes", "copper_golem_running#main", "copper_golem_sitting#main",
                       "copper_golem_star#main"],
                      [("copper_golem/copper_golem_eyes*", "copper_golem#eyes"), ("copper_golem/copper_golem*", None)]),
+}
+
+# The non-living entities, as `thing` lines (the same facts): boats, minecarts, arrows and
+# armor stands.
+WOODS = ["acacia", "birch", "cherry", "dark_oak", "jungle", "mangrove", "oak", "pale_oak", "poplar", "spruce"]
+OBJECTS = {
+    **{f"{wood}_boat": ([f"boat/{wood}#main", "boat#water_patch"], [(f"boat/{wood}", f"boat/{wood}#main")])
+       for wood in WOODS},
+    **{f"{wood}_chest_boat": ([f"chest_boat/{wood}#main", "boat#water_patch"],
+                              [(f"chest_boat/{wood}", f"chest_boat/{wood}#main")]) for wood in WOODS},
+    "bamboo_raft": (["boat/bamboo#main"], [("boat/bamboo", None)]),
+    "bamboo_chest_raft": (["chest_boat/bamboo#main"], [("chest_boat/bamboo", None)]),
+    **{cart: ([f"{cart}#main"], [("minecart/minecart", None)])
+       for cart in ["minecart", "chest_minecart", "furnace_minecart", "hopper_minecart", "tnt_minecart",
+                    "spawner_minecart", "command_block_minecart"]},
+    "arrow": (["arrow#main"], [("projectiles/arrow", None), ("projectiles/arrow_tipped", None)]),
+    "spectral_arrow": (["arrow#main"], [("projectiles/arrow_spectral", None)]),
+    "armor_stand": (["armor_stand#main", "armor_stand_small#main"], [("armorstand/*", None)]),
 }
 
 FACES = "tbrfls"
@@ -337,11 +356,12 @@ def main():
     types = json.loads((args.resources / "entity-types.json").read_text())
     tex = textures()
     lines, problems = [], []
-    for mob, (keys, patterns) in CREATURES.items():
+    for mob, (keys, patterns) in [*CREATURES.items(), *OBJECTS.items()]:
         t = types[f"minecraft:{mob}"]
-        lines.append("\t".join(["mob", mob, number(t["width"]), number(t["height"]), number(t["eye_height"]),
+        kind = "mob" if mob in CREATURES else "thing"
+        lines.append("\t".join([kind, mob, number(t["width"]), number(t["height"]), number(t["eye_height"]),
                                 t["category"], "1" if t["fire_immune"] else "0"]))
-        for name, value in sorted(t["attributes"].items()):
+        for name, value in sorted(t.get("attributes", {}).items()):
             lines.append(f"attr\t{name.removeprefix('minecraft:')}\t{number(value)}")
         stem = keys[0].split("#")[0]
         chosen = []
@@ -390,7 +410,7 @@ def main():
     else:
         OUT.parent.mkdir(parents=True, exist_ok=True)
         OUT.write_text(text)
-        print(f"wrote {OUT.relative_to(ROOT)}: {len(CREATURES)} creatures, {len(lines)} lines")
+        print(f"wrote {OUT.relative_to(ROOT)}: {len(CREATURES)} creatures, {len(OBJECTS)} other entities, {len(lines)} lines")
     if problems:
         sys.exit(1)
 
