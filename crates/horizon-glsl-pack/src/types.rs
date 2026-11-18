@@ -254,29 +254,5 @@ impl fmt::Display for PackError {
 
 impl std::error::Error for PackError {}
 
-/// The `mc_Entity` and normal of a terrain vertex, carried in the alpha byte
-/// of `TerrainVertex::color` while a pack is active: `normal << 5 | material`.
-/// `material` is [`BlockIds::material`] (31 = no entry); `normal` is a [`NormalCode`].
-pub fn vertex_tag(normal: NormalCode, material: u8) -> u8 {
-    ((normal as u8) << 5) | (material & 31)
-}
-
-/// The face normal a terrain vertex carries in its tag.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum NormalCode {
-    Down = 0,
-    Up = 1,
-    North = 2,
-    South = 3,
-    West = 4,
-    East = 5,
-    /// Not axis-aligned (cross plants, sloped fluid): decoded as the
-    /// diagonal `normalize(1, 0, 1)`, a stand-in that is neither up nor a face.
-    Other = 6,
-    /// No tag (0xFF): decoded as up, material none.
-    None = 7,
-}
-
-/// The material index meaning "no `block.properties` id".
+/// The material index meaning "no `block.properties` id" (`BlockIds::material`).
 pub const NO_MATERIAL: u8 = 31;
