@@ -13,7 +13,8 @@ of these families, in block registry order:
 Each line is tab-separated: the name, its class chain, destroy time, explosion resistance, light
 emission (and when lit), light dampening, friction, map colour, sound type, the tool tag that
 mines it fast, the needed tool level (0 none, 1 stone, 2 iron, 3 diamond), whether it needs the
-tool to drop, the model layout (`cube`, `axis` or `facing`), and the texture names of its six
+tool to drop, the model layout (`cube`, `axis`, `pillar`: an axis whose lying models turn the top
+half a turn, or `facing`), and the texture names of its six
 faces (down, up, north, south, west, east; the lit front last for `facing`). Only numbers and
 identifiers are written: no texture, model or other Mojang file.
 
@@ -93,6 +94,14 @@ class Models:
             faces[face] = value(ref[1:])
         return faces
 
+    def parents(self, name):
+        """The model and its parents' names, without namespaces."""
+        names = []
+        while name:
+            names.append(strip(name).removeprefix("block/"))
+            name = self.load(name).get("parent")
+        return names
+
     def variant_model(self, block, key):
         state = json.loads((self.root / "blockstates" / f"{block}.json").read_text())
         variant = state["variants"][key]
@@ -148,6 +157,9 @@ def rows(resources):
             if strip(sound[event]["id"]) not in (f"block.{kind}.{event}", "intentionally_empty"):
                 sys.exit(f"{name}: sound {sound} does not follow block.<type>.<event>")
         faces = models.textures(models.variant_model(short, key))
+        if layout == "axis" and "cube_column_horizontal" in models.parents(models.variant_model(short, "axis=x")):
+            # Lying down, its top turns half a turn (Minecraft's horizontal column).
+            layout = "pillar"
         if None in faces.values():
             sys.exit(f"{name}: unresolved texture in {faces}")
         lit_north = "-"

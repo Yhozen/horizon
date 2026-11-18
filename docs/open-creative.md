@@ -165,10 +165,11 @@ vanilla tables; `--check` fails if it is out of date) gives three families their
 hay) and the furnace, blast furnace and smoker. One line per block, numbers and names only:
 class chain, destroy time, resistance, light (and lit light), dampening, friction, map colour,
 sound type, mining tool and level, and the texture names of its six faces (the lit front last).
-`cubes.rs` reads it: a block the crate already authors keeps its name, faces, tab and drop and
-takes these numbers; the others join the palette with a model in the bundle's own format, their
+`cubes.rs` reads it: a block the crate already authors keeps its name, tab and drop and takes
+these numbers and faces; the others join the palette with a model in the bundle's own format, their
 textures from the pack (a placeholder in the map colour when it has none), and an item; each
-drops itself. Furnaces turn with `facing` and show their lit front when `lit`.
+drops itself. Logs lying down turn their top half a turn, as Minecraft's horizontal columns do;
+furnaces turn with `facing` and show their lit front when `lit`.
 
 ### Support blocks
 

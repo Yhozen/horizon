@@ -71,6 +71,9 @@ pub enum Faces {
     /// A cube with one texture per face: down, up, north, south, west,
     /// east (rotated by `axis` when it has one).
     Cube([&'static str; 6]),
+    /// A log: a cube turned by `axis` whose top, lying down, is turned half
+    /// a turn (Minecraft's horizontal column).
+    Pillar([&'static str; 6]),
     /// A cube facing its `facing` (north unturned), with another front
     /// when `lit` (furnaces).
     Facing {
@@ -1092,7 +1095,7 @@ impl Block {
                 front,
                 side,
             } => vec![top, bottom, front, side],
-            Faces::Cube(faces) => unique(&faces),
+            Faces::Cube(faces) | Faces::Pillar(faces) => unique(&faces),
             Faces::Facing { faces, lit_north } => {
                 let mut all = unique(&faces);
                 all.push(lit_north);

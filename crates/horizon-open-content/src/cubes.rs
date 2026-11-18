@@ -3,8 +3,8 @@
 //! every `RotatedPillarBlock` and the three furnaces, with Minecraft's
 //! numbers (destroy time, resistance, light, map colour, friction, sound
 //! type, mining tool) and the texture names of their faces. A block this
-//! crate already authors keeps its name, faces, tab and drop and takes the
-//! numbers; the others are added to the palette, dropping themselves.
+//! crate already authors keeps its name, tab and drop and takes the numbers
+//! and faces; the others are added to the palette, dropping themselves.
 use crate::blocks::{Block, Category, Drop, Faces, Form, Layer, Mining, Sound, Tier, Tool};
 
 const CUBES: &str = include_str!("../data/blocks/cubes.txt");
@@ -56,6 +56,7 @@ pub fn cubes() -> Vec<Cube> {
                     faces: six,
                     lit_north: f[20],
                 },
+                "pillar" => Faces::Pillar(six),
                 _ => Faces::Cube(six),
             };
             Cube {
@@ -211,6 +212,7 @@ pub fn add(blocks: &mut Vec<Block>) {
 }
 
 fn set_facts(block: &mut Block, cube: &Cube) {
+    block.faces = cube.faces;
     block.classes = cube.classes;
     block.hardness = cube.hardness;
     block.resistance = cube.resistance;

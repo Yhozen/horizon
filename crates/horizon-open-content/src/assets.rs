@@ -279,19 +279,28 @@ fn models(block: &Block, tinting: Tinting) -> (Vec<(String, Value)>, Option<Valu
                 Some(json!({"variants": {"": {"model": format!("minecraft:block/{id}")}}})),
             )
         }
-        Faces::Cube(faces) => {
+        Faces::Cube(faces) | Faces::Pillar(faces) => {
             let model = six_model(faces);
             let model_id = format!("minecraft:block/{id}");
+            let mut models = vec![(format!("block/{id}"), model.clone())];
+            let lying = if let Faces::Pillar(_) = block.faces {
+                let mut lying = model;
+                lying["elements"][0]["faces"]["up"]["rotation"] = json!(180);
+                models.push((format!("block/{id}_horizontal"), lying));
+                format!("{model_id}_horizontal")
+            } else {
+                model_id.clone()
+            };
             let definition = if block.has_property("axis") {
                 json!({"variants": {
-                    "axis=x": {"model": model_id, "x": 90, "y": 90},
+                    "axis=x": {"model": lying, "x": 90, "y": 90},
                     "axis=y": {"model": model_id},
-                    "axis=z": {"model": model_id, "x": 90},
+                    "axis=z": {"model": lying, "x": 90},
                 }})
             } else {
                 json!({"variants": {"": {"model": model_id}}})
             };
-            (vec![(format!("block/{id}"), model)], Some(definition))
+            (models, Some(definition))
         }
         Faces::Facing { faces, lit_north } => {
             let mut lit = faces;
