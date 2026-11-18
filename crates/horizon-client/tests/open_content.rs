@@ -37,7 +37,7 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
     // six for cubes, at least two for plants (a lily pad's two sides), none
     // for the blocks the block-entity renderer draws.
     let palette = palette_blocks();
-    assert_eq!(palette.len(), 936);
+    assert_eq!(palette.len(), 977);
     for block in &palette {
         let name = block.id;
         let state = assets
@@ -55,6 +55,9 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
             // renderer, as Minecraft's are: their block models bake nothing.
             _ if name.ends_with("chest") || name.ends_with("shulker_box") => 0,
             Form::Cross => 2,
+            // Thin shaped blocks (rails, ladders, carpets...) may bake as
+            // little as one flat plane's two sides.
+            Form::Shaped => 2,
             // A door's lower half has no top face.
             Form::Connected(Family::Door) => 5,
             _ => 6,

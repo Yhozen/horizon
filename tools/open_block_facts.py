@@ -19,7 +19,13 @@ of these families, in block registry order:
   turns (glazed terracotta, observers, dispensers, barrels, copper bulbs, mycelium), or a
   multipart of single boxes (mushroom blocks): layout `variants`. `cube_variants.txt` then
   lists its block-state variants or parts (state or condition, model, x and y turns, uvlock)
-  and each model's box and faces (texture, UV, rotation, tint index, cull face).
+  and each model's elements (box, rotation, shade, and faces: texture, UV, rotation, tint index,
+  cull face),
+- the blocks of the classes in `SHAPED` (redstone wire, rails, rods, carpets, repeaters and
+  comparators, snow, farmland, dirt paths, ladders, levers, cakes, anvils): layout `shaped`,
+  their models listed as `variants`' are, and the default state's piston reaction,
+  replaceable, random ticks, lava ignition, block entity and item in the last columns, which
+  the tables cannot derive for them; `cubes.rs` writes their shapes by class.
 
 Each line is tab-separated: the name, its class chain, destroy time, explosion resistance, light
 emission (and when lit), light dampening, friction, map colour, sound type, the tool tag that
@@ -61,6 +67,10 @@ RESOURCES = ROOT / ".local" / "horizon-client" / "26.3"
 FURNACES = ("furnace", "blast_furnace", "smoker")
 # Cubes whose collision box is 14 sixteenths tall (`SoulSandBlock`, `MudBlock`): layout `sunken`.
 SUNKEN = ("SoulSandBlock", "MudBlock")
+# Blocks drawn by models of any boxes, with shapes `cubes.rs` writes by class: layout `shaped`.
+SHAPED = ("RedstoneWireBlock", "LightningRodBlock", "EndRodBlock", "CarpetBlock", "RepeaterBlock",
+          "ComparatorBlock", "SnowLayerBlock", "FarmlandBlock", "PathBlock", "LadderBlock",
+          "BaseRailBlock", "LeverBlock", "CakeBlock", "AnvilBlock")
 # Blocks with a plain cube model that are not plain blocks to place.
 # The jigsaw has a block entity without `BaseEntityBlock`, which the open tables read it from.
 SKIP = ("minecraft:test_instance_block", "minecraft:jigsaw")
@@ -83,7 +93,8 @@ OPENING_FAMILIES = (("DoorBlock", "door", "door_bottom_left", ("top", "bottom"))
                     ("WeightedPressurePlateBlock", "weighted_plate", "pressure_plate_up", ("texture",)),
                     ("PressurePlateBlock", "plate", "pressure_plate_up", ("texture",)))
 HEADER = ("name", "classes", "hardness", "resistance", "emission", "lit_emission", "opacity",
-          "friction", "map_color", "sound", "tool", "needs", "requires_tool", "layout") + FACES + ("lit_north", "speed_factor")
+          "friction", "map_color", "sound", "tool", "needs", "requires_tool", "layout") + FACES + ("lit_north", "speed_factor", "push", "replaceable",
+                                       "random_ticks", "ignited_by_lava", "block_entity", "item")
 
 
 def strip(name):
@@ -179,23 +190,41 @@ class Models:
     def full_cube(self, name):
         return self.element(name)
 
-    def face_specs(self, name):
-        """The element's corners (`x,y,z`), then each face as
-        `texture/u1,v1,u2,v2/rotation/tintindex/cullface` (`-` for a face it lacks, and for an
-        unset UV or cull face)."""
-        e = self.element(name, whole=False)
+    def elements(self, name):
+        """The model's elements, each as `from;to;rotation;shade;down;up;north;south;west;east`:
+        corners `x,y,z`, the rotation `origin x,y,z,axis,angle,rescale` (or `-`), `1` or `0`
+        for shade, and each face as `texture/u1,v1,u2,v2/rotation/tintindex/cullface` (`-` for
+        a face it lacks, and for an unset UV or cull face); then whether it uses ambient
+        occlusion first."""
+        chain = self.chain(name)
         variables = {}
-        for model in reversed(self.chain(name)):
+        for model in reversed(chain):
             variables.update(model.get("textures", {}))
-        out = [",".join(number(v) for v in e["from"]), ",".join(number(v) for v in e["to"])]
-        for d in FACES:
-            f = e["faces"].get(d)
-            if f is None:
-                out.append("-")
-                continue
-            texture = self.resolve(variables, f["texture"][1:])
-            uv = ",".join(number(v) for v in f["uv"]) if "uv" in f else "-"
-            out.append(f"{texture}/{uv}/{f.get('rotation', 0)}/{f.get('tintindex', -1)}/{f.get('cullface', '-')}")
+        elements = next((m["elements"] for m in chain if "elements" in m), [])
+        ao = next((m["ambientocclusion"] for m in chain if "ambientocclusion" in m), True)
+        out = ["1" if ao else "0"]
+        for e in elements:
+            r = e.get("rotation")
+            if r is None:
+                rotation = "-"
+            else:
+                if "angle" not in r:
+                    sys.exit(f"{name}: a rotation on more than one axis")
+                rotation = ",".join([*(number(v) for v in r["origin"]), r["axis"], number(r["angle"]),
+                                     "1" if r.get("rescale") else "0"])
+            parts = [",".join(number(v) for v in e["from"]), ",".join(number(v) for v in e["to"]), rotation,
+                     "1" if e.get("shade", True) else "0"]
+            if e.get("light_emission"):
+                sys.exit(f"{name}: an element giving light")
+            for d in FACES:
+                f = e["faces"].get(d)
+                if f is None:
+                    parts.append("-")
+                    continue
+                texture = self.resolve(variables, f["texture"][1:])
+                uv = ",".join(number(v) for v in f["uv"]) if "uv" in f else "-"
+                parts.append(f"{texture}/{uv}/{f.get('rotation', 0)}/{f.get('tintindex', -1)}/{f.get('cullface', '-')}")
+            out.append(";".join(parts))
         return out
 
     def chain(self, name):
@@ -214,9 +243,10 @@ class Models:
             sys.exit(f"unresolved texture #{var}")
         return self.resolve(variables, v[1:], depth + 1) if v.startswith("#") else strip(v).removeprefix("block/")
 
-    def variant_cubes(self, block):
+    def variant_cubes(self, block, shaped=False):
         """The block-state variants as (key, [(model, x, y, uvlock)]) when every model is one
-        full cube, else None."""
+        full cube, else None. When `shaped`, models may have any elements, and multipart
+        conditions any values (`a|b`) and alternatives (written `or` between them)."""
         path = self.root / "blockstates" / f"{block}.json"
         if not path.exists():
             return None
@@ -230,18 +260,22 @@ class Models:
             # A multipart of single boxes whose conditions are plain values (mushroom blocks).
             for part in definition.get("multipart", []):
                 when, v = part.get("when", {}), part["apply"]
-                if isinstance(v, list) or not self.element(v["model"], whole=False):
+                if isinstance(v, list) or not (shaped or self.element(v["model"], whole=False)):
                     return None
-                if any(not isinstance(value, str) or "|" in value for value in when.values()) or "OR" in when:
+                alternatives = when.get("OR", [when])
+                if not shaped and ("OR" in when or any("|" in value for value in when.values())):
                     return None
-                out.append(("part", ",".join(f"{k}={value}" for k, value in when.items()), [apply(v)]))
+                if "AND" in when or any(not isinstance(value, str) for a in alternatives for value in a.values()):
+                    return None
+                key = " or ".join(",".join(f"{k}={value}" for k, value in a.items()) for a in alternatives)
+                out.append(("part", key, [apply(v)]))
             return out or None
         for key, variant in variants.items():
             variant = variant if isinstance(variant, list) else [variant]
             if any("weight" in v for v in variant):
                 return None
             for v in variant:
-                if not self.full_cube(v["model"]):
+                if not (shaped or self.full_cube(v["model"])):
                     return None
             out.append(("variant", key, [apply(v) for v in variant]))
         return out
@@ -410,6 +444,11 @@ def rows(resources):
             layout, key = "facing", "facing=north,lit=false"
         elif name not in SKIP and (layout := models.plain_layout(short)):
             plain, key = True, "facing=north" if layout == "facing" else ""
+        elif any(c in SHAPED for c in classes) and (found := models.variant_cubes(short, shaped=True)):
+            layout, plain = "shaped", True
+            state = props[defaults[name]]
+            key = next((k for kind, k, _ in found if kind == "variant" and all(
+                state.get(p) == v for p, v in (c.split("=") for c in k.split(",") if c))), None)
         elif name not in SKIP and (found := models.variant_cubes(short)):
             layout, plain = "variants", True
             state = props[defaults[name]]
@@ -423,13 +462,15 @@ def rows(resources):
             if not all(s["outline"] == [[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]] for s in states):
                 sys.exit(f"{name}: not a sunken cube")
             layout = "sunken"
+        elif layout == "shaped":
+            pass
         elif not all(s["full_collision"] for s in states):
             if plain:
                 continue
             sys.exit(f"{name}: not a full cube")
         if layout == "variants" and not all(s["solid_render"] for s in states):
             continue
-        if not all(s["solid_render"] for s in states):
+        if layout != "shaped" and not all(s["solid_render"] for s in states):
             if not plain or layout != "cube":
                 sys.exit(f"{name}: not a full opaque cube")
             layout = "clear"
@@ -441,6 +482,11 @@ def rows(resources):
             facts = gameplay[defaults[name]]
             keep = ("hardness", "explosion_resistance", "dampening", "friction", "map_color",
                     "requires_tool", "sound", "solid_render", "emission")
+            if layout == "shaped":
+                # Their shapes give light dampening and solid rendering, state by state.
+                keep = ("hardness", "explosion_resistance", "friction", "map_color", "requires_tool",
+                        "sound", "emission", "push", "replaceable", "random_ticks", "ignited_by_lava",
+                        "block_entity", "item")
             lit_emission = facts["emission"]
             for i, s in enumerate(states, first[name]):
                 if props[i].get("lit") == "true":
@@ -451,7 +497,7 @@ def rows(resources):
             else:
                 keep = None
             if keep:
-                if layout == "variants":
+                if layout in ("variants", "shaped"):
                     # Light by charge or level (respawn anchor): not a family of this file.
                     continue
                 sys.exit(f"{name}: its states' facts differ")
@@ -462,8 +508,17 @@ def rows(resources):
             lit_emission = lit["emission"]
         kind = sound_kind(name, facts["sound"])
         models.translucent = False
-        model = models.variant_model(short, key) if key is not None else f"block/{short}_inventory"
-        faces = models.textures(model)
+        if layout == "shaped":
+            # Its particle texture names the block's sprite on every face.
+            model = models.variant_model(short, key) if key is not None else found[0][2][0][0]
+            model = model if "/" in model else f"block/{model}"
+            variables = {}
+            for m in reversed(models.chain(model)):
+                variables.update(m.get("textures", {}))
+            faces = dict.fromkeys(FACES, models.resolve(variables, "particle"))
+        else:
+            model = models.variant_model(short, key) if key is not None else f"block/{short}_inventory"
+            faces = models.textures(model)
         if models.translucent:
             if layout != "clear":
                 sys.exit(f"{name}: a translucent sprite on an opaque block")
@@ -475,11 +530,11 @@ def rows(resources):
             layout = "pillar"
         if None in faces.values():
             sys.exit(f"{name}: unresolved texture in {faces}")
-        if layout == "variants":
+        if layout in ("variants", "shaped"):
             for kind, k, variant in found:
                 for model, x, y, uvlock in variant:
                     variant_rows.append((kind, short, k or "-", model, str(x), str(y), "1" if uvlock else "0"))
-                    model_rows.setdefault(model, ("model", model, *models.face_specs(f"block/{model}")))
+                    model_rows.setdefault(model, ("model", model, *models.elements(f"block/{model}")))
         lit_north = "-"
         if layout == "facing" and short not in FURNACES:
             lit_north = faces["north"]
@@ -490,7 +545,8 @@ def rows(resources):
             str(facts["emission"]), str(lit_emission), str(facts["dampening"]), number(facts["friction"]),
             f"{facts['map_color']:06x}", kind, tagged.get(name, "-"), str(needs.get(name, 0)),
             "1" if facts["requires_tool"] else "0", layout, *(faces[f] for f in FACES), lit_north,
-            number(facts["speed_factor"]),
+            number(facts["speed_factor"]), facts["push"], *("1" if facts[k] else "0" for k in (
+                "replaceable", "random_ticks", "ignited_by_lava", "block_entity")), strip(facts["item"]),
         ))
     return out, [*sorted(model_rows.values()), *variant_rows]
 

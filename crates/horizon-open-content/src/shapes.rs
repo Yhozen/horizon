@@ -268,7 +268,7 @@ pub fn of(block: &Block, properties: &[(&str, &str)]) -> Option<StateShape> {
     } else if class("SoulSandBlock") || class("MudBlock") {
         Some(crate::cubes::sunken())
     } else {
-        None
+        crate::cubes::shape(block, properties)
     }
 }
 
