@@ -36,6 +36,7 @@ This page is a map, not legal advice. Where it and a licence text disagree, the 
 | [`content/open/licenses/CC-BY-SA-3.0.txt`](../content/open/licenses/CC-BY-SA-3.0.txt) | `CC-BY-SA-3.0` | The licence text, for the media that use it |
 | [`content/open/licenses/CC-BY-SA-4.0.txt`](../content/open/licenses/CC-BY-SA-4.0.txt) | `CC-BY-SA-4.0` | The licence text, for the generated Horizon Open bundle (below) and for media that use it |
 | [`content/open/licenses/CC0-1.0.txt`](../content/open/licenses/CC0-1.0.txt) | `CC0-1.0` | The dedication text, for the media that use it |
+| `content/open/packs/pixel_perfection_legacy/pack.json` | `CC-BY-SA-4.0` | `content/open/packs/pixel_perfection_legacy/` (Pixel Perfection Legacy textures; the manifest records source, author, licence evidence and every file; `pack.txt` is the pack's own credits) |
 | `content/open/notices/minetest_game-*-license.txt`, `*-README.md` | (upstream notices) | Minetest Game's own licence and credit files, kept unchanged for attribution. They give Minetest Game's code (LGPL-2.1 for `default`, MIT for `flowers` and `wool`) and media (CC BY-SA 3.0) licences; only media is taken from it |
 
 The Cargo manifests say `license = "MIT"` (or `license.workspace = true`) for every crate except
@@ -48,16 +49,18 @@ Its licensing has three parts.
 
 ### The inputs: `content/open/`
 
-The media in `content/open/` (today 121 textures from Minetest Game) keep their own licences, file
-by file. [`content/open/sources.json`](../content/open/sources.json) records for each file its
-origin (repository, revision, path), author, licence id, SHA-256 and how it is transformed. The
+The media in `content/open/` (121 textures from Minetest Game under `media/`, and a vendored
+texture pack under `packs/`) keep their own licences, file by file.
+[`content/open/sources.json`](../content/open/sources.json) records for each Minetest Game file its
+origin (repository, revision, path), author, licence id, SHA-256 and how it is transformed; a
+pack's `pack.json` records the same for the pack and the SHA-256 of each of its files. The
 licences in use:
 
 | SPDX | Files today | Text |
 | --- | --- | --- |
 | `CC-BY-SA-3.0` | 119 | `content/open/licenses/CC-BY-SA-3.0.txt` |
 | `CC0-1.0` | 2 (`default_gravel.png`, `default_glass.png`) | `content/open/licenses/CC0-1.0.txt` |
-| `CC-BY-SA-4.0` | none yet (a CC BY-SA 4.0 texture pack is planned) | `content/open/licenses/CC-BY-SA-4.0.txt` |
+| `CC-BY-SA-4.0` | 3,056 textures of Pixel Perfection Legacy under `packs/` (not used by the bundle yet) | `content/open/licenses/CC-BY-SA-4.0.txt` |
 
 Building the bundle fails if a media file is not listed in `sources.json`, if its checksum
 changed, or if its licence text is not vendored (`crates/horizon-open-content/src/sources.rs`).

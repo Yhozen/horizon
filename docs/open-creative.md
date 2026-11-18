@@ -159,6 +159,31 @@ To change the artwork, vendor the file under `content/open/media/`, add its `sou
 (the `sha256` must match) and map it to a destination; textures the inputs lack come from
 `art.rs`.
 
+### Vendored texture packs
+
+A Minecraft-layout resource pack under an open licence is vendored whole, by file name:
+
+```sh
+python3 tools/vendor_open_pack.py --source PACK.zip --name NAME --title TITLE --url URL \
+  --version VERSION --sha256 SHA256 --author AUTHOR --license CC-BY-SA-4.0 \
+  --evidence "where the licence is stated" --notice pack.txt \
+  --vanilla .local/horizon-client/26.3/assets/minecraft/textures
+```
+
+It copies `assets/minecraft/textures/**.png` and their `.mcmeta`, unchanged, into
+`content/open/packs/NAME/` and writes `pack.json` (source, version, author, licence, licence
+evidence, the SHA-256 of every file). It leaves out, and lists under `excluded`, every file that
+looks taken from Minecraft: the same bytes or pixels as any vanilla texture, a quarter or more of
+its visible pixels equal to vanilla's file of that name, a recolour of it, or Mojang's names and
+logos. The vanilla textures are only read for the comparison.
+
+`sources.json`'s `packs` lists each manifest with its SHA-256 and `enabled`. `Sources::load` checks
+every pack file and turns it into a `Media` whose destination is its own path. While a pack is
+disabled it is checked but offered to nothing; once enabled, `Sources::image` and
+`Sources::provides` take its file before a Minetest Game file with the same destination, and the
+credits name the pack, ship its credit file and the CC BY-SA 4.0 text, and state the bundle's
+licence as soon as the bundle uses one of its files.
+
 ## The browser build
 
 ```sh
