@@ -752,7 +752,7 @@ mod tests {
         for b in blocks::defined() {
             assert!(listed.contains(&b.key().as_str()), "{}", b.id);
         }
-        assert!(!listed.contains(&"minecraft:lava"));
+        assert!(listed.contains(&"minecraft:lava"));
         for (name, entry) in coverage["registries"].as_object().unwrap() {
             let one = entry.get("content").is_some() != entry.get("missing").is_some();
             assert!(one, "{name} lists exactly one of content and missing");

@@ -79,26 +79,34 @@ fn state_nbt(state: &State) -> Tag {
     }
 }
 
-fn is_water(state: &State) -> bool {
-    state.block.form == Form::Fluid
+/// Whether a state holds a fluid: a fluid block, or a waterlogged one.
+fn has_fluid(state: &State) -> bool {
+    fluid(state).0 != 0
 }
 
-/// Whether a state is a fluid source the fixed water scenery uses.
+/// The state's fluid as `block-behaviours.json` writes it: the fluid's
+/// registry id (1 flowing water, 2 water, 3 flowing lava, 4 lava), its
+/// amount and whether it falls. Level 0 is the source, 1 to 7 flow with
+/// 8 - level, 8 and up fall; a waterlogged state holds a water source.
 fn fluid(state: &State) -> (u8, u8, bool) {
-    if !is_water(state) {
-        return (0, 0, false);
+    if state.properties.contains(&("waterlogged", "true")) {
+        return (2, 8, false);
     }
+    let (flowing, source) = match state.block.fluid() {
+        Some("lava") => (3, 4),
+        Some(_) => (1, 2),
+        None => return (0, 0, false),
+    };
     let level: u8 = state
         .properties
         .iter()
         .find(|(k, _)| *k == "level")
         .and_then(|(_, v)| v.parse().ok())
         .unwrap_or(0);
-    // Registry ids: 1 flowing_water, 2 water. Level 0 is the source.
     match level {
-        0 => (2, 8, false),
-        8.. => (1, 8, true),
-        n => (1, 8 - n, false),
+        0 => (source, 8, false),
+        8.. => (flowing, 8, true),
+        n => (flowing, 8 - n, false),
     }
 }
 
@@ -163,7 +171,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             json!([
                 s.block.key(),
                 s.block.is_air(),
-                is_water(s),
+                has_fluid(s),
                 description(s),
                 state_json(s)
             ])
@@ -193,9 +201,9 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
                 "hardness": b.hardness,
                 "requires_tool": b.mining.requires_tool,
                 "replaceable": matches!(b.form, Form::Air | Form::Fluid | Form::Inert) || b.id == "short_grass",
-                "random_ticks": false,
+                "random_ticks": b.id == "lava",
                 "block_entity": b.classes.contains(&"BaseEntityBlock"),
-                "liquid": is_water(s),
+                "liquid": b.form == Form::Fluid,
                 "ignited_by_lava": false,
                 "push": if b.id == "obsidian" || b.id == "bedrock" { "IMMOVEABLE" } else if matches!(b.form, Form::Cross | Form::Fluid | Form::Air | Form::Inert) { "POPPED" } else { "PUSH_PULL" },
                 "render_shape": render_shape(b),
@@ -352,7 +360,10 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
     );
     tags.insert(
         "replaceable".into(),
-        names(&|b: &Block| matches!(b.form, Form::Air | Form::Fluid) || b.id == "short_grass"),
+        names(&|b: &Block| {
+            matches!(b.form, Form::Air | Form::Fluid) && b.id != "bubble_column"
+                || b.id == "short_grass"
+        }),
     );
     tags.insert(
         "impermeable".into(),
@@ -375,23 +386,33 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             GENERATOR,
         )?;
     }
-    bundle.json(
-        "data/minecraft/tags/fluid/water.json",
-        &json!({"values": ["minecraft:water", "minecraft:flowing_water"]}),
-        GENERATOR,
-    )?;
-    bundle.json(
-        "data/minecraft/tags/fluid/lava.json",
-        &json!({"values": []}),
-        GENERATOR,
-    )?;
+    // Fluid tags: the two fluids, and the water sources mobs, plants, boats
+    // and bubble columns look for.
+    for (name, values) in [
+        ("water", &["minecraft:water", "minecraft:flowing_water"][..]),
+        ("lava", &["minecraft:lava", "minecraft:flowing_lava"]),
+        ("axolotl_tries_to_find", &["minecraft:water"]),
+        ("bubble_column_can_occupy", &["minecraft:water"]),
+        ("dolphin_tries_to_find", &["minecraft:water"]),
+        ("entity_floatable", &["#minecraft:water"]),
+        ("frog_tries_to_find_land_near", &["minecraft:water"]),
+        ("supports_frogspawn", &["minecraft:water"]),
+        ("supports_lily_pad", &["minecraft:water"]),
+        ("supports_sugar_cane_adjacently", &["#minecraft:water"]),
+    ] {
+        bundle.json(
+            format!("data/minecraft/tags/fluid/{name}.json"),
+            &json!({"values": values}),
+            GENERATOR,
+        )?;
+    }
 
     // render-definitions.json: how faces against neighbours are skipped.
     let render: BTreeMap<String, Value> = blocks
         .iter()
         .map(|b| {
             let rule = match (b.form, b.id) {
-                (Form::Fluid, _) => "liquid",
+                (Form::Fluid, id) if id != "bubble_column" => "liquid",
                 (_, id) if id.ends_with("_leaves") => "leaves",
                 (_, "glass" | "tinted_glass") => "same_block",
                 _ => "never",

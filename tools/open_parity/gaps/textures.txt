@@ -440,7 +440,6 @@ block/lapis_ore.png
 block/large_amethyst_bud.png
 block/large_fern_bottom.png
 block/large_fern_top.png
-block/lava_flow.png
 block/lava_still.png
 block/leaf_litter.png
 block/lectern_base.png

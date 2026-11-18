@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 pub enum Tier {
     /// In the creative palette: placeable, breakable, with an item.
     Palette,
-    /// Terrain the preset generates but players cannot pick (air, water, grass).
+    /// Terrain and fluids players cannot pick (air, water, lava, grass).
     Terrain,
     /// A Minecraft block without content yet, registered so the numbering is
     /// Minecraft's: never generated or offered, every state inert, with no
@@ -709,30 +709,22 @@ fn authored() -> Vec<Block> {
         wool("purple_wool", "Purple Wool", 0x7F3FB2),
     ]);
     blocks.extend([
+        fluid("water", "Water", 0x4040FF, Layer::Translucent),
         Block {
-            id: "water",
-            name: "Water",
-            tier: Tier::Terrain,
-            form: Form::Fluid,
-            layer: Layer::Translucent,
-            faces: Faces::Fluid {
-                still: "water_still",
-                flow: "water_flow",
-            },
-            properties: LEVELS,
-            defaults: &[("level", "0")],
-            hardness: 100.0,
-            resistance: 100.0,
-            light: 0,
-            lit_light: 0,
-            opacity: 1,
-            sound: Sound::None,
-            classes: &["LiquidBlock", "Block"],
-            map_color: 0x4040FF,
-            category: None,
-            mining: HAND,
-            drop: Drop::Nothing,
-            friction: 0.6,
+            light: 15,
+            ..fluid("lava", "Lava", 0xFF0000, Layer::Solid)
+        },
+        // Minecraft's bubble column is water to look at and to swim in (its
+        // fluid is a water source); the server pushes players up or down.
+        Block {
+            id: "bubble_column",
+            name: "Bubble Column",
+            hardness: 0.0,
+            resistance: 0.0,
+            classes: &["BubbleColumnBlock", "Block"],
+            properties: NO_PROPERTIES,
+            defaults: &[],
+            ..fluid("water", "Water", 0x4040FF, Layer::Translucent)
         },
         Block {
             tier: Tier::Terrain,
@@ -978,6 +970,38 @@ fn authored() -> Vec<Block> {
     blocks
 }
 
+/// A fluid block (`LiquidBlock`) named as its fluid, `water` or `lava`: drawn
+/// by the fluid renderer from `<id>_still` and `<id>_flow`, with no collision
+/// or item; level 0 is the source, 1 to 7 flowing, 8 and up falling.
+fn fluid(id: &'static str, name: &'static str, map_color: u32, layer: Layer) -> Block {
+    let (still, flow) = match id {
+        "lava" => ("lava_still", "lava_flow"),
+        _ => ("water_still", "water_flow"),
+    };
+    Block {
+        id,
+        name,
+        tier: Tier::Terrain,
+        form: Form::Fluid,
+        layer,
+        faces: Faces::Fluid { still, flow },
+        properties: LEVELS,
+        defaults: &[("level", "0")],
+        hardness: 100.0,
+        resistance: 100.0,
+        light: 0,
+        lit_light: 0,
+        opacity: 1,
+        sound: Sound::None,
+        classes: &["LiquidBlock", "Block"],
+        map_color,
+        category: None,
+        mining: HAND,
+        drop: Drop::Nothing,
+        friction: 0.6,
+    }
+}
+
 /// The inert stand-in for a Minecraft block without content ([`all`] gives
 /// it Minecraft's properties).
 pub fn support(id: &'static str) -> Block {
@@ -1080,6 +1104,17 @@ impl Block {
             self.lit_light
         } else {
             self.light
+        }
+    }
+    /// The fluid it is made of (`water` or `lava`), if it is a fluid block.
+    pub fn fluid(&self) -> Option<&'static str> {
+        match self.faces {
+            Faces::Fluid {
+                still: "lava_still",
+                ..
+            } => Some("lava"),
+            Faces::Fluid { .. } => Some("water"),
+            _ => None,
         }
     }
     /// Every texture its model and fluid renderer read.

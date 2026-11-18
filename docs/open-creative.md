@@ -118,7 +118,7 @@ The generator is `crates/horizon-open-content`:
 
 | Module | Writes |
 |---|---|
-| `blocks.rs` | the block definitions: the palette, terrain (air, water, short grass) and inert support blocks, with each block's tool, tier and drop |
+| `blocks.rs` | the block definitions: the palette, terrain (air, short grass), the fluids (water, lava, bubble column) and inert support blocks, with each block's tool, tier and drop |
 | `items.rs` | the items that are not blocks (tools, food, materials), their components, the recipes, item tags and loot tables |
 | `tables.rs` | the per-state tables (`facts.json`, `gameplay-facts.json`, `block-behaviours.json`, shapes, movement, tags), the biome, dimension and day cycle, player attributes, damage types, loot |
 | `assets.rs` | textures, block states, models (its own display transforms, `item/generated` and `item/handheld`), items, the creative palette (`creative-inventory.json`) |
@@ -170,6 +170,18 @@ these numbers and faces; the others join the palette with a model in the bundle'
 textures from the pack (a placeholder in the map colour when it has none), and an item; each
 drops itself. Logs lying down turn their top half a turn, as Minecraft's horizontal columns do;
 furnaces turn with `facing` and show their lit front when `lit`.
+
+### Fluids
+
+Water and lava are Minecraft's `LiquidBlock`s: all 16 `level` states (0 the source, 1 to 7
+flowing, 8 and up falling), each with Minecraft's fluid and amount in `block-behaviours.json`,
+no collision, and the fluid tags (`minecraft:water`, `minecraft:lava` and the water tags mobs,
+plants and boats look for), so the shared code swims, sinks, slows and fogs the player as in
+Minecraft. Lava gives light 15 and is drawn from the pack's animated `lava_still` and `lava_flow`.
+The bubble column is water to look at and swim in (its fluid is a water source). A waterlogged
+state holds a water source, as Minecraft's do. On a Java server, through the relay, they all
+show as Minecraft's; in the edition's own worlds water and lava do not flow (see
+[The content profile](#the-content-profile)).
 
 ### Support blocks
 
@@ -366,7 +378,7 @@ translates every packet:
   registry, counts recomputed), block updates, section updates and break effects. A vanilla block
   the bundle has keeps its properties (log axes); any other becomes the nearest open block by name,
   material and colour (`rules.rs`: dark oak → pine, concrete and terracotta → wool of the same
-  colour, deepslate → stone, lava → orange wool, chests → planks). Thin or non-solid decoration
+  colour, deepslate → stone, chests → planks). Thin or non-solid decoration
   (torches, rails, signs, buttons, carpets, beds, redstone, flower pots, vines) is air, or water
   when waterlogged. `horizon-open-relay mapping` lists what becomes air.
 - **Items**: every stack (inventories, containers, the cursor, equipment, dropped items). A
