@@ -63,6 +63,9 @@ pub(super) fn apply(toks: &[Tok]) -> Result<String, String> {
         };
         texts.push(text);
     }
+    if texts.iter().any(|t| t.contains(ZERO)) {
+        texts.insert(0, format!("float {ZERO};\n"));
+    }
     if !prologue.is_empty() {
         let main = kinds
             .iter()
@@ -73,6 +76,14 @@ pub(super) fn apply(toks: &[Tok]) -> Result<String, String> {
         text.insert_str(brace + 1, &prologue);
     }
     Ok(texts.concat())
+}
+
+/// A float zero that naga cannot fold (a private global, zero-initialised).
+const ZERO: &str = "hz_zero";
+
+fn is_float_zero(literal: &str) -> bool {
+    let digits = literal.trim_end_matches(['f', 'F']);
+    digits.contains('.') && digits.chars().all(|c| c == '0' || c == '.')
 }
 
 /// What `discard;` becomes: naga's GLSL front end drops the statements after
@@ -96,7 +107,16 @@ fn function(toks: &[Tok]) -> String {
     let mut parens = 0i32;
     let mut skip_space = false;
     let mut after_discard = false;
+    let mut last = "";
     for t in toks {
+        if t.kind != Kind::Space {
+            let prev = std::mem::replace(&mut last, t.text);
+            // `x / 0.0`: naga folds it to an infinity and refuses it; GL gives the infinity at run time.
+            if prev == "/" && t.kind == Kind::Number && is_float_zero(t.text) {
+                out.push_str(ZERO);
+                continue;
+            }
+        }
         if skip_space && t.kind == Kind::Space {
             skip_space = false;
             continue;
@@ -265,6 +285,17 @@ mod tests {
             assert!(out.contains(&format!(" {op} ")), "{op} in {out}");
         }
         assert!(out.contains("void main() { g = "), "{out}");
+    }
+
+    #[test]
+    fn division_by_literal_zero_is_left_to_run_time() {
+        let src = "void main() { gl_Position = vec4(-1.0 / 0.0, 1.0 / 0., 2.0 / 0.5, 1.0); }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        assert!(out.starts_with("float hz_zero;\n"), "{out}");
+        assert!(
+            out.contains("-1.0 / hz_zero, 1.0 / hz_zero, 2.0 / 0.5"),
+            "{out}"
+        );
     }
 
     #[test]
