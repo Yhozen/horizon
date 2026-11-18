@@ -119,6 +119,7 @@ The generator is `crates/horizon-open-content`:
 | Module | Writes |
 |---|---|
 | `blocks.rs` | the block definitions: the palette, terrain (air, short grass), the fluids (water, lava, bubble column) and inert support blocks, with each block's tool, tier and drop |
+| `plants.rs` | the plants and small decorations, their per-state facts and models ([Plants](#plants-and-small-decorations)) |
 | `items.rs` | the items that are not blocks (tools, food, materials), their components, the recipes, item tags and loot tables |
 | `tables.rs` | the per-state tables (`facts.json`, `gameplay-facts.json`, `block-behaviours.json`, shapes, movement, tags), the biome, dimension and day cycle, player attributes, damage types, loot |
 | `assets.rs` | textures, block states, models (its own display transforms, `item/generated` and `item/handheld`), items, the creative palette (`creative-inventory.json`) |
@@ -219,6 +220,26 @@ shapes (a door swings to its hinge side, buttons and plates never collide, a pre
 half as thick) and their templates and variants. Doors are flat items, trapdoors, buttons and
 plates show their block model. The `doors`, `trapdoors`, `buttons` and `pressure_plates` tags
 list them, and their `wooden_` tags those an axe mines.
+
+### Plants and small decorations
+
+`data/blocks/plants.txt` (written by `python3 tools/open_plant_facts.py` from the prepared
+vanilla tables, block states and model names; `--check` fails if it is out of date) gives content
+to the plants and small decorations: flowers and tall flowers, saplings, grass, ferns and bushes,
+mushrooms, fungi and roots, crops by age, sugar cane, sweet berry bushes, seagrass, kelp, coral,
+coral fans and wall fans (live and dead), sea pickles, the Nether and cave vines, vines, glow
+lichen, sculk veins, hanging roots, cobwebs, amethyst buds, torches, wall torches, redstone
+torches, lanterns and lily pads. Numbers and names only: per state its light, dampening, map
+colour, flags, outline boxes, collision and occlusion shapes (the cached tables' cells, written
+through the shape library's table), random offset, behaviour row and the models, turns and
+weights its variant uses (or, for vines and lichen, the multipart cases); per model the layout
+its geometry follows (`cross`, `crop`, `coral_fan`, `template_torch`...) and its texture names.
+`plants.rs` reads it and draws each layout itself, with Minecraft's planes, UVs and tint
+indices, so a Minecraft-layout pack's textures fit. A block the crate already authors keeps its
+name and tab. Blocks with their own item join the palette (the item flat, with Minecraft's
+texture, tints and default components); the others (wall torches, crops, kelp's stem, tall
+seagrass) name Minecraft's item (`torch`, `wheat_seeds`) and are never offered. Seagrass, kelp
+and waterlogged states hold water, so the water draws around the plant.
 
 ### Support blocks
 

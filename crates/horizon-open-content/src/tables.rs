@@ -178,7 +178,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             json!([
                 s.block.key(),
                 s.block.is_air(),
-                has_fluid(s),
+                has_fluid(s) || crate::plants::holds_fluid(s.block, &s.properties),
                 description(s),
                 state_json(s)
             ])
@@ -226,6 +226,9 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             });
             if let Form::Connected(family) = b.form {
                 connected_facts(&mut row, family, &s.properties);
+            }
+            if let Some(plant) = crate::plants::gameplay(b, &s.properties) {
+                row.as_object_mut().unwrap().extend(plant);
             }
             let outline: Vec<[f64; 6]> =
                 serde_json::from_value(row["outline"].clone()).unwrap_or_default();
@@ -288,6 +291,9 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             };
             if no_collision {
                 flags |= 32;
+            }
+            if let Some(row) = crate::plants::behaviour(b, &s.properties) {
+                return row;
             }
             let (kind, amount, falling) = fluid(s);
             json!([sturdy, flags, kind, amount, falling, 0, 0, false, "HARP"])
@@ -529,6 +535,14 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
                     kind,
                 )));
             }
+            continue;
+        }
+        let plant = |occlusion: bool| {
+            crate::plants::shape(s.block, &s.properties, occlusion).map(crate::plants::voxel)
+        };
+        if let (Some(c), Some(o)) = (plant(false), plant(true)) {
+            collision.push(&c);
+            occlusion.push(&o);
             continue;
         }
         match sh {
