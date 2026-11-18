@@ -4,7 +4,7 @@
 //! ```text
 //! cargo run --example pack_check -p horizon-glsl-pack -- <pack.zip|folder>... --out <dir>
 //!     [--dimension minecraft:overworld|minecraft:the_nether|minecraft:the_end|all]
-//!     [--option NAME=VALUE]...
+//!     [--option NAME=VALUE]... [--jobs N]
 //! ```
 //!
 //! For each pack it writes `<out>/<pack>/<dimension>/<slot>.{vs,fs}.wgsl` for
@@ -62,6 +62,7 @@ fn main() {
     let mut out = None;
     let mut dimensions = vec![DIMENSIONS[0].to_string()];
     let mut options = PackOptions::default();
+    let mut jobs: usize = std::thread::available_parallelism().map_or(1, |n| n.get());
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -73,6 +74,12 @@ fn main() {
                 } else {
                     vec![d]
                 };
+            }
+            "--jobs" => {
+                jobs = args
+                    .next()
+                    .and_then(|j| j.parse().ok())
+                    .unwrap_or_else(|| usage())
             }
             "--option" => {
                 let o = args.next().unwrap_or_else(|| usage());
@@ -89,24 +96,40 @@ fn main() {
     if packs.is_empty() {
         usage();
     }
-    for pack in &packs {
-        let name = pack_name(pack);
-        let started = std::time::Instant::now();
-        let result = match read_files(pack) {
-            Ok(files) => check_pack(&files, &name, &out.join(&name), &dimensions, &options),
-            Err(e) => json!({ "pack": name, "read_error": e }),
-        };
-        let dir = out.join(&name);
-        fs::create_dir_all(&dir).expect("create the output folder");
-        let text = serde_json::to_string_pretty(&result).expect("JSON");
-        fs::write(dir.join("result.json"), text).expect("write result.json");
-        eprintln!("{name}: {:.1}s", started.elapsed().as_secs_f32());
-    }
+    // Packs run in parallel, biggest first so the slow ones do not finish last.
+    packs.sort_by_key(|p| std::cmp::Reverse(fs::metadata(p).map(|m| m.len()).unwrap_or(0)));
+    let queue = std::sync::Mutex::new(packs.into_iter());
+    std::thread::scope(|scope| {
+        for _ in 0..jobs.max(1) {
+            scope.spawn(|| {
+                loop {
+                    let Some(pack) = queue.lock().unwrap().next() else {
+                        break;
+                    };
+                    check_one(&pack, &out, &dimensions, &options);
+                }
+            });
+        }
+    });
+}
+
+fn check_one(pack: &Path, out: &Path, dimensions: &[String], options: &PackOptions) {
+    let name = pack_name(pack);
+    let started = std::time::Instant::now();
+    let result = match read_files(pack) {
+        Ok(files) => check_pack(&files, &name, &out.join(&name), dimensions, options),
+        Err(e) => json!({ "pack": name, "read_error": e }),
+    };
+    let dir = out.join(&name);
+    fs::create_dir_all(&dir).expect("create the output folder");
+    let text = serde_json::to_string_pretty(&result).expect("JSON");
+    fs::write(dir.join("result.json"), text).expect("write result.json");
+    eprintln!("{name}: {:.1}s", started.elapsed().as_secs_f32());
 }
 
 fn usage() -> ! {
     eprintln!(
-        "usage: pack_check <pack.zip|folder>... --out <dir> [--dimension <id>|all] [--option NAME=VALUE]..."
+        "usage: pack_check <pack.zip|folder>... --out <dir> [--dimension <id>|all] [--option NAME=VALUE]... [--jobs N]"
     );
     std::process::exit(2)
 }

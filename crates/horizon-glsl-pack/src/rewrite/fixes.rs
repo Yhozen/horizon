@@ -219,3 +219,22 @@ fn global<'a>(
     text.push(';');
     Ok(text)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::lex::tokenize;
+    use super::apply;
+
+    #[test]
+    fn moved_initializers_keep_their_operators() {
+        let src = "uniform float u; uniform int k;\n\
+                   float g = (u < 0.5 || u >= 2.0) && u != 1.0 ? 1.0 : 0.0;\n\
+                   int h = (k >> 2) << 1; bool e = k == 3 && k <= 4;\n\
+                   void main() { }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        for op in ["||", ">=", "&&", "!=", ">>", "<<", "==", "<="] {
+            assert!(out.contains(&format!(" {op} ")), "{op} in {out}");
+        }
+        assert!(out.contains("void main() { g = "), "{out}");
+    }
+}
