@@ -26,7 +26,8 @@ pub fn glsl_to_wgsl(source: &str, stage: Stage) -> Result<String, String> {
     let info = Validator::new(ValidationFlags::all(), Capabilities::empty())
         .validate(&module)
         .map_err(|e| e.emit_to_string(source))?;
-    let text = wgsl::write_string(&module, &info, wgsl::WriterFlags::empty()).map_err(|e| e.to_string())?;
+    let text = wgsl::write_string(&module, &info, wgsl::WriterFlags::empty())
+        .map_err(|e| e.to_string())?;
     let out = format!("diagnostic(off, derivative_uniformity);\n{text}");
     // The browser compiles this text again: make sure naga's own WGSL front end takes it.
     let reparsed = naga::front::wgsl::parse_str(&out).map_err(|e| e.emit_to_string(&out))?;

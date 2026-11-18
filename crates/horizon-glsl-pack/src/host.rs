@@ -28,7 +28,11 @@ pub fn sampler_binding(name: &str) -> Option<u32> {
 }
 
 /// The vertex and fragment GLSL 450 sources of a program.
-pub fn sources(vertex: &Rewritten, fragment: &Rewritten, spec: &ProgramSpec) -> Result<(String, String), String> {
+pub fn sources(
+    vertex: &Rewritten,
+    fragment: &Rewritten,
+    spec: &ProgramSpec,
+) -> Result<(String, String), String> {
     let _ = (vertex, fragment, spec);
     todo!("S3")
 }

@@ -34,7 +34,9 @@ impl PackFiles {
     /// The file at `path` (pack-relative, `/` separators) as text.
     pub fn text(&self, path: &str) -> Option<String> {
         let path = path.trim_start_matches('/');
-        self.0.get(path).map(|b| String::from_utf8_lossy(b).into_owned())
+        self.0
+            .get(path)
+            .map(|b| String::from_utf8_lossy(b).into_owned())
     }
 
     /// Whether the pack has a file at `path`.
@@ -56,7 +58,10 @@ pub struct PackOptions {
 
 impl Default for PackOptions {
     fn default() -> Self {
-        Self { mc_version: 12111, overrides: Vec::new() }
+        Self {
+            mc_version: 12111,
+            overrides: Vec::new(),
+        }
     }
 }
 
@@ -71,7 +76,11 @@ pub struct HostParams {
 
 impl Default for HostParams {
     fn default() -> Self {
-        Self { sprite_arrays: 1, sprite_split: 2048, sprite_grid: 1 }
+        Self {
+            sprite_arrays: 1,
+            sprite_split: 2048,
+            sprite_grid: 1,
+        }
     }
 }
 
@@ -92,7 +101,12 @@ impl ProgramKind {
     /// The program file names to try, best first (OptiFine's fallbacks).
     pub fn candidates(self) -> &'static [&'static str] {
         match self {
-            Self::Terrain => &["gbuffers_terrain", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic"],
+            Self::Terrain => &[
+                "gbuffers_terrain",
+                "gbuffers_textured_lit",
+                "gbuffers_textured",
+                "gbuffers_basic",
+            ],
             Self::Water => &[
                 "gbuffers_water",
                 "gbuffers_terrain",
@@ -145,7 +159,10 @@ pub struct PackError {
 
 impl PackError {
     pub fn new(file: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { file: file.into(), message: message.into() }
+        Self {
+            file: file.into(),
+            message: message.into(),
+        }
     }
 }
 
@@ -202,9 +219,16 @@ pub fn compile(
     let folder = world_folder(files, dimension);
     let mut programs = BTreeMap::new();
     for &kind in kinds {
-        let program = find_program(files, &folder, kind)
-            .ok_or_else(|| PackError::new(format!("shaders/{folder}"), format!("no program for {kind:?}")))?;
-        programs.insert(kind, compile_program(files, &program, kind, options, host, &blocks, &predefined)?);
+        let program = find_program(files, &folder, kind).ok_or_else(|| {
+            PackError::new(
+                format!("shaders/{folder}"),
+                format!("no program for {kind:?}"),
+            )
+        })?;
+        programs.insert(
+            kind,
+            compile_program(files, &program, kind, options, host, &blocks, &predefined)?,
+        );
     }
     Ok(CompiledPack { programs, blocks })
 }
@@ -240,13 +264,27 @@ fn compile_program(
     let raw_fsh = preprocess::expand_includes(files, &fsh_path)?;
     let draw_buffers = properties::draw_buffers(&raw_fsh).unwrap_or_else(|| vec![0]);
     let vertex = rewrite::rewrite(&vsh, Stage::Vertex).map_err(|m| PackError::new(&vsh_path, m))?;
-    let fragment = rewrite::rewrite(&fsh, Stage::Fragment).map_err(|m| PackError::new(&fsh_path, m))?;
-    let spec = host::ProgramSpec { kind, geometry: kind.geometry(), draw_buffers: &draw_buffers, host, blocks };
-    let (vs_glsl, fs_glsl) = host::sources(&vertex, &fragment, &spec).map_err(|m| PackError::new(program, m))?;
-    let vertex_wgsl =
-        naga_out::glsl_to_wgsl(&vs_glsl, Stage::Vertex).map_err(|m| PackError::new(&vsh_path, m))?;
-    let fragment_wgsl =
-        naga_out::glsl_to_wgsl(&fs_glsl, Stage::Fragment).map_err(|m| PackError::new(&fsh_path, m))?;
+    let fragment =
+        rewrite::rewrite(&fsh, Stage::Fragment).map_err(|m| PackError::new(&fsh_path, m))?;
+    let spec = host::ProgramSpec {
+        kind,
+        geometry: kind.geometry(),
+        draw_buffers: &draw_buffers,
+        host,
+        blocks,
+    };
+    let (vs_glsl, fs_glsl) =
+        host::sources(&vertex, &fragment, &spec).map_err(|m| PackError::new(program, m))?;
+    let vertex_wgsl = naga_out::glsl_to_wgsl(&vs_glsl, Stage::Vertex)
+        .map_err(|m| PackError::new(&vsh_path, m))?;
+    let fragment_wgsl = naga_out::glsl_to_wgsl(&fs_glsl, Stage::Fragment)
+        .map_err(|m| PackError::new(&fsh_path, m))?;
     let samplers = vertex.samplers.union(&fragment.samplers).cloned().collect();
-    Ok(CompiledProgram { source: program.to_string(), vertex_wgsl, fragment_wgsl, draw_buffers, samplers })
+    Ok(CompiledProgram {
+        source: program.to_string(),
+        vertex_wgsl,
+        fragment_wgsl,
+        draw_buffers,
+        samplers,
+    })
 }
