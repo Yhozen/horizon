@@ -1,6 +1,7 @@
 //! More of the open edition's creatures: the villagers, golems, illagers, the
 //! tameable and wild animals, the fish and the Nether's mobs, beside the
-//! hand-built ones in [`crate::mobs`].
+//! hand-built ones in [`crate::mobs`]; and the boats, minecarts, arrows and
+//! armor stands.
 //!
 //! Each is built from `data/mobs/creatures.txt` (written by
 //! `tools/open_mob_layouts.py`): its entity type's facts (hit box, category,
@@ -66,6 +67,9 @@ pub struct Creature {
     eye_height: f64,
     category: String,
     fire_immune: bool,
+    /// A mob (`mob` line), or another entity (`thing`: a boat, minecart, arrow or
+    /// armor stand) that the game draws with its own renderer.
+    pub living: bool,
     attributes: Vec<(String, f64)>,
     models: Vec<Model>,
     textures: Vec<Texture>,
@@ -103,7 +107,8 @@ pub fn creatures() -> Vec<Creature> {
         let f: Vec<&str> = line.split('\t').collect();
         let creature = out.last_mut();
         match f[0] {
-            "mob" => out.push(Creature {
+            "mob" | "thing" => out.push(Creature {
+                living: f[0] == "mob",
                 name: f[1].into(),
                 width: f[2].parse().expect("width"),
                 height: f[3].parse().expect("height"),
@@ -174,9 +179,19 @@ pub fn creatures() -> Vec<Creature> {
     out
 }
 
-/// The entity types' names.
+/// The entity types' names, mobs and the other entities.
 pub fn names() -> Vec<String> {
     creatures().into_iter().map(|c| c.name).collect()
+}
+
+/// The names of the entity types that are not mobs (boats, minecarts, arrows, armor
+/// stands).
+pub fn object_names() -> Vec<String> {
+    creatures()
+        .into_iter()
+        .filter(|c| !c.living)
+        .map(|c| c.name)
+        .collect()
 }
 
 /// A face of a box (as `mobs::Face`): which slot, its corners, its pixel rectangle
@@ -480,17 +495,18 @@ pub fn write(
             .iter()
             .map(|(k, v)| (format!("minecraft:{k}"), json!(v)))
             .collect();
-        types.insert(
-            format!("minecraft:{}", c.name),
-            json!({
-                "width": c.width,
-                "height": c.height,
-                "eye_height": c.eye_height,
-                "category": c.category,
-                "fire_immune": c.fire_immune,
-                "attributes": attributes,
-            }),
-        );
+        let mut facts = json!({
+            "width": c.width,
+            "height": c.height,
+            "eye_height": c.eye_height,
+            "category": c.category,
+            "fire_immune": c.fire_immune,
+        });
+        // As in Minecraft's table, only living entities have attributes.
+        if c.living {
+            facts["attributes"] = Value::Object(attributes);
+        }
+        types.insert(format!("minecraft:{}", c.name), facts);
     }
     Ok((models, types))
 }

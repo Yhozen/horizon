@@ -69,7 +69,9 @@ cod, salmon, tropical fish, pufferfish, dolphins, turtles, llamas and trader lla
 polar bears, pandas, mooshrooms, camels, sniffers, armadillos, allays, frogs, tadpoles, axolotls,
 slimes, magma cubes, piglins, piglin brutes, zombified piglins, hoglins, zoglins, striders, the
 ghast, blaze, wither skeleton, bogged, phantom, silverfish, endermite, both guardians, the giant,
-shulker, breeze, creaking, warden and wither. Their facts are in `data/mobs/creatures.txt`, which
+shulker, breeze, creaking, warden and wither. The same file carries the other entities the
+relay used to hide: every boat, chest boat and raft, the minecarts, arrows and armor stands (`thing`
+lines: no attributes, drawn by the game's own renderers). Their facts are in `data/mobs/creatures.txt`, which
 `tools/open_mob_layouts.py` writes from the prepared vanilla tables (numbers and names only): the
 entity type's hit box, category and default attributes, and every model layer the renderer draws
 (the young's own models too) as Minecraft's parts, poses and boxes, which the tool recovers from

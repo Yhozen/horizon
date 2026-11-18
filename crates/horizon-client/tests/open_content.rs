@@ -210,8 +210,11 @@ fn every_open_mob_loads_with_its_models_and_skins() {
     use horizon_client::mobs::{Mob, MobTypes, render};
     let root = bundle("mobs");
     let types = MobTypes::load(&root).unwrap();
-    let names = horizon_open_content::mobs::names();
-    assert_eq!(names.len(), 83);
+    // The boats, minecarts, arrows and armor stands have renderers of their own.
+    let objects = horizon_open_content::creatures::object_names();
+    let mut names = horizon_open_content::mobs::names();
+    names.retain(|n| !objects.iter().any(|o| o == n));
+    assert_eq!((names.len(), objects.len()), (83, 32));
     for name in names {
         let id = format!("minecraft:{name}");
         let kind = std::sync::Arc::new(
