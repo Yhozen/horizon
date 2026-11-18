@@ -36,6 +36,15 @@ pub struct Cube {
     pub layout: &'static str,
     /// How much it slows walking (soul sand 0.4, else 1).
     pub speed_factor: f32,
+    /// The default state's facts the open tables cannot derive for a
+    /// `shaped` block: piston reaction, replaceable, random ticks, catches
+    /// fire from lava, has a block entity, and its item.
+    pub push: &'static str,
+    pub replaceable: bool,
+    pub random_ticks: bool,
+    pub ignited_by_lava: bool,
+    pub block_entity: bool,
+    pub item: &'static str,
 }
 
 impl Cube {
@@ -131,9 +140,13 @@ struct Variant {
     uvlock: bool,
 }
 
-/// A model of `cube_variants.txt`: its box's corners and its faces (down,
-/// up, north, south, west, east; `-` for a face it lacks).
-type BoxModel = [&'static str; 8];
+/// A model of `cube_variants.txt`: whether it uses ambient occlusion, and its
+/// elements, each `from;to;rotation;shade;down;up;north;south;west;east`
+/// (see `tools/open_block_facts.py`).
+struct BoxModel {
+    ao: bool,
+    elements: Vec<&'static str>,
+}
 
 /// The `variants` blocks' variants, and their models by name.
 type VariantTables = (Vec<Variant>, HashMap<&'static str, BoxModel>);
@@ -146,8 +159,12 @@ fn variant_tables() -> &'static VariantTables {
             let f: Vec<&'static str> = line.split('\t').collect();
             let num = |s: &str| -> u16 { s.parse().expect("cube_variants.txt: a turn") };
             if f[0] == "model" {
-                assert_eq!(f.len(), 10, "cube_variants.txt: {line}");
-                models.insert(f[1], [f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9]]);
+                assert!(f.len() >= 3, "cube_variants.txt: {line}");
+                let model = BoxModel {
+                    ao: f[2] == "1",
+                    elements: f[3..].to_vec(),
+                };
+                models.insert(f[1], model);
                 continue;
             }
             assert_eq!(f.len(), 7, "cube_variants.txt: {line}");
@@ -189,6 +206,12 @@ fn variant_face(spec: &'static str) -> (&'static str, Value) {
     (p[0], face)
 }
 
+/// An element's faces (down, up, north, south, west, east; `-` for one it
+/// lacks).
+fn element_faces(element: &'static str) -> impl Iterator<Item = &'static str> {
+    element.split(';').skip(4).filter(|s| *s != "-")
+}
+
 /// Where a `variants` model is written (`block/cube/<block>/<model>`: its
 /// names are Minecraft's, some of them other blocks' names or shared).
 fn variant_model_path(block: &str, model: &str) -> String {
@@ -196,32 +219,84 @@ fn variant_model_path(block: &str, model: &str) -> String {
 }
 
 fn variant_model(model: &BoxModel) -> Value {
-    let corner = |s: &str| -> Vec<f64> { s.split(',').map(|v| v.parse().unwrap()).collect() };
+    let numbers = |s: &str| -> Vec<f64> { s.split(',').map(|v| v.parse().unwrap()).collect() };
     let dirs = ["down", "up", "north", "south", "west", "east"];
-    let mut textures = serde_json::Map::new();
-    let mut faces = serde_json::Map::new();
-    for (dir, spec) in dirs.iter().zip(&model[2..]) {
-        if *spec == "-" {
-            continue;
+    // One texture variable per texture, in the order the faces name them.
+    let mut names: Vec<&str> = Vec::new();
+    let mut elements = Vec::new();
+    for element in &model.elements {
+        let p: Vec<&'static str> = element.split(';').collect();
+        assert_eq!(p.len(), 10, "cube_variants.txt: element {element}");
+        let mut faces = serde_json::Map::new();
+        for (dir, spec) in dirs.iter().zip(&p[4..]) {
+            if *spec == "-" {
+                continue;
+            }
+            let (texture, mut face) = variant_face(spec);
+            let i = names.iter().position(|n| *n == texture).unwrap_or_else(|| {
+                names.push(texture);
+                names.len() - 1
+            });
+            face["texture"] = json!(format!("#t{i}"));
+            faces.insert((*dir).into(), face);
         }
-        let (texture, mut face) = variant_face(spec);
-        textures.insert((*dir).into(), json!(format!("minecraft:block/{texture}")));
-        face["texture"] = json!(format!("#{dir}"));
-        faces.insert((*dir).into(), face);
+        let mut out = json!({"from": numbers(p[0]), "to": numbers(p[1]), "faces": faces});
+        if p[2] != "-" {
+            let r: Vec<&str> = p[2].split(',').collect();
+            out["rotation"] = json!({
+                "origin": numbers(&r[..3].join(",")),
+                "axis": r[3],
+                "angle": r[4].parse::<f64>().unwrap(),
+                "rescale": r[5] == "1",
+            });
+        }
+        if p[3] == "0" {
+            out["shade"] = json!(false);
+        }
+        elements.push(out);
     }
-    let particle = textures.values().next().cloned().unwrap_or(Value::Null);
+    let mut textures: serde_json::Map<String, Value> = names
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (format!("t{i}"), json!(format!("minecraft:block/{t}"))))
+        .collect();
+    let particle = textures.get("t0").cloned().unwrap_or(Value::Null);
     textures.insert("particle".into(), particle);
-    json!({
+    let mut out = json!({
         "parent": "minecraft:block/open_base",
         "textures": textures,
-        "elements": [{"from": corner(model[0]), "to": corner(model[1]), "faces": faces}],
-    })
+        "elements": elements,
+    });
+    if !model.ao {
+        out["ambientocclusion"] = json!(false);
+    }
+    out
+}
+
+/// A multipart condition: `k=v,k=v`, alternatives joined by ` or `.
+fn condition(key: &str) -> Value {
+    let alternatives: Vec<Value> = key
+        .split(" or ")
+        .map(|a| {
+            let map: serde_json::Map<String, Value> = a
+                .split(',')
+                .filter_map(|c| c.split_once('='))
+                .map(|(k, val)| (k.to_owned(), json!(val)))
+                .collect();
+            Value::Object(map)
+        })
+        .collect();
+    if alternatives.len() == 1 {
+        alternatives.into_iter().next().unwrap()
+    } else {
+        json!({ "OR": alternatives })
+    }
 }
 
 /// A `variants` block's models (its default one again as `block/<id>`, for
 /// its item) and its block-state definition; None for other blocks.
 pub fn variant_models(block: &Block) -> Option<(Vec<(String, Value)>, Option<Value>)> {
-    if layouts().get(block.id) != Some(&"variants") {
+    if !matches!(layouts().get(block.id), Some(&"variants" | &"shaped")) {
         return None;
     }
     let (variants, models) = variant_tables();
@@ -249,13 +324,11 @@ pub fn variant_models(block: &Block) -> Option<(Vec<(String, Value)>, Option<Val
             entry["uvlock"] = json!(true);
         }
         if v.part {
-            let when: serde_json::Map<String, Value> = v
-                .key
-                .split(',')
-                .filter_map(|c| c.split_once('='))
-                .map(|(k, val)| (k.to_owned(), json!(val)))
-                .collect();
-            parts.push(json!({"when": when, "apply": entry}));
+            let mut part = json!({ "apply": entry });
+            if !v.key.is_empty() {
+                part["when"] = condition(v.key);
+            }
+            parts.push(part);
             continue;
         }
         match definition.get_mut(v.key) {
@@ -278,14 +351,16 @@ pub fn variant_models(block: &Block) -> Option<(Vec<(String, Value)>, Option<Val
     let item = match (default, block.faces) {
         (Some(v), _) => variant_model(&models[v.model]),
         (None, Faces::Cube(faces)) => {
-            let specs: Vec<&'static str> = ["down", "up", "north", "south", "west", "east"]
+            let specs: Vec<String> = ["down", "up", "north", "south", "west", "east"]
                 .iter()
                 .zip(faces)
-                .map(|(d, t)| &*Box::leak(format!("{t}/-/0/-1/{d}").into_boxed_str()))
+                .map(|(d, t)| format!("{t}/-/0/-1/{d}"))
                 .collect();
-            let mut model: BoxModel = ["0,0,0", "16,16,16", "", "", "", "", "", ""];
-            model[2..].copy_from_slice(&specs);
-            variant_model(&model)
+            let element = format!("0,0,0;16,16,16;-;1;{}", specs.join(";"));
+            variant_model(&BoxModel {
+                ao: true,
+                elements: vec![Box::leak(element.into_boxed_str())],
+            })
         }
         (None, _) => return None,
     };
@@ -304,7 +379,13 @@ pub fn variant_textures(id: &str) -> Vec<&'static str> {
     let mut out: Vec<&'static str> = variants
         .iter()
         .filter(|v| v.block == id)
-        .flat_map(|v| models[v.model][2..].iter().filter(|s| **s != "-"))
+        .flat_map(|v| {
+            models[v.model]
+                .elements
+                .iter()
+                .copied()
+                .flat_map(element_faces)
+        })
         .map(|spec| variant_face(spec).0)
         .collect();
     out.sort_unstable();
@@ -324,7 +405,7 @@ pub fn cubes() -> Vec<Cube> {
         .filter(|line| !line.is_empty())
         .map(|line| {
             let f: Vec<&'static str> = line.split('\t').collect();
-            assert_eq!(f.len(), 22, "cubes.txt: {line}");
+            assert_eq!(f.len(), 28, "cubes.txt: {line}");
             let num = |i: usize| -> f32 {
                 f[i].parse()
                     .unwrap_or_else(|_| panic!("cubes.txt: {} field {i}", f[0]))
@@ -364,6 +445,12 @@ pub fn cubes() -> Vec<Cube> {
                 faces,
                 layout: f[13],
                 speed_factor: num(21),
+                push: f[22],
+                replaceable: f[23] == "1",
+                random_ticks: f[24] == "1",
+                ignited_by_lava: f[25] == "1",
+                block_entity: f[26] == "1",
+                item: f[27],
             }
         })
         .collect()
@@ -540,6 +627,157 @@ pub fn speed_factor(id: &str) -> f32 {
     speeds.get(id).copied().unwrap_or(1.0)
 }
 
+/// The facts of a `shaped` block's states the open tables cannot derive
+/// (Minecraft's, from `cubes.txt`).
+pub fn patch_facts(row: &mut Value, id: &str) {
+    static SHAPED: OnceLock<HashMap<&'static str, Cube>> = OnceLock::new();
+    let shaped = SHAPED.get_or_init(|| {
+        cubes()
+            .into_iter()
+            .filter(|c| c.layout == "shaped")
+            .map(|c| (c.id, c))
+            .collect()
+    });
+    let Some(cube) = shaped.get(id) else {
+        return;
+    };
+    row["push"] = json!(cube.push);
+    row["replaceable"] = json!(cube.replaceable);
+    row["random_ticks"] = json!(cube.random_ticks);
+    row["ignited_by_lava"] = json!(cube.ignited_by_lava);
+    row["block_entity"] = json!(cube.block_entity);
+    row["item"] = json!(format!("minecraft:{}", cube.item));
+}
+
+/// The shapes of a `shaped` block's state, by its class (Minecraft's
+/// boxes, in sixteenths).
+pub fn shape(block: &Block, properties: &[(&str, &str)]) -> Option<crate::shapes::StateShape> {
+    use crate::shapes::{StateShape, cuboid, empty, union, value};
+    if layouts().get(block.id) != Some(&"shaped") {
+        return None;
+    }
+    let class = |name: &str| block.classes.contains(&name);
+    let waterlogged = value(properties, "waterlogged") == "true";
+    // Not occluding neighbours' faces (`noOcclusion`); the occlusion shape
+    // is still the outline.
+    let open = |collision, outline: crate::shapes::Shape| StateShape {
+        collision,
+        occlusion: outline.clone(),
+        outline,
+        can_occlude: false,
+        shape_occlusion: false,
+        waterlogged,
+    };
+    let flat = |height: f64| cuboid(0.0, 0.0, 0.0, 16.0, height, 16.0);
+    Some(if class("RedstoneWireBlock") {
+        let mut boxes = vec![cuboid(3.0, 0.0, 3.0, 13.0, 1.0, 13.0)];
+        for (side, floor, up) in [
+            (
+                "north",
+                [3.0, 0.0, 0.0, 13.0, 1.0, 13.0],
+                [3.0, 0.0, 0.0, 13.0, 16.0, 1.0],
+            ),
+            (
+                "south",
+                [3.0, 0.0, 3.0, 13.0, 1.0, 16.0],
+                [3.0, 0.0, 15.0, 13.0, 16.0, 16.0],
+            ),
+            (
+                "east",
+                [3.0, 0.0, 3.0, 16.0, 1.0, 13.0],
+                [15.0, 0.0, 3.0, 16.0, 16.0, 13.0],
+            ),
+            (
+                "west",
+                [0.0, 0.0, 3.0, 13.0, 1.0, 13.0],
+                [0.0, 0.0, 3.0, 1.0, 16.0, 13.0],
+            ),
+        ] {
+            let b = |c: [f64; 6]| cuboid(c[0], c[1], c[2], c[3], c[4], c[5]);
+            match value(properties, side) {
+                "side" => boxes.push(b(floor)),
+                "up" => boxes.extend([b(floor), b(up)]),
+                _ => {}
+            }
+        }
+        open(empty(), union(&boxes))
+    } else if class("RodBlock") {
+        let rod = match value(properties, "facing") {
+            "north" | "south" => cuboid(6.0, 6.0, 0.0, 10.0, 10.0, 16.0),
+            "east" | "west" => cuboid(0.0, 6.0, 6.0, 16.0, 10.0, 10.0),
+            _ => cuboid(6.0, 0.0, 6.0, 10.0, 16.0, 10.0),
+        };
+        open(rod.clone(), rod)
+    } else if class("LadderBlock") {
+        let ladder = match value(properties, "facing") {
+            "south" => cuboid(0.0, 0.0, 0.0, 16.0, 16.0, 3.0),
+            "west" => cuboid(13.0, 0.0, 0.0, 16.0, 16.0, 16.0),
+            "east" => cuboid(0.0, 0.0, 0.0, 3.0, 16.0, 16.0),
+            _ => cuboid(0.0, 0.0, 13.0, 16.0, 16.0, 16.0),
+        };
+        open(ladder.clone(), ladder)
+    } else if class("BaseRailBlock") {
+        let ascending = value(properties, "shape").starts_with("ascending");
+        open(empty(), flat(if ascending { 8.0 } else { 2.0 }))
+    } else if class("LeverBlock") {
+        let facing = value(properties, "facing");
+        let along_x = matches!(facing, "east" | "west");
+        let lever = match (value(properties, "face"), facing) {
+            ("floor", _) if along_x => cuboid(4.0, 0.0, 5.0, 12.0, 6.0, 11.0),
+            ("floor", _) => cuboid(5.0, 0.0, 4.0, 11.0, 6.0, 12.0),
+            ("ceiling", _) if along_x => cuboid(4.0, 10.0, 5.0, 12.0, 16.0, 11.0),
+            ("ceiling", _) => cuboid(5.0, 10.0, 4.0, 11.0, 16.0, 12.0),
+            (_, "south") => cuboid(5.0, 4.0, 0.0, 11.0, 12.0, 6.0),
+            (_, "west") => cuboid(10.0, 4.0, 5.0, 16.0, 12.0, 11.0),
+            (_, "east") => cuboid(0.0, 4.0, 5.0, 6.0, 12.0, 11.0),
+            _ => cuboid(5.0, 4.0, 10.0, 11.0, 12.0, 16.0),
+        };
+        open(empty(), lever)
+    } else if class("CakeBlock") {
+        let bites: f64 = value(properties, "bites").parse().unwrap_or(0.0);
+        StateShape::solid(
+            cuboid(1.0 + 2.0 * bites, 0.0, 1.0, 15.0, 8.0, 15.0),
+            false,
+            false,
+        )
+    } else if class("AnvilBlock") {
+        let along_x = matches!(value(properties, "facing"), "east" | "west");
+        let anvil = if along_x {
+            union(&[
+                cuboid(2.0, 0.0, 2.0, 14.0, 4.0, 14.0),
+                cuboid(3.0, 4.0, 4.0, 13.0, 5.0, 12.0),
+                cuboid(4.0, 5.0, 6.0, 12.0, 10.0, 10.0),
+                cuboid(0.0, 10.0, 3.0, 16.0, 16.0, 13.0),
+            ])
+        } else {
+            union(&[
+                cuboid(2.0, 0.0, 2.0, 14.0, 4.0, 14.0),
+                cuboid(4.0, 4.0, 3.0, 12.0, 5.0, 13.0),
+                cuboid(6.0, 5.0, 4.0, 10.0, 10.0, 12.0),
+                cuboid(3.0, 10.0, 0.0, 13.0, 16.0, 16.0),
+            ])
+        };
+        StateShape::solid(anvil, false, false)
+    } else if class("CarpetBlock") {
+        StateShape::solid(flat(1.0), false, waterlogged)
+    } else if class("DiodeBlock") {
+        StateShape::solid(flat(2.0), false, waterlogged)
+    } else if class("SnowLayerBlock") {
+        let layers: f64 = value(properties, "layers").parse().unwrap_or(1.0);
+        StateShape {
+            collision: if layers > 1.0 {
+                flat(2.0 * (layers - 1.0))
+            } else {
+                empty()
+            },
+            ..StateShape::solid(flat(2.0 * layers), true, waterlogged)
+        }
+    } else {
+        // Farmland and dirt paths.
+        StateShape::solid(flat(15.0), true, waterlogged)
+    })
+}
+
 /// The shapes of a `sunken` cube (soul sand, mud): a full outline and
 /// occlusion over a collision box 14 sixteenths tall
 /// (`SoulSandBlock.SHAPE`, `MudBlock.SHAPE`).
@@ -553,6 +791,17 @@ pub fn sunken() -> crate::shapes::StateShape {
 
 fn set_facts(block: &mut Block, cube: &Cube) {
     block.faces = cube.faces;
+    if cube.layout == "shaped" {
+        block.form = Form::Shaped;
+        block.layer = Layer::Cutout;
+        if cube.item != cube.id {
+            // Placed by another item (redstone wire by redstone): no item
+            // of its own.
+            block.tier = Tier::Terrain;
+            block.category = None;
+            block.drop = Drop::Nothing;
+        }
+    }
     if cube.layout == "sunken" {
         block.form = Form::Shaped;
     }
@@ -616,8 +865,10 @@ mod tests {
         let blocks = crate::blocks::defined();
         for cube in cubes() {
             let block = blocks.iter().find(|b| b.id == cube.id).unwrap();
-            assert_eq!(block.tier, Tier::Palette, "{}", cube.id);
-            let form = if cube.layout == "sunken" {
+            if cube.item == cube.id {
+                assert_eq!(block.tier, Tier::Palette, "{}", cube.id);
+            }
+            let form = if matches!(cube.layout, "sunken" | "shaped") {
                 Form::Shaped
             } else if cube.clear() {
                 Form::SeeThroughCube

@@ -36,7 +36,7 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
     // Every palette block bakes faces, each on a sprite the bundle has:
     // six for cubes, at least two for plants (a lily pad's two sides).
     let palette = palette_blocks();
-    assert_eq!(palette.len(), 936);
+    assert_eq!(palette.len(), 977);
     for block in &palette {
         let name = block.id;
         let state = assets

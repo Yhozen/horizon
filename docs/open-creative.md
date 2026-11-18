@@ -190,7 +190,16 @@ redstone lamps, beehives, sculk, sculk catalysts, infested stone and deepslate (
 models), suspicious sand and gravel, the creaking heart, command blocks and the three mushroom
 blocks (six faces, each a part). `data/blocks/cube_variants.txt` lists each block's variants or
 parts (state key or condition, model, x and y turns, uvlock) and each model's box and faces
-(texture, UV, rotation, tint index, cull face); `cubes.rs` writes them in the bundle's format. One line per block, numbers and names only:
+(texture, UV, rotation, tint index, cull face); `cubes.rs` writes them in the bundle's format.
+
+The `shaped` layout covers 42 blocks that are not cubes, drawn by models of any boxes:
+redstone wire, the four rails, end rods and lightning rods, carpets and moss carpet, repeaters,
+comparators, snow layers, farmland, dirt paths, ladders, levers, cakes and anvils. Their models
+are listed as the `variants` blocks' are (any elements, turned ones too, and multipart
+conditions with alternatives). `cubes.rs` gives each state Minecraft's boxes by class
+(`cubes::shape`, through the shape library), and `cubes.txt`'s last columns give the facts the
+tables cannot derive for them: piston reaction, replaceable, random ticks, lava ignition, block
+entity and item. Redstone wire is placed by redstone, so it has no item of its own. One line per block, numbers and names only:
 class chain, destroy time, resistance, light (and lit light), dampening, friction, map colour,
 sound type, mining tool and level, and the texture names of its six faces (the lit front last).
 `cubes.rs` reads it: a block the crate already authors keeps its name, tab and drop and takes
