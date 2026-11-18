@@ -402,7 +402,7 @@ def run(args) -> int:
     (game_dir / "saves").mkdir()
     for jar in (HOME / "mods").glob("*.jar"):
         os.symlink(jar, game_dir / "mods" / jar.name)
-    pack_name = pack.name
+    pack_name = Path(args.pack).absolute().name  # a symlinked folder keeps its link's name
     if pack.is_dir():
         shutil.copytree(pack, game_dir / "shaderpacks" / pack_name)
     else:
