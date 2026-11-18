@@ -8,7 +8,7 @@
 //! the relay"): block states in chunks and block updates, items everywhere a
 //! stack travels, entity types (a creature the bundle lacks shows as its
 //! stand-in, `rules::stand_in`, or is never spawned, its later packets dropped
-//! too), menu types, and the server brand.
+//! too), menu types, attributes, and the server brand.
 use crate::rules;
 use crate::tables::Tables;
 use horizon_protocol::{
@@ -156,7 +156,6 @@ const ENTITY_FIRST_VARINT: &[i32] = &[
     cb::SET_ENTITY_MOTION,
     cb::TAKE_ITEM_ENTITY,
     cb::TELEPORT_ENTITY,
-    cb::UPDATE_ATTRIBUTES,
     cb::PROJECTILE_POWER,
     cb::SWING_ANIMATION,
     cb::SET_PASSENGERS,
@@ -380,6 +379,23 @@ impl<'t> Clientbound<'t> {
                         *item = self.stack(item.take());
                     }
                     Some(C::SetEquipment(p).encode())
+                }
+                _ => None,
+            },
+            // Attributes by the bundle's own numbers (`attributes.json`); the
+            // ones it lacks are dropped, so none is read as another (a vanilla
+            // oxygen bonus as the open scale shrank players).
+            cb::UPDATE_ATTRIBUTES => match typed()? {
+                C::UpdateAttributes(mut p) if !self.hidden.contains(&p.id) => {
+                    p.values = p
+                        .values
+                        .into_iter()
+                        .filter_map(|mut a| {
+                            a.attribute = self.t.attribute(a.attribute)?;
+                            Some(a)
+                        })
+                        .collect();
+                    Some(C::UpdateAttributes(p).encode())
                 }
                 _ => None,
             },

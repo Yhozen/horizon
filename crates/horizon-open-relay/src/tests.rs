@@ -387,3 +387,49 @@ fn creatures_the_bundle_lacks_show_as_a_stand_in_with_only_shared_data() {
     w.bytes(&[0; 7]);
     assert!(c.translate(cb::MOVE_ENTITY_POS, &w.data).is_some());
 }
+
+#[test]
+fn attributes_take_the_bundle_numbers() {
+    let t = tables();
+    let mut c = playing(&t);
+    let snapshot = |attribute, base| play::AttributeSnapshot {
+        attribute,
+        base,
+        modifiers: vec![],
+    };
+    // Vanilla armor (0), below_name_distance (1), oxygen_bonus (2), scale (3).
+    let play::Clientbound::UpdateAttributes(p) = decode(send(
+        &mut c,
+        play::Clientbound::UpdateAttributes(play::UpdateAttributes {
+            id: 1,
+            values: vec![
+                snapshot(0, 4.0),
+                snapshot(1, 64.0),
+                snapshot(2, 1.0),
+                snapshot(3, 1.0),
+            ],
+        }),
+    )) else {
+        panic!()
+    };
+    assert_eq!(
+        p.values
+            .iter()
+            .map(|a| (a.attribute, a.base))
+            .collect::<Vec<_>>(),
+        vec![(2, 4.0), (1, 1.0), (0, 1.0)],
+        "open armor 2, oxygen_bonus 1, scale 0; below_name_distance dropped"
+    );
+    // A hidden entity's attributes stay dropped.
+    assert!(send(&mut c, add_entity(5, 0, 0)).is_none());
+    assert!(
+        send(
+            &mut c,
+            play::Clientbound::UpdateAttributes(play::UpdateAttributes {
+                id: 5,
+                values: vec![snapshot(0, 2.0)],
+            }),
+        )
+        .is_none()
+    );
+}

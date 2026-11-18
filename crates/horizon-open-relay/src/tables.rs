@@ -5,7 +5,8 @@
 //!   `registries.json`; `java -DbundlerMainClass=net.minecraft.data.Main -jar
 //!   server.jar --reports`, see `vanilla.rs`), from the operator's own server jar;
 //! - the open bundle the players run (`registries.json`, `facts.json`,
-//!   `horizon-open-provenance.json`), so the relay's numbers are the players'.
+//!   `horizon-open-provenance.json`, `attributes.json`), so the relay's
+//!   numbers are the players'.
 use crate::rules;
 use horizon_protocol::registry::{Builtin, Ids};
 use horizon_world::{chunk::BlockState, registry::BlockRegistry};
@@ -57,6 +58,9 @@ pub fn vanilla_states(report: &serde_json::Value) -> Result<Vec<BlockState>> {
 /// The open bundle as the relay needs it.
 pub struct Open {
     pub registries: Builtin,
+    /// Attribute names by open wire id: the bundle's `attributes.json` order
+    /// (`attributes::Catalog::from_json`), not a `registries.json` entry.
+    pub attributes: Ids,
     pub states: BlockRegistry,
     /// Per open state: (air, fluid), as `facts.json` flags them.
     pub flags: Vec<(bool, bool)>,
@@ -86,6 +90,7 @@ impl Open {
         let (states, flags) =
             BlockRegistry::from_facts_json_with_flags(read("facts.json")?.as_slice())
                 .map_err(|e| format!("facts.json: {e}"))?;
+        let attributes = attribute_names(&read("attributes.json")?)?;
         let mut visible: std::collections::HashSet<String> = ["minecraft:air", "minecraft:water"]
             .into_iter()
             .map(String::from)
@@ -105,12 +110,31 @@ impl Open {
         }
         Ok(Self {
             registries,
+            attributes,
             states,
             flags,
             visible,
             brand: brand(&read("horizon-open-provenance.json")?),
         })
     }
+}
+
+/// The attribute names of a bundle's `attributes.json`, in wire-id order.
+pub fn attribute_names(json: &[u8]) -> Result<Ids> {
+    let v: serde_json::Value =
+        serde_json::from_slice(json).map_err(|e| format!("attributes.json: {e}"))?;
+    let list = v["attributes"]
+        .as_array()
+        .ok_or("attributes.json has no attributes list")?;
+    list.iter()
+        .map(|a| {
+            a["id"]
+                .as_str()
+                .map(String::from)
+                .ok_or_else(|| "attributes.json: an attribute without an id".to_string())
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(Ids::from_names)
 }
 
 /// `horizon-open/` and the first six bytes of the provenance record's SHA-256
@@ -156,6 +180,8 @@ pub struct Tables {
     /// types the bundle doesn't have.
     pub stand_ins: Vec<Option<i32>>,
     pub menus: Vec<Option<i32>>,
+    /// Vanilla attribute → open attribute; `None` where the bundle has none.
+    pub attributes: Vec<Option<i32>>,
     /// Vanilla data component id → open id, for the components the bundle names.
     pub components: Vec<Option<i32>>,
     pub components_back: Vec<Option<i32>>,
@@ -321,6 +347,7 @@ impl Tables {
                 &get(vanilla, "minecraft:menu")?,
                 &get(&open.registries, "minecraft:menu")?,
             ),
+            attributes: by_name(&get(vanilla, "minecraft:attribute")?, &open.attributes),
             // Components keep their number on both sides or are dropped: the
             // shared item codec reads each by its vanilla number.
             components: by_name(&vanilla_components, &components_open)
@@ -388,6 +415,11 @@ impl Tables {
         usize::try_from(vanilla)
             .ok()
             .and_then(|i| self.menus.get(i).copied().flatten())
+    }
+    pub fn attribute(&self, vanilla: i32) -> Option<i32> {
+        usize::try_from(vanilla)
+            .ok()
+            .and_then(|i| self.attributes.get(i).copied().flatten())
     }
     pub fn component(&self, vanilla: i32) -> Option<i32> {
         usize::try_from(vanilla)
@@ -473,6 +505,10 @@ pub(crate) mod fixture {
             "minecraft:data_component_type".into(),
             registry(&["custom_data", "max_stack_size", "item_model", "food"]),
         );
+        vanilla.registries.insert(
+            "minecraft:attribute".into(),
+            registry(&["armor", "below_name_distance", "oxygen_bonus", "scale"]),
+        );
         let mut open_registries = Builtin::default();
         open_registries.registries.insert(
             "minecraft:item".into(),
@@ -539,8 +575,19 @@ pub(crate) mod fixture {
         .iter()
         .map(|n| format!("minecraft:{n}"))
         .collect();
+        let attributes = attribute_names(
+            serde_json::json!({"attributes": [
+                {"id": "minecraft:scale"},
+                {"id": "minecraft:oxygen_bonus"},
+                {"id": "minecraft:armor"},
+            ]})
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
         let open = Open {
             registries: open_registries,
+            attributes,
             states,
             flags,
             visible,
@@ -617,6 +664,11 @@ mod tests {
         assert_eq!(t.component(1), Some(1));
         assert_eq!(t.component(3), None);
         assert_eq!(t.component_back(1), Some(1));
+        assert_eq!(
+            (0..5).map(|i| t.attribute(i)).collect::<Vec<_>>(),
+            vec![Some(2), None, Some(1), Some(0), None],
+            "armor, below_name_distance (not in the bundle), oxygen_bonus, scale"
+        );
         assert!(!t.commands_compatible, "the fixture has no argument types");
     }
 }
