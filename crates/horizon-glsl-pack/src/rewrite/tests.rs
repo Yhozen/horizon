@@ -694,3 +694,10 @@ fn functions_returning_arrays() {
     );
     naga(&rw, Stage::Fragment);
 }
+
+#[test]
+fn vertex_id_is_an_int() {
+    let src = "int f(int i) { return i % 2; }\nvoid main() { gl_Position = vec4(float(f(gl_VertexID)), 0.0, 0.0, 1.0); }\n";
+    let rw = rewrite(src, Stage::Vertex).unwrap();
+    assert!(rw.body.contains("f(int(gl_VertexIndex))"), "{}", rw.body);
+}

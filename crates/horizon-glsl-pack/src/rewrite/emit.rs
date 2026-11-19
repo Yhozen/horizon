@@ -112,10 +112,11 @@ impl Ctx<'_> {
                 out.push_str("hz_");
                 out.push_str(name);
             } else if name == "gl_VertexID" || name == "gl_InstanceID" {
+                // GLSL's are `int`; naga's Vulkan-style built-ins are `uint`.
                 out.push_str(if name == "gl_VertexID" {
-                    "gl_VertexIndex"
+                    "int(gl_VertexIndex)"
                 } else {
-                    "gl_InstanceIndex"
+                    "int(gl_InstanceIndex)"
                 });
             } else if name.starts_with("gl_") && !listed(KEPT, name) {
                 return Err(format!("unsupported built-in `{name}`"));
