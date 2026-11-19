@@ -43,6 +43,13 @@ pub fn glsl_to_wgsl(source: &str, stage: Stage) -> Result<String, String> {
         .map_err(|e| e.emit_to_string(source))?;
     let text = wgsl::write_string(&module, &info, wgsl::WriterFlags::empty())
         .map_err(|e| e.to_string())?;
+    // naga writes `f32::MAX` as its shortest round trip, 340282350…0f, which
+    // is above the largest f32 as written: Chrome's compiler refuses it
+    // ("value cannot be represented as 'f32'"). The exact value is the same float.
+    let text = text.replace(
+        "340282350000000000000000000000000000000f",
+        "340282346638528859811704183484516925440f",
+    );
     let out = format!("diagnostic(off, derivative_uniformity);\n{text}");
     // The browser compiles this text again: make sure naga's own WGSL front end takes it.
     let reparsed = naga::front::wgsl::parse_str(&out).map_err(|e| e.emit_to_string(&out))?;
@@ -617,7 +624,11 @@ fn modulo_splats(module: &naga::Module, source: &str) -> Vec<(std::ops::Range<us
 /// Parses `source`; a call naga finds ambiguous (`max(x, 1)` with a float
 /// or uint `x`: GLSL converts the `1`, naga's overload resolution does not
 /// choose) gets its integer literals written as `uint`s, which convert to
-/// either, and the source is parsed again. Returns the patched source when it changed.
+/// either, and the source is parsed again. `dot` on two scalars (GLSL's
+/// `a * b`, which naga refuses) is written as the product, and a swizzle
+/// store into a matrix column (`m[0].xyz = v`, which naga cannot look up) as
+/// stores of its components. Returns the
+/// patched source when it changed.
 fn parse_floating_ambiguous(
     source: &str,
     stage: naga::ShaderStage,
@@ -635,8 +646,34 @@ fn parse_floating_ambiguous(
             .filter(|e| e.kind.to_string().starts_with("Ambiguous best function"))
             .filter_map(|e| e.meta.to_range())
             .collect();
-        let patched = float_literals(current, &ambiguous);
-        if ambiguous.is_empty() || patched == current {
+        let dots: Vec<_> = errors
+            .errors
+            .iter()
+            .filter(|e| {
+                e.kind
+                    .to_string()
+                    .contains("BuiltinArgumentsInvalid(\"Dot\")")
+            })
+            .filter_map(|e| e.meta.to_range())
+            .collect();
+        let fields: Vec<_> = errors
+            .errors
+            .iter()
+            .filter(|e| {
+                e.kind
+                    .to_string()
+                    .starts_with("Can't lookup field on this type")
+            })
+            .filter_map(|e| e.meta.to_range())
+            .collect();
+        let patched = if !dots.is_empty() {
+            scalar_dots(current, dots)
+        } else if !fields.is_empty() {
+            column_swizzle_stores(current, fields)
+        } else {
+            float_literals(current, &ambiguous)
+        };
+        if patched == current {
             return Err(errors.emit_to_string(current));
         }
         text = Some(patched);
@@ -695,6 +732,141 @@ fn float_literals(source: &str, ranges: &[std::ops::Range<usize>]) -> String {
     out
 }
 
+/// `source` with each swizzle store whose field is at `ranges`
+/// (`m[0].xyz = v;`) written as one store per component:
+/// `{ vec3 hz_sw = vec3(v); m[0][0] = hz_sw.x; … }`. Fields that are not
+/// the target of a whole-statement store are left alone.
+fn column_swizzle_stores(source: &str, mut ranges: Vec<std::ops::Range<usize>>) -> String {
+    ranges.sort_by_key(|r| std::cmp::Reverse(r.start));
+    ranges.dedup();
+    let mut out = source.to_string();
+    for r in ranges {
+        if let Some((range, text)) = column_swizzle_store(&out, r) {
+            out.replace_range(range, &text);
+        }
+    }
+    out
+}
+
+fn column_swizzle_store(
+    s: &str,
+    field: std::ops::Range<usize>,
+) -> Option<(std::ops::Range<usize>, String)> {
+    let b = s.as_bytes();
+    // naga's span starts at the `.`.
+    let text = s.get(field.clone())?;
+    let field = field.start + (text.len() - text.trim_start_matches(['.', ' ']).len())..field.end;
+    let name = s.get(field.clone())?.trim_end();
+    let field = field.start..field.start + name.len();
+    let set = ["xyzw", "rgba", "stpq"]
+        .into_iter()
+        .find(|set| name.chars().all(|c| set.contains(c)))?;
+    if !(2..=4).contains(&name.len()) {
+        return None;
+    }
+    // Back over the `.` and the postfix chain before it: `cols[i].m[1]`.
+    let mut i = s[..field.start].trim_end().len();
+    if i == 0 || b[i - 1] != b'.' {
+        return None;
+    }
+    i = s[..i - 1].trim_end().len();
+    let dot_end = i;
+    loop {
+        if i > 0 && b[i - 1] == b']' {
+            let mut depth = 0;
+            loop {
+                i = i.checked_sub(1)?;
+                match b[i] {
+                    b']' => depth += 1,
+                    b'[' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        } else if i > 0
+            && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_' || b[i - 1] == b'.')
+        {
+            i -= 1;
+        } else {
+            break;
+        }
+    }
+    let start = i;
+    let column = s[start..dot_end].trim();
+    if column.is_empty() || !column.ends_with(']') {
+        return None;
+    }
+    // The statement must begin here.
+    let before = s[..start].trim_end();
+    if !(before.is_empty() || before.ends_with([';', '{', '}', ')']) || before.ends_with("else")) {
+        return None;
+    }
+    let rest = &s[field.end..];
+    let after = rest.trim_start();
+    let op = ["+=", "-=", "*=", "/=", "="]
+        .into_iter()
+        .find(|op| after.starts_with(op) && !after[op.len()..].starts_with('='))?;
+    let rhs_start = field.end + (rest.len() - after.len()) + op.len();
+    let mut depth = 0i32;
+    let semi = s[rhs_start..].char_indices().find(|&(_, c)| {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            _ => {}
+        }
+        c == ';' && depth == 0
+    })?;
+    let rhs = s[rhs_start..rhs_start + semi.0].trim();
+    let ty = format!("vec{}", name.len());
+    let mut text = format!("{{ {ty} hz_sw = {ty}({rhs});");
+    for (k, c) in name.chars().enumerate() {
+        let index = set.find(c)?;
+        let lane = ['x', 'y', 'z', 'w'][k];
+        text.push_str(&format!(" {column}[{index}] {op} hz_sw.{lane};"));
+    }
+    text.push_str(" }");
+    Some((start..rhs_start + semi.0 + 1, text))
+}
+
+/// `source` with each `dot(a, b)` call at `ranges` written `((a) * (b))`.
+fn scalar_dots(source: &str, mut ranges: Vec<std::ops::Range<usize>>) -> String {
+    ranges.sort_by_key(|r| std::cmp::Reverse(r.start));
+    ranges.dedup();
+    let mut out = source.to_string();
+    for r in ranges {
+        let Some(call) = out.get(r.clone()) else {
+            continue;
+        };
+        let Some(inner) = call
+            .strip_prefix("dot")
+            .map(str::trim_start)
+            .and_then(|c| c.strip_prefix('('))
+            .and_then(|c| c.strip_suffix(')'))
+        else {
+            continue;
+        };
+        let mut depth = 0i32;
+        let comma = inner.char_indices().find(|&(_, c)| {
+            match c {
+                '(' | '[' => depth += 1,
+                ')' | ']' => depth -= 1,
+                _ => {}
+            }
+            c == ',' && depth == 0
+        });
+        let Some((k, _)) = comma else {
+            continue;
+        };
+        let product = format!("(({}) * ({}))", inner[..k].trim(), inner[k + 1..].trim());
+        out.replace_range(r, &product);
+    }
+    out
+}
+
 /// The byte offset of the last `%` outside parentheses and brackets (the
 /// top operator of a left-associative `a % b % c`), not `%=`.
 fn top_level_percent(text: &str) -> Option<usize> {
@@ -731,6 +903,39 @@ fn wrap_ranges(source: &str, mut patches: Vec<(std::ops::Range<usize>, String)>)
 #[cfg(test)]
 mod modulo_tests {
     use super::*;
+
+    #[test]
+    fn swizzle_stores_into_matrix_columns() {
+        let src = "#version 450\nlayout(location = 0) out vec4 o;\nvoid main() { mat4 m = mat4(1.0); vec4 a[2]; a[1] = vec4(0.0); a[1].xy = vec2(2.0); if (o.x > 0.0) m[0].xyz = vec3(o.x, 2.0, 3.0); m[3].wx += 1.0; o = m[0] + m[3] + a[1]; }\n";
+        let wgsl = glsl_to_wgsl(src, Stage::Fragment).unwrap();
+        assert!(wgsl.contains("hz_sw"), "{wgsl}");
+        let patched = column_swizzle_stores("m[3].wx += 1.0;", std::iter::once(4..7).collect());
+        assert_eq!(
+            patched,
+            "{ vec2 hz_sw = vec2(1.0); m[3][3] += hz_sw.x; m[3][0] += hz_sw.y; }"
+        );
+    }
+
+    #[test]
+    fn largest_float_is_written_exactly() {
+        let src = "#version 450\nlayout(location = 0) out vec4 o;\nvoid main() { float m = 3.4028235e38; o = vec4(min(gl_FragCoord.x * m, m)); }\n";
+        let wgsl = glsl_to_wgsl(src, Stage::Fragment).unwrap();
+        assert!(
+            wgsl.contains("340282346638528859811704183484516925440f"),
+            "{wgsl}"
+        );
+        assert_eq!(
+            "340282346638528859811704183484516925440".parse::<f32>(),
+            Ok(f32::MAX)
+        );
+    }
+
+    #[test]
+    fn scalar_dot_is_a_product() {
+        let src = "#version 450\nlayout(location = 0) out vec4 o;\nfloat h(float x) { x = fract(x); x += dot(x, x + 19.19); return x + dot(vec2(x), vec2(1.0)); }\nvoid main() { o = vec4(h(gl_FragCoord.x)); }\n";
+        let wgsl = glsl_to_wgsl(src, Stage::Fragment).unwrap();
+        assert!(wgsl.contains("dot("), "{wgsl}");
+    }
 
     #[test]
     fn ambiguous_calls_take_float_literals() {
