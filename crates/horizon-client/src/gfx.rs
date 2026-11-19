@@ -3293,12 +3293,15 @@ impl Renderer {
     }
     /// Draws the overworld with a compiled shader pack's programs from now on
     /// (`None`: Horizon's own). Errors leave the renderer without a pack.
+    /// `resources` reads a namespaced resource-pack file (`minecraft:textures/x.png`)
+    /// from the game's own assets, for the pack's resource textures.
     pub fn set_shader_pack(
         &mut self,
         pack: Option<(
             &horizon_glsl_pack::CompiledPack,
             &horizon_glsl_pack::PackFiles,
         )>,
+        resources: &dyn Fn(&str) -> Option<Vec<u8>>,
     ) -> std::result::Result<(), String> {
         self.glsl_pack = None;
         let Some((pack, files)) = pack else {
@@ -3315,6 +3318,7 @@ impl Renderer {
             self.config.format.remove_srgb_suffix(),
             pack,
             files,
+            resources,
         )?;
         // Natively the verdict comes at once; the browser's arrives a few
         // frames later through `shader_pack_error`.

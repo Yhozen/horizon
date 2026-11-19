@@ -701,3 +701,17 @@ fn vertex_id_is_an_int() {
     let rw = rewrite(src, Stage::Vertex).unwrap();
     assert!(rw.body.contains("f(int(gl_VertexIndex))"), "{}", rw.body);
 }
+
+#[test]
+fn a_sampler_declared_below_its_first_use() {
+    let src = "vec3 sky(sampler2D s) { return texture2D(s, vec2(0.5)).rgb; }\n\
+               vec3 g() { return sky(colortex4); }\n\
+               uniform sampler2D colortex4;\n\
+               void main() { gl_FragData[0] = vec4(g(), 1.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(
+        rw.sample_calls.contains("hz_sample_colortex4"),
+        "{}",
+        rw.body
+    );
+}

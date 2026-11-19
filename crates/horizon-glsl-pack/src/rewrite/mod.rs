@@ -215,6 +215,14 @@ pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
         prelude: polyfills,
     };
     let mut body = String::new();
+    // Samplers first: a function cloned per sampler (mono.rs) may sit above
+    // the sampler's own declaration.
+    for (start, end) in top_level_items(&cx.toks)? {
+        let sig: Vec<usize> = (start..end)
+            .filter(|&i| cx.toks[i].kind != Kind::Space)
+            .collect();
+        cx.sampler_declaration(&sig);
+    }
     for (start, end) in top_level_items(&cx.toks)? {
         let sig: Vec<usize> = (start..end)
             .filter(|&i| cx.toks[i].kind != Kind::Space)
