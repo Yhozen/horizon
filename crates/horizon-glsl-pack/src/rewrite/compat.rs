@@ -9,6 +9,9 @@
 //!   `normalMatrix` local stays.
 //! - `gl_TexCoord[i]` (literal `i`) becomes a varying `hz_TexCoord<i>` per
 //!   index the stage uses.
+//! - Initializer lists (`float k[2][2] = {{a, b}, {c, d}};`, GLSL 4.2)
+//!   become constructors (`float[2][2](float[2](a, b), float[2](c, d))`),
+//!   which naga parses.
 
 use std::collections::BTreeSet;
 
@@ -35,6 +38,145 @@ const CORE: [(&str, &str, &str, bool); 9] = [
 
 /// The stage with the renames of the module doc; None when there are none.
 pub(super) fn apply(source: &str, stage: Stage) -> Option<String> {
+    let listed = init_lists(source);
+    let renamed = renames(listed.as_deref().unwrap_or(source), stage);
+    renamed.or(listed)
+}
+
+/// Initializer lists as constructors (see the module doc).
+fn init_lists(source: &str) -> Option<String> {
+    let toks = tokenize(source);
+    let sig: Vec<usize> = (0..toks.len())
+        .filter(|&i| toks[i].kind != Kind::Space)
+        .collect();
+    let t = |j: usize| sig.get(j).map_or("", |&i| toks[i].text);
+    // (token index of the `{`, of its matching `}`, the constructor text)
+    let mut lists: Vec<(usize, usize, String)> = Vec::new();
+    let mut j = 0;
+    while j + 1 < sig.len() {
+        if !(t(j) == "=" && t(j + 1) == "{") {
+            j += 1;
+            continue;
+        }
+        // The declaration: `… TYPE NAME [dims] =` back to the statement start.
+        let start = (0..j)
+            .rev()
+            .find(|&h| matches!(t(h), ";" | "{" | "}"))
+            .map_or(0, |h| h + 1);
+        let decl: Vec<&str> = (start..j).map(t).collect();
+        let Some(name_at) = decl
+            .iter()
+            .position(|w| *w == "[")
+            .map(|p| p.saturating_sub(1))
+            .or(decl.len().checked_sub(1))
+        else {
+            j += 1;
+            continue;
+        };
+        if name_at == 0 {
+            j += 1;
+            continue;
+        }
+        let ty = decl[name_at - 1];
+        let mut dims: Vec<String> = Vec::new();
+        let mut k = name_at + 1;
+        while k < decl.len() && decl[k] == "[" {
+            let close = (k..decl.len())
+                .find(|&c| decl[c] == "]")
+                .unwrap_or(decl.len());
+            dims.push(decl[k + 1..close].join(" "));
+            k = close + 1;
+        }
+        // The list's tokens up to its matching `}`.
+        let mut depth = 0;
+        let mut end = j + 1;
+        for m in j + 1..sig.len() {
+            match t(m) {
+                "{" => depth += 1,
+                "}" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = m;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let words: Vec<&str> = (j + 1..=end).map(t).collect();
+        let (text, _) = constructor(&words, 0, ty, &dims);
+        lists.push((sig[j + 1], sig[end], text));
+        j = end + 1;
+    }
+    if lists.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    let mut i = 0;
+    while i < toks.len() {
+        if let Some((_, end, text)) = lists.iter().find(|(open, _, _)| *open == i) {
+            out.push_str(text);
+            i = end + 1;
+            continue;
+        }
+        out.push_str(toks[i].text);
+        i += 1;
+    }
+    Some(out)
+}
+
+/// The constructor for the brace list starting at `words[at]` (a `{`) at
+/// array level `level`; returns it and the index after its `}`.
+fn constructor(words: &[&str], at: usize, ty: &str, dims: &[String]) -> (String, usize) {
+    let mut items: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut i = at + 1;
+    let mut parens = 0;
+    while i < words.len() {
+        match words[i] {
+            "{" if parens == 0 => {
+                let (inner, next) = constructor(words, i, ty, dims.get(1..).unwrap_or(&[]));
+                current.push_str(&inner);
+                i = next;
+                continue;
+            }
+            "}" if parens == 0 => {
+                i += 1;
+                break;
+            }
+            "," if parens == 0 => items.push(std::mem::take(&mut current)),
+            w => {
+                match w {
+                    "(" | "[" => parens += 1,
+                    ")" | "]" => parens -= 1,
+                    _ => {}
+                }
+                if !current.is_empty() {
+                    current.push(' ');
+                }
+                current.push_str(w);
+            }
+        }
+        i += 1;
+    }
+    if !current.trim().is_empty() {
+        items.push(current);
+    }
+    let shape: String = dims
+        .iter()
+        .enumerate()
+        .map(|(k, d)| {
+            if k == 0 && d.is_empty() {
+                format!("[{}]", items.len())
+            } else {
+                format!("[{d}]")
+            }
+        })
+        .collect();
+    (format!("{ty}{shape}({})", items.join(", ")), i)
+}
+
+fn renames(source: &str, stage: Stage) -> Option<String> {
     let toks = tokenize(source);
     let sig: Vec<usize> = (0..toks.len())
         .filter(|&i| toks[i].kind != Kind::Space)
@@ -140,6 +282,20 @@ pub(super) fn apply(source: &str, stage: Stage) -> Option<String> {
 mod tests {
     use super::apply;
     use crate::Stage;
+
+    #[test]
+    fn initializer_lists_become_constructors() {
+        let src = "const float k[2][2] = {\n {1.0 / 4.0, 1.0 / 8.0},\n {1.0, f(2.0, 3.0)}\n};\n\
+                   vec3 v = {1.0, 2.0, 3.0}; int w[] = {1, 2, 3};\nfloat g() { return k[0][1]; }\n";
+        let out = apply(src, Stage::Fragment).unwrap();
+        assert!(
+            out.contains("const float k[2][2] = float[2][2](float[2](1.0 / 4.0, 1.0 / 8.0), float[2](1.0, f ( 2.0 , 3.0 )));"),
+            "{out}"
+        );
+        assert!(out.contains("vec3 v = vec3(1.0, 2.0, 3.0);"), "{out}");
+        assert!(out.contains("int w[] = int[3](1, 2, 3);"), "{out}");
+        assert!(out.contains("float g()"), "{out}");
+    }
 
     #[test]
     fn core_profile_inputs_become_built_ins() {
