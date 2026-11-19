@@ -89,6 +89,24 @@ pub(super) fn apply(toks: &[Tok]) -> Result<String, String> {
     Ok(texts.concat())
 }
 
+/// Whether the declaration in `toks` (up to its `;`) is initialised from
+/// numbers and operators only (`const int n = 6;`, `const float k = 1.0 / 3.0;`).
+fn literal_initializer(toks: &[Tok]) -> bool {
+    let decl: Vec<&Tok> = toks
+        .iter()
+        .take_while(|t| t.text != ";")
+        .filter(|t| t.kind != Kind::Space)
+        .collect();
+    let Some(eq) = decl.iter().position(|t| t.text == "=") else {
+        return false;
+    };
+    !decl[eq + 1..].is_empty()
+        && decl[..eq].iter().all(|t| t.text != "," && t.text != "(")
+        && decl[eq + 1..]
+            .iter()
+            .all(|t| matches!(t.kind, Kind::Number | Kind::Punct) && t.text != "," && t.text != "?")
+}
+
 /// A float zero that naga cannot fold (a private global, zero-initialised).
 const ZERO: &str = "hz_zero";
 
@@ -119,7 +137,7 @@ fn function(toks: &[Tok]) -> String {
     let mut skip_space = false;
     let mut after_discard = false;
     let mut last = "";
-    for t in toks {
+    for (at, t) in toks.iter().enumerate() {
         if t.kind != Kind::Space {
             let prev = std::mem::replace(&mut last, t.text);
             // `x / 0.0`: naga folds it to an infinity and refuses it; GL gives the infinity at run time.
@@ -145,6 +163,8 @@ fn function(toks: &[Tok]) -> String {
                 after_discard = true;
                 continue;
             }
+            // Kept on a local whose value is a literal expression: it may size an array.
+            "const" if literal_initializer(&toks[at + 1..]) => {}
             "const" => {
                 skip_space = true;
                 continue;
@@ -306,6 +326,17 @@ mod tests {
         assert!(out.contains("return m;"), "{out}");
         assert!(out.contains("return mat2x3( mat2x3(1.0));"), "{out}");
         assert!(out.contains("return vec3( 1.0);"), "{out}");
+    }
+
+    #[test]
+    fn literal_local_constants_stay_constant() {
+        let src = "float f(float x) { const int n = 6; const float k = 1.0 / 3.0; const float y = x * 2.0; \
+                   float a[n]; return k + y + a[0]; }\nvoid main() { }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        assert!(
+            out.contains("const int n = 6; const float k = 1.0 / 3.0; float y = x * 2.0;"),
+            "{out}"
+        );
     }
 
     #[test]

@@ -37,6 +37,7 @@ pub fn glsl_to_wgsl(source: &str, stage: Stage) -> Result<String, String> {
     spill_pointer_arguments(&mut module);
     end_terminated_cases(&mut module);
     flatten_else_if_chains(&mut module);
+    unsigned_literals(&mut module);
     let info = Validator::new(ValidationFlags::all(), Capabilities::empty())
         .validate(&module)
         .map_err(|e| e.emit_to_string(source))?;
@@ -247,6 +248,61 @@ fn end_terminated_cases(module: &mut naga::Module) {
     }
     for e in &mut module.entry_points {
         walk(&mut e.function.body);
+    }
+}
+
+/// Int literals beside a `uint` (`min(n, 32)` with a `uint n`, `n + 1u`'s
+/// GLSL 1.x spelling `n + 1`) become `uint` literals: GLSL converts them,
+/// naga's GLSL front end leaves an `int` that validation then refuses.
+fn unsigned_literals(module: &mut naga::Module) {
+    let handles: Vec<_> = module.functions.iter().map(|(h, _)| h).collect();
+    for h in handles {
+        let mut f = std::mem::take(&mut module.functions[h]);
+        unsigned_literals_in(module, &mut f);
+        module.functions[h] = f;
+    }
+    for i in 0..module.entry_points.len() {
+        let mut f = std::mem::take(&mut module.entry_points[i].function);
+        unsigned_literals_in(module, &mut f);
+        module.entry_points[i].function = f;
+    }
+}
+
+fn unsigned_literals_in(module: &naga::Module, f: &mut naga::Function) {
+    use naga::{Expression, Literal, MathFunction as M, ScalarKind, TypeInner};
+    let Some(last) = f.expressions.iter().map(|(h, _)| h).next_back() else {
+        return;
+    };
+    let ctx = naga::proc::ResolveContext::with_locals(module, &f.local_variables, &f.arguments);
+    let mut types = naga::front::Typifier::new();
+    if types.grow(last, &f.expressions, &ctx).is_err() {
+        return;
+    }
+    let is_uint = |h| matches!(types.get(h, &module.types), TypeInner::Scalar(s) | TypeInner::Vector { scalar: s, .. } if s.kind == ScalarKind::Uint);
+    let mut fix = Vec::new();
+    for (_, e) in f.expressions.iter() {
+        let operands: Vec<_> = match *e {
+            Expression::Math {
+                fun: M::Min | M::Max | M::Clamp,
+                arg,
+                arg1,
+                arg2,
+                ..
+            } => [Some(arg), arg1, arg2].into_iter().flatten().collect(),
+            Expression::Binary { left, right, .. } => vec![left, right],
+            _ => continue,
+        };
+        if !operands.iter().any(|&o| is_uint(o)) {
+            continue;
+        }
+        fix.extend(operands.into_iter().filter(
+            |&o| matches!(f.expressions[o], Expression::Literal(Literal::I32(n)) if n >= 0),
+        ));
+    }
+    for h in fix {
+        if let Expression::Literal(Literal::I32(n)) = f.expressions[h] {
+            f.expressions[h] = Expression::Literal(Literal::U32(n as u32));
+        }
     }
 }
 
@@ -559,9 +615,9 @@ fn modulo_splats(module: &naga::Module, source: &str) -> Vec<(std::ops::Range<us
 }
 
 /// Parses `source`; a call naga finds ambiguous (`max(x, 1)` with a float
-/// `x`: GLSL converts the `1`, naga's overload resolution does not choose)
-/// gets its integer literals written as floats, and the source is parsed
-/// again. Returns the patched source when it changed.
+/// or uint `x`: GLSL converts the `1`, naga's overload resolution does not
+/// choose) gets its integer literals written as `uint`s, which convert to
+/// either, and the source is parsed again. Returns the patched source when it changed.
 fn parse_floating_ambiguous(
     source: &str,
     stage: naga::ShaderStage,
@@ -592,7 +648,8 @@ fn parse_floating_ambiguous(
         .map_err(|e| e.emit_to_string(current))
 }
 
-/// `source` with the integer literals inside `ranges` (outside `[…]`) as floats.
+/// `source` with the integer literals inside `ranges` (outside `[…]`) as
+/// `uint`s (floats when negated).
 fn float_literals(source: &str, ranges: &[std::ops::Range<usize>]) -> String {
     let mut out = String::with_capacity(source.len() + 16);
     let bytes = source.as_bytes();
@@ -628,7 +685,10 @@ fn float_literals(source: &str, ranges: &[std::ops::Range<usize>]) -> String {
         let literal = &source[i..end];
         out.push_str(literal);
         if literal.bytes().all(|b| b.is_ascii_digit()) {
-            out.push_str(".0");
+            // `u` fits both a `uint` and a `float` neighbour (GLSL converts
+            // uint to float); a negated one can only be a float.
+            let negated = source[..i].trim_end().ends_with('-');
+            out.push_str(if negated { ".0" } else { "u" });
         }
         i = end;
     }
@@ -680,9 +740,16 @@ mod modulo_tests {
         let wgsl = glsl_to_wgsl(src, Stage::Fragment).unwrap();
         assert!(wgsl.contains("max("), "{wgsl}");
         assert_eq!(
-            float_literals("f(a, 12, x2, 3u, v[1])", &[0..21]),
-            "f(a, 12.0, x2, 3u, v[1])"
+            float_literals("f(a, 12, -2, x2, 3u, v[1])", &[0..25]),
+            "f(a, 12u, -2.0, x2, 3u, v[1])"
         );
+    }
+
+    #[test]
+    fn int_literals_beside_uints() {
+        let src = "#version 450\nlayout(location = 0) flat in uint n;\nlayout(location = 0) out vec4 c;\n\
+                   void main() { uint s = min(n, 32); s = clamp(s, 1, 8); bool b = s > 2; c = vec4(float(s), b, 0.0, 1.0); }\n";
+        glsl_to_wgsl(src, Stage::Fragment).unwrap();
     }
 
     #[test]
