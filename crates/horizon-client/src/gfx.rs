@@ -480,6 +480,9 @@ pub struct Renderer {
     /// The mipmap levels sampled (the Mipmap Levels option), at most `mip_levels - 1`.
     mipmaps: u32,
     terrain_layout: wgpu::BindGroupLayout,
+    /// The terrain group of shader-pack terrain programs (`pack_terrain_layout`).
+    pack_terrain_layout: wgpu::BindGroupLayout,
+    pack_group: wgpu::BindGroup,
     sprite_sampler: wgpu::Sampler,
     lightmap_view: wgpu::TextureView,
     lightmap_sampler: wgpu::Sampler,
@@ -720,6 +723,94 @@ fn terrain_group(
             view(10, &sprites[6]),
             view(11, &sprites[7]),
         ],
+    })
+}
+/// The terrain group a shader pack's terrain programs read: Horizon's, with
+/// only the sprite arrays in use, so a pack keeps WebGPU's 16 textures a
+/// stage for its own (`HostParams::terrain_textures`).
+fn pack_terrain_layout(device: &wgpu::Device, sprite_arrays: u32) -> wgpu::BindGroupLayout {
+    let vf = wgpu::ShaderStages::VERTEX_FRAGMENT;
+    let texture = |dim| wgpu::BindingType::Texture {
+        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+        view_dimension: dim,
+        multisampled: false,
+    };
+    let sampler = wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering);
+    let mut entries = vec![
+        (
+            0,
+            wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+        ),
+        (1, texture(wgpu::TextureViewDimension::D2Array)),
+        (2, sampler),
+        (3, texture(wgpu::TextureViewDimension::D2)),
+        (4, sampler),
+    ];
+    entries.extend(
+        (1..sprite_arrays.clamp(1, 8)).map(|i| (4 + i, texture(wgpu::TextureViewDimension::D2Array))),
+    );
+    let entries: Vec<wgpu::BindGroupLayoutEntry> = entries
+        .into_iter()
+        .map(|(binding, ty)| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: vf,
+            ty,
+            count: None,
+        })
+        .collect();
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Shader pack terrain bindings"),
+        entries: &entries,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pack_terrain_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    sprite_arrays: u32,
+    globals: &wgpu::Buffer,
+    sprites: &[wgpu::TextureView],
+    sprite_sampler: &wgpu::Sampler,
+    lightmap: &wgpu::TextureView,
+    lightmap_sampler: &wgpu::Sampler,
+) -> wgpu::BindGroup {
+    let mut entries = vec![
+        wgpu::BindGroupEntry {
+            binding: 0,
+            resource: globals.as_entire_binding(),
+        },
+        wgpu::BindGroupEntry {
+            binding: 1,
+            resource: wgpu::BindingResource::TextureView(&sprites[0]),
+        },
+        wgpu::BindGroupEntry {
+            binding: 2,
+            resource: wgpu::BindingResource::Sampler(sprite_sampler),
+        },
+        wgpu::BindGroupEntry {
+            binding: 3,
+            resource: wgpu::BindingResource::TextureView(lightmap),
+        },
+        wgpu::BindGroupEntry {
+            binding: 4,
+            resource: wgpu::BindingResource::Sampler(lightmap_sampler),
+        },
+    ];
+    for i in 1..sprite_arrays.clamp(1, 8) {
+        entries.push(wgpu::BindGroupEntry {
+            binding: 4 + i,
+            resource: wgpu::BindingResource::TextureView(&sprites[i as usize]),
+        });
+    }
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Shader pack terrain resources"),
+        layout,
+        entries: &entries,
     })
 }
 /// CPU texture uploads prepared by the resource worker. Consumed by renderer
@@ -1662,6 +1753,17 @@ impl Renderer {
             &lightmap_view,
             &lightmap_sampler,
         );
+        let pack_terrain_layout = pack_terrain_layout(&device, sprite_arrays);
+        let pack_group = pack_terrain_group(
+            &device,
+            &pack_terrain_layout,
+            sprite_arrays,
+            &globals,
+            &sprite_views,
+            &sprite_sampler,
+            &lightmap_view,
+            &lightmap_sampler,
+        );
         let crosshair_group = terrain_group(
             &device,
             "Debug crosshair resources",
@@ -2571,6 +2673,8 @@ impl Renderer {
             mip_levels,
             mipmaps: mip_levels - 1,
             terrain_layout: bindings,
+            pack_terrain_layout,
+            pack_group,
             sprite_sampler,
             lightmap_view,
             lightmap_sampler,
@@ -3149,6 +3253,16 @@ impl Renderer {
             &self.lightmap_view,
             &self.lightmap_sampler,
         );
+        self.pack_group = pack_terrain_group(
+            &self.device,
+            &self.pack_terrain_layout,
+            self.sprite_host.sprite_arrays,
+            &self.globals,
+            &views,
+            &self.sprite_sampler,
+            &self.lightmap_view,
+            &self.lightmap_sampler,
+        );
     }
     /// The device's inter-stage variable limit, for packing a pack's varyings.
     pub fn max_varyings(&self) -> u32 {
@@ -3163,6 +3277,7 @@ impl Renderer {
             max_textures: limits.max_sampled_textures_per_shader_stage,
             max_draw_buffers: limits.max_color_attachments,
             max_attachment_bytes: limits.max_color_attachment_bytes_per_sample,
+            terrain_textures: self.sprite_host.sprite_arrays.clamp(1, 8) + 1,
             ..self.sprite_host
         }
     }
@@ -3194,7 +3309,7 @@ impl Renderer {
             &self.device,
             &self.queue,
             glsl_pack::Group0Layouts {
-                terrain: &self.terrain_layout,
+                terrain: &self.pack_terrain_layout,
                 entity: &self.entity_bind_layout,
             },
             self.config.format.remove_srgb_suffix(),
