@@ -141,12 +141,15 @@ their last result for the next one (temporal anti-aliasing).
 Horizon renders with reversed Z (1 at the near plane) and wgpu's clip space, and its textures start at the
 top row; packs expect OpenGL's. The host converts at the edges so the pack's maths stays as written:
 
-- `ftransform()` returns GL clip space, `hz_to_gl(c) = (c.x, -c.y, c.w - 2c.z, c.w)`, and the vertex host
-  converts `gl_Position` back.
-- `gbufferProjection` is that conversion times Horizon's projection, so `gbufferProjectionInverse` takes the
-  pack's `(uv, depth)` back to view space. The y flip lives in that projection, so texture coordinates and
-  `gl_FragCoord` need no flip; but window y then runs against view-space y, so `dFdy` is negated in fragment
-  shaders, which keeps normals rebuilt with `cross(dFdx(p), dFdy(p))` facing out.
+- `ftransform()` returns GL clip space, `hz_to_gl(c) = (c.x, c.y, c.w - 2c.z, c.w)`, and `gbufferProjection`
+  is that conversion times Horizon's projection: GL's own projection (a positive `[1][1]`), so
+  `gbufferProjectionInverse` takes the pack's `(uv, depth)` back to view space and packs that read its
+  elements directly (FOV, lens flares) see what they expect.
+- The vertex host negates clip y on output, so pack targets are stored bottom row first, as GL stores them:
+  texture coordinates, `gl_FragCoord.y` and `dFdy` then follow GL's window y with no conversion. Pack
+  pipelines that cull face the other way. `final` alone draws upright into the screen (no negation; its
+  `gl_FragCoord.y` and `dFdy` are flipped back), and Horizon's overlays draw after it against an upright copy
+  of the pack's depth.
 - Depth reads return `1 - d`, and so does `gl_FragCoord.z`; hardware shadow compares use `GreaterEqual`
   against `1 - ref`.
 - The hand's depth is squeezed as `MC_HAND_DEPTH` does (GL depth 0.44 to 0.56), in front of the world.

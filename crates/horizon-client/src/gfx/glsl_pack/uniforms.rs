@@ -55,14 +55,14 @@ pub(crate) struct FrameUniforms {
     pub hand: PackUniforms,
 }
 
-/// GL clip space from Horizon's: y flipped (images are stored top row first)
-/// and reversed-Z 0..1 depth to GL's -1..1 with 1 - d (`horizon_glsl_pack`'s
-/// `hz_to_gl`). Packs reconstruct positions with `gbufferProjectionInverse`,
-/// so their projection is this times Horizon's.
+/// GL clip space from Horizon's: reversed-Z 0..1 depth to GL's -1..1 with
+/// 1 - d (`horizon_glsl_pack`'s `hz_to_gl`); y as GL has it, so packs see
+/// GL's own projection (a positive `[1][1]`). The host negates clip y on
+/// output instead: pack targets are stored bottom row first, as in GL.
 pub(crate) fn gl_clip() -> Mat4 {
     Mat4::from_cols(
         glam::Vec4::new(1.0, 0.0, 0.0, 0.0),
-        glam::Vec4::new(0.0, -1.0, 0.0, 0.0),
+        glam::Vec4::new(0.0, 1.0, 0.0, 0.0),
         glam::Vec4::new(0.0, 0.0, -2.0, 0.0),
         glam::Vec4::new(0.0, 0.0, 1.0, 1.0),
     )

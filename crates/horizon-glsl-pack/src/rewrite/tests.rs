@@ -45,6 +45,10 @@ fn naga(rw: &Rewritten, stage: Stage) -> String {
         };
         s += &format!("{ty} {f}({sig}) {{ return {ret}; }}\n");
     }
+    if rw.body.contains("hz_dFdy") {
+        // The real host declares it per program (fragment.rs).
+        s += "const float hz_dFdy_sign = 1.0;\n";
+    }
     let write_out = stage == Stage::Fragment && rw.builtins.contains("hz_gl_FragData");
     if write_out {
         s += "layout(location = 0) out vec4 hz_out0;\n";
@@ -557,7 +561,7 @@ void main() {
 }
 
 #[test]
-fn dfdy_is_negated_in_fragment_shaders() {
+fn dfdy_follows_gl_window_y() {
     let fs = "varying vec3 viewPos;\nvoid main() {\n    vec3 n = normalize(cross(dFdx(viewPos), dFdy(viewPos)));\n    \
               float w = 1.0-dFdy(viewPos.x);\n    gl_FragData[0] = vec4(n, w);\n}\n";
     let rw = rewrite(fs, Stage::Fragment).unwrap();
@@ -568,7 +572,7 @@ fn dfdy_is_negated_in_fragment_shaders() {
     );
     assert!(
         rw.body
-            .contains("vec3 hz_dFdy(vec3 v) { return -dFdy(v); }"),
+            .contains("vec3 hz_dFdy(vec3 v) { return hz_dFdy_sign * dFdy(v); }"),
         "{}",
         rw.body
     );

@@ -394,10 +394,10 @@ fn gl_convention_round_trips() {
         [0.0, 0.0, near / (far - near), -1.0],
         [0.0, 0.0, near * far / (far - near), 0.0],
     ];
-    // hz_to_gl as a matrix: (x, -y, w - 2z, w).
+    // hz_to_gl as a matrix: (x, y, w - 2z, w).
     let m: Mat = [
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, -1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
         [0.0, 0.0, -2.0, 0.0],
         [0.0, 0.0, 1.0, 1.0],
     ];
@@ -405,7 +405,9 @@ fn gl_convention_round_trips() {
     for view in [[0.3, -1.2, -4.0], [-20.0, 7.5, -300.0], [0.0, 0.0, -0.06]] {
         let clip = apply(&p, [view[0], view[1], view[2], 1.0]);
         let ndc = [clip[0] / clip[3], clip[1] / clip[3], clip[2] / clip[3]];
-        let uv_down = [0.5 * ndc[0] + 0.5, 0.5 - 0.5 * ndc[1]];
+        // The host draws with y negated, so the pixel's row from the target's
+        // first row is GL's t, as GL stores images (bottom row first).
+        let uv_down = [0.5 * ndc[0] + 0.5, 0.5 + 0.5 * ndc[1]];
         let d = ndc[2];
         assert!((0.0..=1.0).contains(&d));
         // The pack's screen2view on what the host hands it.
@@ -958,4 +960,33 @@ fn entity_geometry_reads_the_atlas_size() {
                 .unwrap_or_else(|e| panic!("{e}\n{}", out.fragment));
         }
     }
+}
+
+#[test]
+fn targets_are_stored_bottom_up_and_final_is_upright() {
+    let (vertex, fragment) = final_program();
+    let blocks = BlockIds::legacy();
+    let plan = PackPlan::default();
+    let host = HostParams::default();
+    let spec = |kind| ProgramSpec {
+        kind,
+        geometry: kind.geometry(),
+        draw_buffers: &[0],
+        host: &host,
+        blocks: &blocks,
+        plan: &plan,
+    };
+    let composite = program_sources(&vertex, &fragment, &spec(ProgramKind::Composite(0))).unwrap();
+    let last = program_sources(&vertex, &fragment, &spec(ProgramKind::Final)).unwrap();
+    assert!(
+        composite.vertex.contains("vec4(hz_p.x, -hz_p.y,"),
+        "{}",
+        composite.vertex
+    );
+    // Composite passes draw y-negated (bottom row first); `final` draws the upright screen.
+    assert!(
+        last.vertex.contains("vec4(hz_p.x, hz_p.y,"),
+        "{}",
+        last.vertex
+    );
 }

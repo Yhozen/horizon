@@ -12,6 +12,7 @@
 //! `SamplerKind`.
 
 mod debug;
+mod flip;
 mod frame;
 mod mips;
 mod pipelines;
@@ -59,11 +60,12 @@ pub(crate) struct PackRenderer {
     pub(super) blit: Option<debug::Debug>,
     /// `scale.<program>` of full-screen passes.
     pub(super) scales: BTreeMap<ProgramKind, horizon_glsl_pack::plan::Scale>,
-    screen_format: wgpu::TextureFormat,
     mips: mips::Mips,
     schedule: horizon_glsl_pack::schedule::FrameSchedule,
     /// `HORIZON_SHADER_PACK_DEBUG`: one texture shown instead of the image.
     debug: Option<debug::Debug>,
+    /// Pack depth upright for Horizon's overlays.
+    depth_flip: flip::DepthFlip,
     targets: Option<Targets>,
     shadow: Option<ShadowTargets>,
     textures: textures::Textures,
@@ -239,10 +241,10 @@ impl PackRenderer {
                 .filter(|k| k.is_fullscreen())
                 .filter_map(|&k| Some((k, pack.plan.state(k).scale?)))
                 .collect(),
-            screen_format,
             mips,
             schedule: horizon_glsl_pack::schedule::FrameSchedule::new(&plan),
             debug: debug::Debug::new(device, screen_format),
+            depth_flip: flip::DepthFlip::new(device),
             targets: None,
             shadow,
             textures,
@@ -287,12 +289,6 @@ impl PackRenderer {
         self.programs.contains_key(&kind)
     }
 
-    /// colortex0's format, which Horizon's pipelines can draw into when it is
-    /// the world's.
-    pub fn draws_horizon_pipelines(&self) -> bool {
-        self.formats[0] == self.screen_format
-    }
-
     /// (Re)creates the screen-sized targets.
     pub fn prepare(&mut self, device: &wgpu::Device, size: [u32; 2]) {
         if self.targets.as_ref().is_some_and(|t| t.size == size) {
@@ -318,9 +314,10 @@ impl PackRenderer {
         &self.textures.notes
     }
 
-    /// The pack's depth buffer, which Horizon's overlays draw against.
+    /// The pack's depth buffer upright, which Horizon's overlays draw against
+    /// (filled by [`flip::DepthFlip`] after `final`).
     pub fn depth(&self) -> &wgpu::TextureView {
-        &self.targets().depth.view
+        &self.targets().overlay_depth.view
     }
 
     /// Group 1 of `program` for a pass that reads each buffer's `sides`.

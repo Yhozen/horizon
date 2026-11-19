@@ -354,6 +354,13 @@ pub(super) fn build(
             },
             cull_mode: (kind == ProgramKind::Terrain || kind == ProgramKind::Water)
                 .then_some(wgpu::Face::Back),
+            // The host negates clip y (targets are stored bottom row first), which
+            // mirrors the winding; `final` alone draws upright.
+            front_face: if kind == ProgramKind::Final {
+                wgpu::FrontFace::Ccw
+            } else {
+                wgpu::FrontFace::Cw
+            },
             ..Default::default()
         },
         depth_stencil,

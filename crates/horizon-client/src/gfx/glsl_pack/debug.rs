@@ -1,6 +1,7 @@
 //! `HORIZON_SHADER_PACK_DEBUG=colortexN|depth|shadow|shadowcolorN`: shows one
 //! of the pack's textures instead of its image, for finding the pass that
-//! goes wrong without a GPU debugger. Depth is shown as GL depth (white far).
+//! goes wrong without a GPU debugger. Depth is shown as GL depth (white far);
+//! NaN texels show magenta and infinite ones cyan.
 
 const SHADER: &str = "
 @group(0) @binding(0) var source: texture_2d<f32>;
@@ -16,12 +17,29 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
 @fragment
 fn fs(@builtin(position) p: vec4<f32>) -> @location(0) vec4<f32> {
     let size = vec2<f32>(textureDimensions(source));
-    let at = vec2<i32>(p.xy / params.xy * size);
+    // Pack targets are stored bottom row first: mirror rows to show them upright.
+    let px = vec2<i32>(p.xy / params.xy * size);
+    let at = vec2<i32>(px.x, i32(size.y) - 1 - px.y);
     let c = textureLoad(source, at, 0);
     if (params.z > 0.5) {
         // Reversed Z: 1 - d is GL depth; stretch the near range to see it.
         let d = pow(1.0 - c.x, 64.0);
         return vec4<f32>(d, d, d, 1.0);
+    }
+    // A pack without `final`: colortex0 as it is.
+    if (params.w > 0.5) {
+        return vec4<f32>(c.rgb, 1.0);
+    }
+    // NaN shows magenta, infinity cyan: the usual causes of a black pack image.
+    // By bits: compilers may fold `c != c` away.
+    let bits = bitcast<vec4<u32>>(c);
+    let special = (bits & vec4<u32>(0x7f800000u)) == vec4<u32>(0x7f800000u);
+    let mantissa = (bits & vec4<u32>(0x007fffffu)) != vec4<u32>(0u);
+    if (any(special & mantissa)) {
+        return vec4<f32>(1.0, 0.0, 1.0, 1.0);
+    }
+    if (any(special)) {
+        return vec4<f32>(0.0, 1.0, 1.0, 1.0);
     }
     return vec4<f32>(c.rgb, 1.0);
 }
@@ -60,6 +78,8 @@ impl Show {
 
 pub(super) struct Debug {
     pub show: Show,
+    /// The built-in final (a plain, mirrored copy), not a debug view.
+    plain: bool,
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     params: wgpu::Buffer,
@@ -74,7 +94,10 @@ impl Debug {
 
     /// A plain copy of colortex0 to the screen (a pack without `final`).
     pub fn copy(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        Self::with(device, format, Show::Color(0))
+        Self {
+            plain: true,
+            ..Self::with(device, format, Show::Color(0))
+        }
     }
 
     fn with(device: &wgpu::Device, format: wgpu::TextureFormat, show: Show) -> Self {
@@ -141,6 +164,7 @@ impl Debug {
         });
         Self {
             show,
+            plain: false,
             pipeline,
             layout,
             params,
@@ -161,7 +185,12 @@ impl Debug {
         queue.write_buffer(
             &self.params,
             0,
-            bytemuck::cast_slice(&[size[0] as f32, size[1] as f32, depth, 0.0]),
+            bytemuck::cast_slice(&[
+                size[0] as f32,
+                size[1] as f32,
+                depth,
+                f32::from(u8::from(self.plain)),
+            ]),
         );
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Shader pack debug view"),

@@ -158,6 +158,9 @@ pub(super) struct Targets {
     pub depth: Image,
     /// Copies: `depthtex1` (no translucent terrain) and `depthtex2` (no hand).
     pub depth_copies: [Image; 2],
+    /// `depth` upright (pack targets are stored bottom row first), for
+    /// Horizon's overlays after `final` (flip.rs).
+    pub overlay_depth: Image,
 }
 
 const COLOR_USAGE: wgpu::TextureUsages = wgpu::TextureUsages::RENDER_ATTACHMENT
@@ -219,6 +222,14 @@ impl Targets {
                 image(device, "depthtex1", size, depth32, 1, copy_usage),
                 image(device, "depthtex2", size, depth32, 1, copy_usage),
             ],
+            overlay_depth: image(
+                device,
+                "Shader pack overlay depth",
+                size,
+                depth32,
+                1,
+                wgpu::TextureUsages::RENDER_ATTACHMENT,
+            ),
         }
     }
 

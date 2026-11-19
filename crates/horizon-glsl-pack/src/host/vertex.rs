@@ -109,10 +109,16 @@ pub(super) fn vertex_source(
         writeln!(out, "    {} = {value};", a.name).unwrap();
     }
     out += "    hz_pack_main();\n    vec4 hz_p = gl_Position;\n";
-    // The pack's untouched ftransform() goes out bit-exact, so its depth equals Horizon's own pipelines'.
-    let back = "gl_Position = vec4(hz_p.x, -hz_p.y, 0.5 * (hz_p.w - hz_p.z), hz_p.w);";
+    // GL clip to wgpu's, y negated: GL's bottom row lands in the target's first row, as GL
+    // stores images. `final` draws the screen, which is upright (top row first): no flip.
+    let back = if spec.kind == ProgramKind::Final {
+        "gl_Position = vec4(hz_p.x, hz_p.y, 0.5 * (hz_p.w - hz_p.z), hz_p.w);"
+    } else {
+        "gl_Position = vec4(hz_p.x, -hz_p.y, 0.5 * (hz_p.w - hz_p.z), hz_p.w);"
+    };
     if !fullscreen {
-        writeln!(out, "    if (all(equal(hz_p, hz_to_gl(hz_ft)))) {{ gl_Position = hz_ft; }} else {{ {back} }}").unwrap();
+        // The pack's untouched ftransform() goes out bit-exact, so its depth equals Horizon's own pipelines'.
+        writeln!(out, "    if (all(equal(hz_p, hz_to_gl(hz_ft)))) {{ gl_Position = vec4(hz_ft.x, -hz_ft.y, hz_ft.zw); }} else {{ {back} }}").unwrap();
     } else {
         writeln!(out, "    {back}").unwrap();
     }
