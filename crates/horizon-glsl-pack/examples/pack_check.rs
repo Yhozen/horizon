@@ -4,7 +4,7 @@
 //! ```text
 //! cargo run --example pack_check -p horizon-glsl-pack -- <pack.zip|folder>... --out <dir>
 //!     [--dimension minecraft:overworld|minecraft:the_nether|minecraft:the_end|all]
-//!     [--option NAME=VALUE]... [--max-varyings N] [--jobs N]
+//!     [--option NAME=VALUE]... [--max-varyings N] [--terrain-textures N] [--jobs N]
 //! ```
 //!
 //! For each pack it writes `<out>/<pack>/<dimension>/<slot>.{vs,fs}.wgsl` for
@@ -62,7 +62,7 @@ fn main() {
     let mut out = None;
     let mut dimensions = vec![DIMENSIONS[0].to_string()];
     let mut options = PackOptions::default();
-    let mut max_varyings: Option<u32> = None;
+    let mut host = HostParams::default();
     let mut jobs: usize = std::thread::available_parallelism().map_or(1, |n| n.get());
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -77,10 +77,17 @@ fn main() {
                 };
             }
             "--max-varyings" => {
-                max_varyings = args.next().and_then(|j| j.parse().ok());
-                if max_varyings.is_none() {
-                    usage();
-                }
+                host.max_varyings = args
+                    .next()
+                    .and_then(|j| j.parse().ok())
+                    .unwrap_or_else(|| usage());
+            }
+            // Horizon's own textures in terrain programs: the sprite arrays in use and the lightmap.
+            "--terrain-textures" => {
+                host.terrain_textures = args
+                    .next()
+                    .and_then(|j| j.parse().ok())
+                    .unwrap_or_else(|| usage());
             }
             "--jobs" => {
                 jobs = args
@@ -113,7 +120,7 @@ fn main() {
                     let Some(pack) = queue.lock().unwrap().next() else {
                         break;
                     };
-                    check_one(&pack, &out, &dimensions, &options, max_varyings);
+                    check_one(&pack, &out, &dimensions, &options, &host);
                 }
             });
         }
@@ -125,19 +132,12 @@ fn check_one(
     out: &Path,
     dimensions: &[String],
     options: &PackOptions,
-    max_varyings: Option<u32>,
+    host: &HostParams,
 ) {
     let name = pack_name(pack);
     let started = std::time::Instant::now();
     let result = match read_files(pack) {
-        Ok(files) => check_pack(
-            &files,
-            &name,
-            &out.join(&name),
-            dimensions,
-            options,
-            max_varyings,
-        ),
+        Ok(files) => check_pack(&files, &name, &out.join(&name), dimensions, options, host),
         Err(e) => json!({ "pack": name, "read_error": e }),
     };
     let dir = out.join(&name);
@@ -149,7 +149,7 @@ fn check_one(
 
 fn usage() -> ! {
     eprintln!(
-        "usage: pack_check <pack.zip|folder>... --out <dir> [--dimension <id>|all] [--option NAME=VALUE]... [--max-varyings N] [--jobs N]"
+        "usage: pack_check <pack.zip|folder>... --out <dir> [--dimension <id>|all] [--option NAME=VALUE]... [--max-varyings N] [--terrain-textures N] [--jobs N]"
     );
     std::process::exit(2)
 }
@@ -222,12 +222,9 @@ fn check_pack(
     dir: &Path,
     dimensions: &[String],
     options: &PackOptions,
-    max_varyings: Option<u32>,
+    host: &HostParams,
 ) -> Value {
-    let mut host = HostParams::default();
-    if let Some(max) = max_varyings {
-        host.max_varyings = max;
-    }
+    let host = *host;
     let mut dims = serde_json::Map::new();
     for dimension in dimensions {
         let folder = world_folder(files, dimension);
