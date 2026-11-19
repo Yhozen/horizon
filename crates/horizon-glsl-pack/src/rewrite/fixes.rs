@@ -100,11 +100,32 @@ fn literal_initializer(toks: &[Tok]) -> bool {
     let Some(eq) = decl.iter().position(|t| t.text == "=") else {
         return false;
     };
-    !decl[eq + 1..].is_empty()
-        && decl[..eq].iter().all(|t| t.text != "," && t.text != "(")
+    // Exactly `TYPE NAME = …` (a parameter's `const in float x` is not one).
+    eq == 2
+        && decl[..eq].iter().all(|t| t.kind == Kind::Ident)
+        && !decl[eq + 1..].is_empty()
         && decl[eq + 1..]
             .iter()
             .all(|t| matches!(t.kind, Kind::Number | Kind::Punct) && t.text != "," && t.text != "?")
+}
+
+/// `(name, value)` of an integer declaration initialised from numbers and
+/// operators only (`int n = 6;` after its `const`).
+fn literal_constant<'a>(toks: &[Tok<'a>]) -> Option<(&'a str, String)> {
+    if !literal_initializer(toks) {
+        return None;
+    }
+    let decl: Vec<&Tok<'a>> = toks
+        .iter()
+        .take_while(|t| t.text != ";")
+        .filter(|t| t.kind != Kind::Space)
+        .collect();
+    let eq = decl.iter().position(|t| t.text == "=")?;
+    if eq != 2 || !matches!(decl[0].text, "int" | "uint") {
+        return None;
+    }
+    let value: Vec<&str> = decl[eq + 1..].iter().map(|t| t.text).collect();
+    Some((decl[1].text, value.join(" ")))
 }
 
 /// A float zero that naga cannot fold (a private global, zero-initialised).
@@ -137,7 +158,29 @@ fn function(toks: &[Tok]) -> String {
     let mut skip_space = false;
     let mut after_discard = false;
     let mut last = "";
+    // Literal local constants (name → value), written out where they size an
+    // array: naga only takes global constants there.
+    let mut sizes: Vec<(&str, String)> = Vec::new();
+    let mut brackets = 0i32;
     for (at, t) in toks.iter().enumerate() {
+        match t.text {
+            "[" => brackets += 1,
+            "]" => brackets -= 1,
+            _ => {}
+        }
+        if brackets > 0
+            && t.kind == Kind::Ident
+            && let Some((_, value)) = sizes.iter().rev().find(|(n, _)| *n == t.text)
+        {
+            out.push_str(&format!("({value})"));
+            last = t.text;
+            continue;
+        }
+        if t.text == "const"
+            && let Some(constant) = literal_constant(&toks[at + 1..])
+        {
+            sizes.push(constant);
+        }
         if t.kind != Kind::Space {
             let prev = std::mem::replace(&mut last, t.text);
             // `x / 0.0`: naga folds it to an infinity and refuses it; GL gives the infinity at run time.
@@ -330,7 +373,7 @@ mod tests {
 
     #[test]
     fn literal_local_constants_stay_constant() {
-        let src = "float f(float x) { const int n = 6; const float k = 1.0 / 3.0; const float y = x * 2.0; \
+        let src = "float g(const in float x) { float y = 1.0; return x + y; }\nfloat f(float x) { const int n = 6; const float k = 1.0 / 3.0; const float y = x * 2.0; \
                    float a[n]; return k + y + a[0]; }\nvoid main() { }\n";
         let out = apply(&tokenize(src)).unwrap();
         assert!(
