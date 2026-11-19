@@ -740,7 +740,7 @@ mod modulo_tests {
         let wgsl = glsl_to_wgsl(src, Stage::Fragment).unwrap();
         assert!(wgsl.contains("max("), "{wgsl}");
         assert_eq!(
-            float_literals("f(a, 12, -2, x2, 3u, v[1])", &[0..25]),
+            float_literals("f(a, 12, -2, x2, 3u, v[1])", std::slice::from_ref(&(0..25))),
             "f(a, 12u, -2.0, x2, 3u, v[1])"
         );
     }
