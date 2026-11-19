@@ -98,6 +98,37 @@ impl Ctx<'_> {
         Ok(true)
     }
 
+    /// Records the samplers of a top-level `uniform sampler… a, b;` ahead of
+    /// the pass that emits the body (errors are left to that pass).
+    pub(super) fn sampler_declaration(&mut self, sig: &[usize]) {
+        let words: Vec<&str> = sig.iter().map(|&i| self.toks[i].text).collect();
+        let Some(u) = words.iter().position(|w| *w == "uniform") else {
+            return;
+        };
+        if words.contains(&"{") || words.contains(&"(") && words.first() != Some(&"layout") {
+            return;
+        }
+        let Some(t) = words[u..]
+            .iter()
+            .position(|w| w.trim_start_matches(['i', 'u']).starts_with("sampler"))
+            .map(|t| t + u)
+        else {
+            return;
+        };
+        let ty = words[t];
+        for w in words[t + 1..].windows(2) {
+            if matches!(w[1], "," | ";")
+                && w[0].starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            {
+                self.sampler_shadow
+                    .insert(w[0].into(), ty.ends_with("Shadow"));
+                self.out
+                    .sampler_types
+                    .insert(emit::sampler_alias(w[0]).into(), ty.into());
+            }
+        }
+    }
+
     pub(super) fn record(
         &mut self,
         storage: &str,

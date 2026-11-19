@@ -639,8 +639,7 @@ mod tests {
         let out = pp(text);
         let words: Vec<&str> = out.split_whitespace().collect();
         assert_eq!(words, ["I", "0", "4", "0", "41", "16", "2"]);
-        let text =
-            "#if defined IS_IRIS && MC_VERSION >= 260300 && IRIS_TAG_SUPPORT == 2
+        let text = "#if defined IS_IRIS && MC_VERSION >= 260300 && IRIS_TAG_SUPPORT == 2
 V
 #endif
 ";
