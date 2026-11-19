@@ -31,11 +31,17 @@ use horizon_glsl_pack::schedule::Side;
 use pipelines::Program;
 use targets::{Need, ShadowTargets, Targets};
 
-/// Features a pack's targets use when the adapter has them (32-bit float
-/// targets that filter and blend, 11/11/10 float targets).
-pub(crate) const FEATURES: wgpu::Features = wgpu::Features::FLOAT32_FILTERABLE
-    .union(wgpu::Features::FLOAT32_BLENDABLE)
-    .union(wgpu::Features::RG11B10UFLOAT_RENDERABLE);
+/// Features a pack's targets can use (32-bit float targets that filter and
+/// blend, 11/11/10 float targets). The stock renderer requires none of these.
+pub(super) fn device_features(shader_pack_requested: bool) -> wgpu::Features {
+    if shader_pack_requested {
+        wgpu::Features::FLOAT32_FILTERABLE
+            | wgpu::Features::FLOAT32_BLENDABLE
+            | wgpu::Features::RG11B10UFLOAT_RENDERABLE
+    } else {
+        wgpu::Features::empty()
+    }
+}
 
 /// The uniform block, once per kind of pass (the camera's, the light's, the hand's).
 pub(super) struct UniformBuffers {

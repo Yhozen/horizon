@@ -17,12 +17,29 @@ static FILES: OnceLock<Result<PackFiles, String>> = OnceLock::new();
 /// `--shader-pack-option NAME=VALUE` (repeatable), in order.
 static OPTIONS: std::sync::Mutex<Vec<(String, Option<String>)>> = std::sync::Mutex::new(Vec::new());
 
-pub(super) fn set_path(path: PathBuf) {
-    let _ = PATH.set(path);
+#[derive(Default)]
+pub(super) struct Args {
+    pub path: Option<PathBuf>,
+    pub overrides: Vec<String>,
+}
+
+impl Args {
+    pub(super) fn apply(self) {
+        if let Some(path) = self.path {
+            let _ = PATH.set(path);
+        }
+        for arg in self.overrides {
+            add_option(&arg);
+        }
+    }
+}
+
+pub(super) fn requested() -> bool {
+    PATH.get().is_some()
 }
 
 /// `NAME=VALUE` (a boolean option takes `true` or `false`); `NAME` alone turns it on.
-pub(super) fn add_option(arg: &str) {
+fn add_option(arg: &str) {
     let (name, value) = match arg.split_once('=') {
         Some((n, v)) => (n.trim().to_string(), v.trim().to_string()),
         None => (arg.trim().to_string(), "true".to_string()),

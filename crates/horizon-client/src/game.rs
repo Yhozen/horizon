@@ -246,14 +246,6 @@ use winit::{
     window::{CursorGrabMode, Window, WindowId},
 };
 
-/// The browser build's command line, from the page (web.rs).
-#[cfg(target_arch = "wasm32")]
-static WEB_ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-#[cfg(target_arch = "wasm32")]
-pub fn set_web_args(args: Vec<String>) {
-    let _ = WEB_ARGS.set(args);
-}
-
 /// The event loop's flow between frames. The desktop polls; in the browser the
 /// redraw request already schedules the next animation frame, and polling would
 /// spin winit's `scheduler.postTask` loop, starving the frames it waits for.
@@ -330,7 +322,7 @@ impl Options {
             )
         })
     }
-    fn read() -> Result<Option<Self>> {
+    fn read(mut args: impl Iterator<Item = String>) -> Result<Option<(Self, glsl_pack::Args)>> {
         let sibling = horizon_core::fs::current_exe()?
             .parent()
             .ok_or("missing executable directory")?
@@ -381,10 +373,7 @@ impl Options {
             profile: Default::default(),
         };
         let mut session_file = std::env::var("HORIZON_SESSION_FILE").ok();
-        #[cfg(target_arch = "wasm32")]
-        let mut args = WEB_ARGS.get().cloned().unwrap_or_default().into_iter();
-        #[cfg(not(target_arch = "wasm32"))]
-        let mut args = std::env::args().skip(1);
+        let mut shader_pack = glsl_pack::Args::default();
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--help" | "-h" => {
@@ -443,8 +432,10 @@ impl Options {
                         "--world" => o.world = Some(value),
                         "--dev-mod" => o.dev_mods.push(std::path::absolute(&value)?),
                         // An OptiFine-format shader pack (game/glsl_pack.rs).
-                        "--shader-pack" => glsl_pack::set_path(value.into()),
-                        "--shader-pack-option" => glsl_pack::add_option(&value),
+                        "--shader-pack" => {
+                            shader_pack.path.get_or_insert(value.into());
+                        }
+                        "--shader-pack-option" => shader_pack.overrides.push(value),
                         "--benchmark" => {
                             if horizon_client::benchmark::scenes(&value).is_none() {
                                 return Err(format!(
@@ -489,7 +480,7 @@ impl Options {
             }
         }
         open_profile::apply(&mut o)?;
-        Ok(Some(o))
+        Ok(Some((o, shader_pack)))
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -12877,6 +12868,7 @@ fn build_renderer(
         prepared,
         previous,
         api,
+        glsl_pack::requested(),
     ))?;
     renderer.hud.fire_animations = atlas
         .fire_animations
@@ -12924,6 +12916,7 @@ fn loading_renderer(
         None,
         previous,
         api,
+        glsl_pack::requested(),
     ))?;
     if let Some(atlas) = atlas {
         renderer.hud.fire_animations = atlas
@@ -13552,10 +13545,31 @@ fn run_loading(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run() -> Result<()> {
-    let Some(mut options) = Options::read()? else {
+    let Some((options, shader_pack)) = Options::read(std::env::args().skip(1))? else {
         return Ok(());
     };
+    shader_pack.apply();
+    run_with_options(options)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn run_web(args: Vec<String>) -> std::result::Result<(), wasm_bindgen::JsValue> {
+    use wasm_bindgen::JsValue;
+    let game_error = |e: Box<dyn std::error::Error>| JsValue::from_str(&format!("Horizon: {e}"));
+    let Some((options, shader_pack)) = Options::read(args.into_iter()).map_err(game_error)? else {
+        return Ok(());
+    };
+    // The renderer reuses this device, so parse the opt-in before opening it.
+    horizon_client::gfx::open_web_gpu(shader_pack.path.is_some())
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    shader_pack.apply();
+    run_with_options(options).map_err(game_error)
+}
+
+fn run_with_options(mut options: Options) -> Result<()> {
     if options.dedicated.is_some() && !dedicated::preflight(&mut options)? {
         return Ok(());
     }

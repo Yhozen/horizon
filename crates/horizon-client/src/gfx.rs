@@ -918,7 +918,7 @@ thread_local! {
 static WEB_LAYERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(256);
 /// Opens the page's WebGPU adapter and device, for [`open_device`].
 #[cfg(target_arch = "wasm32")]
-pub async fn open_web_gpu() -> Result<()> {
+pub async fn open_web_gpu(shader_pack_requested: bool) -> Result<()> {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::BROWSER_WEBGPU;
     let instance = wgpu::Instance::new(descriptor);
@@ -935,7 +935,9 @@ pub async fn open_web_gpu() -> Result<()> {
     let limits = adapter.limits();
     let features = timing::GpuTimer::features(&adapter)
         | cull::Cull::features(&adapter)
-        | (adapter.features() & (wgpu::Features::INDIRECT_FIRST_INSTANCE | glsl_pack::FEATURES));
+        | (adapter.features()
+            & (wgpu::Features::INDIRECT_FIRST_INSTANCE
+                | glsl_pack::device_features(shader_pack_requested)));
     startup_step(format_args!(
         "requesting the WebGPU device with features [{features}] ({} texture layers)",
         limits.max_texture_array_layers
@@ -964,6 +966,7 @@ async fn open_device(
     offscreen: bool,
     _api: GraphicsApi,
     layers: u32,
+    _shader_pack_requested: bool,
 ) -> Result<Opened> {
     let (instance, adapter, device, queue) = WEB_GPU
         .with(|slot| slot.borrow().clone())
@@ -991,6 +994,7 @@ async fn open_device(
     offscreen: bool,
     api: GraphicsApi,
     layers: u32,
+    shader_pack_requested: bool,
 ) -> Result<Opened> {
     let order = backend_order(
         api.with_env(),
@@ -1038,7 +1042,7 @@ async fn open_device(
             | (adapter.features()
                 & (wgpu::Features::INDIRECT_FIRST_INSTANCE
                     | wgpu::Features::MAPPABLE_PRIMARY_BUFFERS
-                    | glsl_pack::FEATURES));
+                    | glsl_pack::device_features(shader_pack_requested)));
         let driver = format!("{} {}", info.driver, info.driver_info);
         startup_step(format_args!(
             "requesting the device (driver {}) with features [{features}] and the adapter's \
@@ -1146,6 +1150,7 @@ impl Renderer {
         prepared: Option<PreparedTextures>,
         previous: Option<&Self>,
         api: GraphicsApi,
+        shader_pack_requested: bool,
     ) -> Result<Self> {
         let split = sprite_split();
         let grid = sprite_grid(layers, split, sprite_size);
@@ -1181,7 +1186,7 @@ impl Renderer {
                     queue: renderer.queue.clone(),
                 }
             }
-            None => open_device(&window, offscreen, api, layers).await?,
+            None => open_device(&window, offscreen, api, layers, shader_pack_requested).await?,
         };
         let info = adapter.get_info();
         crate::graphics::suggest_reduced_far_detail(crate::graphics::lod_capped(&info));
