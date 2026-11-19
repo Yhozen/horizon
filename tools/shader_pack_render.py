@@ -307,6 +307,12 @@ def run_iris(pack: Path | None, out: Path, timeout: int, extra: list[str]) -> di
         code = 1
     else:
         ctl("wait-ready", "300", limit=320)
+        if pack:
+            # The pack compiles in the background: pose only once it is in (or refused).
+            until = time.time() + 400
+            while time.time() < until and "Horizon: shader pack " not in ctl("logs", "--lines", "400"):
+                output.pop()
+                time.sleep(5)
         ctl("key", "f1", "tap")
         poses = os.environ.get("POSES", "noon,dusk,underwater").split(",")
         for name, commands, (x, y, z), yaw, pitch, settle in IRIS_POSES:
