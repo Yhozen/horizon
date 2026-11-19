@@ -119,6 +119,10 @@ pub struct SectionMesh {
     /// `solid`'s quads by the side they face (`facing`).
     pub faces: FaceGroups,
     pub translucent: Vec<TerrainVertex>,
+    /// With a shader pack (`Mesher::pack`), one [`PackVertex`] per vertex of
+    /// `solid` and of `translucent`, in the same order; empty otherwise.
+    pub solid_pack: Vec<PackVertex>,
+    pub translucent_pack: Vec<PackVertex>,
     /// VisGraph: bit `a * 6 + b` is set when faces `a` and `b` (Direction
     /// order) are connected through non-opaque blocks.
     pub visibility: u64,
@@ -127,12 +131,31 @@ pub struct SectionMesh {
     /// `SectionCompiler.Results.blockEntities`.
     pub block_entities: Vec<([i32; 3], u32)>,
 }
+impl SectionMesh {
+    /// The terrain vertices and their pack stream of one layer.
+    pub(crate) fn layer(
+        &mut self,
+        translucent: bool,
+    ) -> (&mut Vec<TerrainVertex>, &mut Vec<PackVertex>) {
+        if translucent {
+            (&mut self.translucent, &mut self.translucent_pack)
+        } else {
+            (&mut self.solid, &mut self.solid_pack)
+        }
+    }
+    /// Groups the solid quads by facing (`facing::group`), the pack stream with them.
+    pub fn group_faces(&mut self) {
+        self.faces = facing::group(&mut self.solid, &mut self.solid_pack);
+    }
+}
 impl Default for SectionMesh {
     fn default() -> Self {
         Self {
             solid: Vec::new(),
             faces: FaceGroups::default(),
             translucent: Vec::new(),
+            solid_pack: Vec::new(),
+            translucent_pack: Vec::new(),
             visibility: ALL_VISIBLE,
             block_entities: Vec::new(),
         }
@@ -232,6 +255,8 @@ fn visibility(pad: &Padded, info: &[Info]) -> u64 {
 #[cfg(test)]
 mod leaf_culling_tests;
 #[cfg(test)]
+mod pack_tests;
+#[cfg(test)]
 mod particle_tests;
 #[cfg(test)]
 mod visibility_tests;
@@ -308,19 +333,60 @@ pub struct MeshTables {
     water_overlay: u16,
     lava_still: u16,
     lava_flow: u16,
-    /// Shader pack (`--shader-pack`): `block.properties` materials for the
-    /// vertex tag. Unset keeps the colour's alpha byte at 0xFF, which the
-    /// stock terrain shaders multiply into the sprite's alpha. Set once, after
-    /// the pack compiled, before the world meshes.
-    pack: std::sync::OnceLock<PackTags>,
 }
-/// A shader pack's material index per block state, and the fluids', for
-/// `horizon_glsl_pack::vertex_tag`.
+/// A shader pack's per-vertex data, in a stream parallel to the terrain
+/// vertices (vertex buffer slot 2 of the pack's terrain pipelines). Only
+/// meshes made with [`PackTags`] carry it.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct PackVertex {
+    /// The mean of the quad's four `TerrainVertex` UVs, same fixed point
+    /// (`mc_midTexCoord`).
+    pub mid_uv: [u16; 2],
+    /// The pack's `block.properties` id of the state; [`PACK_UNLISTED`] for none.
+    pub block: u16,
+    /// `x | y << 4 | z << 8` of the block in its section, with
+    /// [`CELL_FLUID`] and [`CELL_NONE`].
+    pub cell: u16,
+    /// The quad's true normal (xyz) and the block's light emission (w, 0..15).
+    pub normal: [i8; 4],
+}
+impl PackVertex {
+    /// The stream of a vertex meshed without the pack: unlisted, no cell, up.
+    pub const UNTAGGED: Self = Self {
+        mid_uv: [0; 2],
+        block: PACK_UNLISTED,
+        cell: CELL_NONE,
+        normal: [0, 127, 0, 0],
+    };
+}
+/// [`PackVertex::block`] of a state without an id in the pack's range.
+pub const PACK_UNLISTED: u16 = u16::MAX;
+/// [`PackVertex::cell`]: the vertex is on a fluid surface (`mc_Entity.y` = 1).
+pub const CELL_FLUID: u16 = 1 << 12;
+/// [`PackVertex::cell`]: no block cell (distant-terrain tiles).
+pub const CELL_NONE: u16 = 1 << 13;
+/// A pack's block id as [`PackVertex::block`]: ids outside 0..=65534 are unlisted.
+pub fn pack_block_id(id: i32) -> u16 {
+    u16::try_from(id)
+        .ok()
+        .filter(|&id| id != PACK_UNLISTED)
+        .unwrap_or(PACK_UNLISTED)
+}
+/// The `cell` of block `(x, y, z)` (0..16 each) of a section.
+pub fn pack_cell([x, y, z]: [i32; 3], fluid: bool) -> u16 {
+    (x & 15) as u16 | ((y & 15) as u16) << 4 | ((z & 15) as u16) << 8 | if fluid { CELL_FLUID } else { 0 }
+}
+/// What meshes made for a shader pack carry: the pack's block id of every
+/// state and of the fluid surfaces, and the lighting options it changes.
+/// Meshed only while the pack draws (`WorkerContext::pack`).
+#[derive(Clone, Debug, PartialEq)]
 pub struct PackTags {
-    pub states: Vec<u8>,
-    /// The fluid surfaces' materials (`mc_Entity.y` = 1).
-    pub water: u8,
-    pub lava: u8,
+    /// [`PackVertex::block`] by block state id.
+    pub states: Vec<u16>,
+    /// The fluid surfaces' ids (the water and lava blocks').
+    pub water: u16,
+    pub lava: u16,
     /// `oldLighting`: keep vanilla's face shade (else every face is 1).
     pub old_lighting: bool,
     /// `ambientOcclusionLevel`: brightness b becomes 1 - level × (1 - b).
@@ -332,63 +398,76 @@ impl PackTags {
         blocks: &horizon_glsl_pack::BlockIds,
         plan: &horizon_glsl_pack::PackPlan,
     ) -> Self {
+        let fluid = |name: &str| pack_block_id(blocks.state_id(name, &[("level", "0")]));
         Self {
             states: (0..registry.len() as u32)
                 .map(|id| {
                     registry
                         .state(BlockStateId(id))
-                        .map_or(horizon_glsl_pack::NO_MATERIAL, |s| {
-                            blocks.material(&s.name, false)
+                        .map_or(PACK_UNLISTED, |s| {
+                            let props: Vec<(&str, &str)> = s
+                                .properties
+                                .iter()
+                                .map(|(k, v)| (k.as_str(), v.as_str()))
+                                .collect();
+                            pack_block_id(blocks.state_id(&s.name, &props))
                         })
                 })
                 .collect(),
-            water: blocks.material("water", true),
-            lava: blocks.material("lava", true),
+            water: fluid("water"),
+            lava: fluid("lava"),
             old_lighting: plan.properties.old_lighting,
             ao_level: plan.ambient_occlusion_level.clamp(0.0, 1.0),
         }
     }
+    /// The id of state `id`.
+    pub fn block(&self, id: u32) -> u16 {
+        self.states.get(id as usize).copied().unwrap_or(PACK_UNLISTED)
+    }
 }
-/// The pack's normal code of a quad: its axis, or `Other` when it is not
-/// axis-aligned (cross plants), from the winding the mesher's `facing` uses.
-fn quad_normal_code(
-    positions: &[[f32; 3]; 4],
-    facing: horizon_assets::model::Direction,
-) -> horizon_glsl_pack::NormalCode {
-    let [a, b, c] = [positions[0], positions[1], positions[2]];
-    let (u, v) = (
-        [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
-        [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+/// A unit normal as [`PackVertex::normal`], with `w`.
+fn pack_normal(n: [f32; 3], w: u8) -> [i8; 4] {
+    let q = |c: f32| (c * 127.0).round().clamp(-127.0, 127.0) as i8;
+    [q(n[0]), q(n[1]), q(n[2]), w.min(15) as i8]
+}
+/// The true normal of a quad from its corners (the winding `facing` uses:
+/// counter-clockwise seen from the front), snapped to an axis when it is one;
+/// `fallback` for a degenerate quad.
+pub(crate) fn quad_normal(p: [[f32; 3]; 4], fallback: [f32; 3]) -> [f32; 3] {
+    // The cross product of the diagonals: the quad's area normal.
+    let (d0, d1) = (
+        glam::Vec3::from(p[2]) - glam::Vec3::from(p[0]),
+        glam::Vec3::from(p[3]) - glam::Vec3::from(p[1]),
     );
-    let n = [
-        u[1] * v[2] - u[2] * v[1],
-        u[2] * v[0] - u[0] * v[2],
-        u[0] * v[1] - u[1] * v[0],
-    ];
-    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
-    let max = n.iter().fold(0.0f32, |m, c| m.max(c.abs()));
-    if len > 0.0 && max < 0.99 * len {
-        horizon_glsl_pack::NormalCode::Other
-    } else {
-        normal_code(facing)
+    let Some(n) = d0.cross(d1).try_normalize() else {
+        return fallback;
+    };
+    match n.abs().max_element() {
+        m if m > 0.9999 => n.map(|c| if c.abs() == m { c.signum() } else { 0.0 }).into(),
+        _ => n.into(),
     }
 }
-/// `horizon_glsl_pack::NormalCode` of a model face direction.
-fn normal_code(d: horizon_assets::model::Direction) -> horizon_glsl_pack::NormalCode {
+/// The pack stream of the quad `quad` (its four terrain vertices).
+pub(crate) fn pack_quad(quad: &[TerrainVertex], block: u16, cell: u16, normal: [f32; 3], emission: u8) -> [PackVertex; 4] {
+    let mean = |i: usize| ((quad.iter().map(|v| u32::from(v.uv[i])).sum::<u32>() + 2) / 4) as u16;
+    [PackVertex {
+        mid_uv: [mean(0), mean(1)],
+        block,
+        cell,
+        normal: pack_normal(normal, emission),
+    }; 4]
+}
+/// The unit normal of a model face direction.
+pub(crate) fn direction_normal(d: horizon_assets::model::Direction) -> [f32; 3] {
     use horizon_assets::model::Direction as D;
-    use horizon_glsl_pack::NormalCode as N;
     match d {
-        D::Down => N::Down,
-        D::Up => N::Up,
-        D::North => N::North,
-        D::South => N::South,
-        D::West => N::West,
-        D::East => N::East,
+        D::Down => [0.0, -1.0, 0.0],
+        D::Up => [0.0, 1.0, 0.0],
+        D::North => [0.0, 0.0, -1.0],
+        D::South => [0.0, 0.0, 1.0],
+        D::West => [-1.0, 0.0, 0.0],
+        D::East => [1.0, 0.0, 0.0],
     }
-}
-/// `color` with its alpha byte replaced by the pack's vertex tag.
-fn tag_color(color: u32, material: u8, normal: horizon_glsl_pack::NormalCode) -> u32 {
-    color & 0x00FF_FFFF | u32::from(horizon_glsl_pack::vertex_tag(normal, material)) << 24
 }
 fn redstone_color(power: u8) -> u32 {
     // RedstoneWireBlock.COLORS
@@ -537,16 +616,7 @@ impl MeshTables {
             water_overlay: layer("minecraft:block/water_overlay")?,
             lava_still: layer("minecraft:block/lava_still")?,
             lava_flow: layer("minecraft:block/lava_flow")?,
-            pack: std::sync::OnceLock::new(),
         })
-    }
-    /// Installs a shader pack's vertex tags, once. Only for a pack that
-    /// compiled: the stock shaders would read the tags as alpha.
-    pub fn set_pack_tags(&self, tags: PackTags) {
-        let _ = self.pack.set(tags);
-    }
-    pub fn pack_active(&self) -> bool {
-        self.pack.get().is_some()
     }
     pub fn facts(&self, state: BlockStateId) -> Option<MeshFacts> {
         let i = self.info.get(state.0 as usize)?;
@@ -784,12 +854,15 @@ pub struct Mesher<'a> {
     pub cutout_leaves: bool,
     /// Cull shared leaf and mangrove-root faces, including transparent leaves.
     pub cull_leaves: bool,
+    /// The shader pack the mesh is for: fills `SectionMesh::*_pack` and
+    /// applies the pack's lighting options. `None` draws with Horizon's shaders.
+    pub pack: Option<&'a PackTags>,
 }
 impl Mesher<'_> {
     /// `region[dz][dx]` are the chunks around the meshed column (centre 1,1).
     pub fn mesh(&mut self, region: &[[Option<&Chunk>; 3]; 3], sy: i32) -> SectionMesh {
         let mut out = self.tesselate(region, sy);
-        out.faces = facing::group(&mut out.solid);
+        out.group_faces();
         out
     }
     /// The section's quads in model order, before `facing::group`.
@@ -836,7 +909,15 @@ impl Mesher<'_> {
                     if state.fluid.kind() != FluidKind::Empty {
                         let water = tints.get(Resolver::Water, x, y, z);
                         let nether = self.nether_shading;
-                        fluid::tesselate(self.tables, nether, &pad, water, &mut out, [x, y, z]);
+                        fluid::tesselate(
+                            self.tables,
+                            self.pack,
+                            nether,
+                            &pad,
+                            water,
+                            &mut out,
+                            [x, y, z],
+                        );
                     }
                     if !state.model {
                         continue;
@@ -862,7 +943,7 @@ impl Mesher<'_> {
                         ],
                         None => [x as f32, y as f32, z as f32],
                     };
-                    let material = self.tables.pack.get().map(|p| p.states[id as usize]);
+                    let block = self.pack.map(|p| p.block(id));
                     let mut visible = [false; 6];
                     for d in Direction::ALL {
                         let [dx, dy, dz] = d.normal();
@@ -898,7 +979,7 @@ impl Mesher<'_> {
                                 face,
                                 ao,
                                 state,
-                                material,
+                                block,
                             );
                         }
                     }
@@ -938,11 +1019,11 @@ impl Mesher<'_> {
         face: &BakedFace,
         ao: bool,
         state: &Info,
-        material: Option<u8>,
+        block: Option<u16>,
     ) {
         let q = &face.quad;
         let shade_face = q.shade_direction_override.unwrap_or(q.facing);
-        let pack = material.and(self.tables.pack.get());
+        let pack = self.pack;
         let directional = match pack {
             Some(p) if !p.old_lighting => 1.0,
             _ => lighting::cardinal(self.nether_shading, shade_face),
@@ -966,11 +1047,7 @@ impl Mesher<'_> {
             ([lighting::gray(directional); 4], [coords; 4])
         };
         let tint = Self::tint(state, q.tint_index, tints, pos);
-        let target = if face.translucent {
-            &mut out.translucent
-        } else {
-            &mut out.solid
-        };
+        let (target, target_pack) = out.layer(face.translucent);
         for i in 0..4 {
             let g = gray[i] as u32;
             let rgb = match tint {
@@ -987,14 +1064,15 @@ impl Mesher<'_> {
                 } else {
                     face.layer as u16
                 },
-                match material {
-                    Some(m) => {
-                        tag_color(pack_rgb(rgb), m, quad_normal_code(&q.positions, q.facing))
-                    }
-                    None => pack_rgb(rgb),
-                },
+                pack_rgb(rgb),
                 pack_coords(lighting::with_emission(coords[i], q.light_emission)),
             ));
+        }
+        if let Some(block) = block {
+            let normal = quad_normal(q.positions, direction_normal(q.facing));
+            let quad = &target[target.len() - 4..];
+            let cell = pack_cell(pos, false);
+            target_pack.extend(pack_quad(quad, block, cell, normal, state.emission));
         }
     }
 }

@@ -6,7 +6,7 @@ use crate::{
     environment::Sky,
     graphics::GraphicsApi,
     hud::{HudBatch, HudRenderer},
-    mesher::{SectionMesh, TerrainVertex, Vertex},
+    mesher::{PackVertex, SectionMesh, TerrainVertex, Vertex},
     sprites::SpriteAnimation,
 };
 use glam::{DVec3, Mat4, Vec3, Vec4};
@@ -298,6 +298,37 @@ pub struct PackFrame {
     pub hide_gui: bool,
     /// `isEyeInWater`: 1 water, 2 lava, 3 powder snow, else 0.
     pub eye_in_fluid: i32,
+    /// The biome at the camera: `BIOME_*` index, `CAT_*` index,
+    /// precipitation (0 none, 1 rain, 2 snow), temperature and downfall.
+    pub biome: i32,
+    pub biome_category: i32,
+    pub biome_precipitation: i32,
+    pub temperature: f32,
+    pub rainfall: f32,
+    /// `thunderStrength` (0..1, scaled by the rain as vanilla's).
+    pub thunder_strength: f32,
+    /// Health, hunger and air as fractions of their maxima (-1 in creative
+    /// and spectator), and the maxima (`currentPlayer*`, `maxPlayer*`).
+    pub health: [f32; 2],
+    pub hunger: [f32; 2],
+    pub air: [f32; 2],
+    pub spectator: bool,
+    pub sneaking: bool,
+    pub sprinting: bool,
+    pub hurt: bool,
+    pub invisible: bool,
+    pub burning: bool,
+    pub on_ground: bool,
+    /// The cave ambience's mood, 0..1 (`playerMood`).
+    pub mood: f32,
+    /// A bolt being drawn, camera-relative, w = 1; zero without one.
+    pub lightning: [f32; 4],
+    /// Blocks from the camera to the first block along its view, for
+    /// `centerDepthSmooth`; infinite when the ray meets nothing.
+    pub center_distance: f32,
+    /// The darkness effect's blend and its pulsing light dim
+    /// (`darknessFactor`, `darknessLightFactor`).
+    pub darkness: [f32; 2],
 }
 
 /// What `draw_frame` worked out for the world pass, for the pack's frame
@@ -2863,6 +2894,36 @@ impl Renderer {
                 );
             }
         }
+        // The pack stream, at the same vertex indices in the page's second buffer.
+        if let Some(extra) = self.arena.extra_buffer(page) {
+            let stride = std::mem::size_of::<PackVertex>() as u64;
+            let parts = [
+                (0, &mesh.solid_pack, mesh.solid.len()),
+                (mesh.solid.len(), &mesh.translucent_pack, mesh.translucent.len()),
+            ];
+            for (offset, part, len) in parts {
+                if len == 0 {
+                    continue;
+                }
+                // A mesh made without the pack's tags draws as unlisted blocks.
+                let fallback;
+                let part = if part.len() == len {
+                    &part[..]
+                } else {
+                    fallback = vec![PackVertex::UNTAGGED; len];
+                    &fallback[..]
+                };
+                let bytes: &[u8] = bytemuck::cast_slice(part);
+                self.uploaded_bytes += bytes.len() as u64;
+                self.section_copy_bytes += bytes.len() as u64;
+                self.section_uploads.buffer(
+                    encoder,
+                    extra,
+                    (start + offset as u64) * stride,
+                    bytes,
+                );
+            }
+        }
         if self.section_copy_bytes >= SECTION_COPY_LIMIT
             && let Some(copies) = self.take_section_copies()
         {
@@ -2943,6 +3004,10 @@ impl Renderer {
                 .take_while(|&&p| p == (page, index_page))
                 .count();
             pass.set_vertex_buffer(0, self.arena.buffer(page).slice(..));
+            // A shader pack's stream: read by its terrain pipelines, ignored by the stock ones.
+            if let Some(extra) = self.arena.extra_buffer(page) {
+                pass.set_vertex_buffer(2, extra.slice(..));
+            }
             let indices = index_page.map_or(&self.indices, |p| self.sorted_indices.buffer(p));
             pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
             if self.multi_draw {
@@ -2979,6 +3044,23 @@ impl Renderer {
     /// A value that changes whenever `block_entities` gives something else.
     pub fn block_entity_revision(&self) -> u64 {
         self.block_entity_revision
+    }
+    /// Switches the section arena's `PackVertex` stream on (while a shader
+    /// pack draws terrain: its pipelines read vertex slot 2) or off. Every
+    /// section and distant tile is dropped (`clear_sections`), so the meshes
+    /// uploaded next, made with `Streaming::set_pack_tags`'s context, all
+    /// match. Nothing happens when the stream already is `on`.
+    pub fn set_pack_vertex_stream(&mut self, on: bool) {
+        if self.pack_vertex_stream() == on {
+            return;
+        }
+        self.clear_sections();
+        let stride = std::mem::size_of::<PackVertex>() as u64;
+        self.arena.set_extra_stride(on.then_some(stride));
+    }
+    /// Whether sections carry the `PackVertex` stream.
+    pub fn pack_vertex_stream(&self) -> bool {
+        self.arena.extra_stride().is_some()
     }
     pub fn clear_sections(&mut self) {
         self.block_entities.clear();
@@ -3087,6 +3169,12 @@ impl Renderer {
     /// Whether a shader pack is installed.
     pub fn has_shader_pack(&self) -> bool {
         self.glsl_pack.is_some()
+    }
+    /// What went wrong loading the installed pack's textures (for its report).
+    pub fn shader_pack_notes(&self) -> Vec<String> {
+        self.glsl_pack
+            .as_ref()
+            .map_or_else(Vec::new, |p| p.texture_notes().to_vec())
     }
     /// Draws the overworld with a compiled shader pack's programs from now on
     /// (`None`: Horizon's own). Errors leave the renderer without a pack.

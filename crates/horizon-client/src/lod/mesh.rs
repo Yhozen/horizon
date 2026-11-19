@@ -2,7 +2,7 @@
 use super::{Column, Span, TileKey};
 use crate::{
     fast_hash::{FxHashMap, FxHashSet},
-    mesher::{FaceGroups, OPAQUE_LAYER, SectionMesh, TerrainVertex},
+    mesher::{CELL_FLUID, CELL_NONE, OPAQUE_LAYER, SectionMesh, TerrainVertex, direction_normal, pack_quad},
     streaming::WorkerContext,
 };
 use horizon_assets::model::Direction;
@@ -51,6 +51,8 @@ struct Material {
     faces: [Option<Paint>; 2],
     fluid: u8,
     opaque: bool,
+    /// With a shader pack: the state's pack block id and light emission.
+    pack: Option<(u16, u8)>,
 }
 #[derive(Default)]
 pub(super) struct Mesher {
@@ -196,6 +198,15 @@ impl Mesher {
             }),
             fluid: styles.fluid,
             opaque: styles.opaque,
+            pack: context.pack.as_deref().map(|p| {
+                let block = match styles.fluid {
+                    1 => p.water,
+                    2 => p.lava,
+                    _ => p.block(span.state.0),
+                };
+                let emission = context.tables.facts(span.state).map_or(0, |f| f.emission);
+                (block, emission)
+            }),
         }
     }
 }
@@ -223,6 +234,8 @@ struct FaceKey {
     light: u16,
     color: u32,
     translucent: bool,
+    /// The pack stream's block id, emission and fluid bit (`Material::pack`).
+    pack: Option<(u16, u8, bool)>,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Rect {
@@ -244,6 +257,9 @@ fn add_face(faces: &mut Faces, direction: Direction, plane: f32, rect: Rect, mat
                 light: paint.light,
                 color: paint.color,
                 translucent: paint.translucent,
+                pack: material
+                    .pack
+                    .map(|(block, emission)| (block, emission, material.fluid != 0)),
             })
             .or_default()
             .push(rect);
@@ -558,7 +574,7 @@ fn mesh_columns_with_edges(
             emit(&mut mesh, key, rect)
         }
     }
-    mesh.faces = FaceGroups::group(&mut mesh.solid);
+    mesh.group_faces();
     mesh
 }
 
@@ -610,6 +626,7 @@ mod refinement_tests {
                 ],
                 fluid: 0,
                 opaque: true,
+                pack: None,
             },
         );
         let [ox, _, oz] = parent.origin();
@@ -869,11 +886,7 @@ fn emit_quad(mesh: &mut SectionMesh, key: FaceKey, rect: Rect) {
     ) {
         points.reverse()
     }
-    let out = if key.translucent {
-        &mut mesh.translucent
-    } else {
-        &mut mesh.solid
-    };
+    let (out, out_pack) = mesh.layer(key.translucent);
     // Tile origins are integer multiples of a block, so local coordinates
     // retain the world texture phase without distant-coordinate precision loss;
     // a whole number of blocks off each UV keeps it (the sampler repeats) and
@@ -898,6 +911,12 @@ fn emit_quad(mesh: &mut SectionMesh, key: FaceKey, rect: Rect) {
             key.light,
         )
     }));
+    if let Some((block, emission, fluid)) = key.pack {
+        let normal = direction_normal(key.direction);
+        let cell = CELL_NONE | if fluid { CELL_FLUID } else { 0 };
+        let quad = &out[out.len() - 4..];
+        out_pack.extend(pack_quad(quad, block, cell, normal, emission));
+    }
 }
 
 #[cfg(test)]
@@ -934,6 +953,7 @@ mod tests {
             ],
             fluid: u8::from(water),
             opaque: !water,
+            pack: None,
         }
     }
     fn mesh(columns: &[Column]) -> SectionMesh {
@@ -963,6 +983,7 @@ mod tests {
             light: 0,
             color: 0,
             translucent: false,
+            pack: None,
         };
         emit(
             &mut mesh,
@@ -1031,6 +1052,56 @@ mod tests {
                 16.0
             );
         }
+    }
+    #[test]
+    fn tiles_fill_the_pack_stream_with_face_normals_and_no_cell() {
+        let mut columns = columns();
+        for (i, column) in columns.iter_mut().enumerate() {
+            // Stone below, water on half the tile.
+            column.spans = vec![span(0, 4, 1)];
+            if i % 16 < 8 {
+                column.spans.push(span(4, 6, 2));
+            }
+        }
+        let key = TileKey {
+            x: 0,
+            z: 0,
+            level: 0,
+        };
+        let mesh = mesh_columns(key, &columns, &FxHashSet::default(), None, |span, d| {
+            let water = span.state.0 == 2;
+            Material {
+                pack: Some((if water { 9 } else { 1 }, 0)),
+                ..material(span, d)
+            }
+        });
+        assert!(!mesh.solid.is_empty() && !mesh.translucent.is_empty());
+        assert_eq!(mesh.solid_pack.len(), mesh.solid.len());
+        assert_eq!(mesh.translucent_pack.len(), mesh.translucent.len());
+        for (quads, pack, block) in [
+            (&mesh.solid, &mesh.solid_pack, 1),
+            (&mesh.translucent, &mesh.translucent_pack, 9),
+        ] {
+            for (q, p) in quads.as_chunks::<4>().0.iter().zip(pack.as_chunks::<4>().0) {
+                let n = normal(q).normalize();
+                let stored = glam::Vec3::new(
+                    f32::from(p[0].normal[0]),
+                    f32::from(p[0].normal[1]),
+                    f32::from(p[0].normal[2]),
+                ) / 127.0;
+                // Grouping by facing moved the stream with its quads.
+                assert!(n.dot(stored) > 0.999, "{n} {stored}");
+                assert_eq!(p[0].block, block);
+                let fluid = if block == 9 { CELL_FLUID } else { 0 };
+                assert_eq!(p[0].cell, CELL_NONE | fluid);
+                let mean = |i: usize| (q.iter().map(|v| u32::from(v.uv[i])).sum::<u32>() + 2) / 4;
+                assert_eq!(p[0].mid_uv, [mean(0) as u16, mean(1) as u16]);
+            }
+        }
+        // Without a pack: no stream.
+        let plain = mesh_columns(key, &columns, &FxHashSet::default(), None, material);
+        assert_eq!(plain.solid.len(), mesh.solid.len());
+        assert!(plain.solid_pack.is_empty() && plain.translucent_pack.is_empty());
     }
     #[test]
     fn gaps_and_real_bottoms_remain_open_without_floor_curtains() {

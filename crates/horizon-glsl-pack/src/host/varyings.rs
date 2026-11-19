@@ -686,22 +686,22 @@ mod tests {
     }
 
     #[test]
-    fn mc_entity_reads_the_material_table() {
+    fn mc_entity_reads_the_pack_stream() {
         for (geometry, ty, want) in [
             (
                 Geometry::Terrain,
                 "vec4",
-                "mc_Entity = vec4(vec4(hz_mc_entity[int(hz_tag & 31u)], 0.0, 1.0));",
+                "mc_Entity = vec4(vec4(hz_in_block.x == 65535u ? -1.0 : float(hz_in_block.x), (hz_in_block.y & 4096u) != 0u ? 1.0 : 0.0, 0.0, 1.0));",
             ),
             (
                 Geometry::Terrain,
                 "float",
-                "mc_Entity = float(vec4(hz_mc_entity[int(hz_tag & 31u)], 0.0, 1.0).x);",
+                "mc_Entity = float(vec4(hz_in_block.x == 65535u ? -1.0 : float(hz_in_block.x), (hz_in_block.y & 4096u) != 0u ? 1.0 : 0.0, 0.0, 1.0).x);",
             ),
             (
                 Geometry::Terrain,
                 "ivec3",
-                "mc_Entity = ivec3(vec4(hz_mc_entity[int(hz_tag & 31u)], 0.0, 1.0).xyz);",
+                "mc_Entity = ivec3(vec4(hz_in_block.x == 65535u ? -1.0 : float(hz_in_block.x), (hz_in_block.y & 4096u) != 0u ? 1.0 : 0.0, 0.0, 1.0).xyz);",
             ),
             (
                 Geometry::Fullscreen,
@@ -733,15 +733,6 @@ mod tests {
             };
             let (vs, _) = sources(&p.0, &p.1, &spec).unwrap();
             assert!(vs.contains(want), "{want}\n{vs}");
-            if geometry == Geometry::Terrain {
-                // Water's fluid surface is material 0; 31 is unlisted.
-                assert!(vs.contains("hz_mc_entity[32] = vec2[](vec2(9.0, 1.0), vec2(11.0, 1.0), vec2(-123.0, 0.0),"), "{vs}");
-                assert!(
-                    vs.ends_with("vec2(-1.0, 0.0));\n")
-                        || vs.contains("vec2(-1.0, 0.0), vec2(-1.0, 0.0));"),
-                    "{vs}"
-                );
-            }
             glsl_to_wgsl(&vs, Stage::Vertex).unwrap_or_else(|e| panic!("{e}\n{vs}"));
         }
     }

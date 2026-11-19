@@ -374,7 +374,12 @@ fn compile_target(target: &Target, host: &HostParams) -> JobResult {
 /// The manager's state, in `Game`.
 #[derive(Default)]
 pub(super) struct ShaderPacks {
+    /// What the pages show and edit.
     pub selection: Selection,
+    /// What the game runs: the selection and the option values as of the
+    /// last Apply (or the saved ones at start).
+    pub active: Selection,
+    pub active_values: Option<Vec<(String, String)>>,
     pub library: Vec<LibraryPack>,
     /// `--shader-pack PATH`: chosen for this run, not saved.
     pub cli: Option<LibraryPack>,
@@ -421,6 +426,7 @@ impl ShaderPacks {
             self.selection = Selection::parse(&text);
         }
         self.rescan();
+        self.active = self.selection.clone();
         if let Some(path) = cli {
             let file = path
                 .file_name()
@@ -435,6 +441,7 @@ impl ShaderPacks {
                     enabled: true,
                     pack: Some(file),
                 };
+                self.active = self.selection.clone();
                 self.save_selection();
             } else {
                 self.cli = Some(LibraryPack { file, path });
@@ -509,17 +516,32 @@ impl ShaderPacks {
         if let Some(cli) = &self.cli {
             return Some(cli.clone());
         }
-        if !self.selection.enabled {
+        if !self.active.enabled {
             return None;
         }
-        let file = self.selection.pack.as_ref()?;
+        let file = self.active.pack.as_ref()?;
         self.library.iter().find(|p| &p.file == file).cloned()
+    }
+
+    /// Makes the pages' choices the running ones.
+    pub fn apply(&mut self) {
+        self.active = self.selection.clone();
+        self.active_values = self
+            .active
+            .pack
+            .clone()
+            .map(|f| self.values_of(&f).clone());
+        self.failed = None;
+        self.save_selection();
     }
 
     /// What should be compiled for `dim`, if anything.
     pub fn target(&mut self, dim: Dim) -> Option<Target> {
         let pack = self.chosen()?;
-        let mut values = self.values_of(&pack.file).clone();
+        let mut values = match (&self.active_values, &self.cli) {
+            (Some(v), None) => v.clone(),
+            _ => self.values_of(&pack.file).clone(),
+        };
         values.extend(self.cli_options.iter().cloned());
         Some(Target {
             overrides: values
@@ -623,6 +645,16 @@ impl Game<'_> {
             let installed = match (compiled, files) {
                 (Some(compiled), Some(files)) => {
                     let compiled = Arc::new(compiled);
+                    for program in compiled.programs.values() {
+                        report.notes.extend(
+                            program
+                                .notes
+                                .iter()
+                                .map(|n| format!("{}: {n}", program.source)),
+                        );
+                    }
+                    report.notes.sort();
+                    report.notes.dedup();
                     match self.install_shader_pack(&compiled, &files) {
                         Ok(()) => Some(Applied {
                             target: target.clone(),
@@ -644,6 +676,11 @@ impl Game<'_> {
                 }
                 _ => None,
             };
+            if installed.is_some()
+                && let Some(r) = self.renderer.as_ref()
+            {
+                report.notes.extend(r.shader_pack_notes());
+            }
             log::info!(
                 "Horizon: shader pack {} ({}): {}\n{}",
                 target.file,
@@ -770,18 +807,35 @@ impl Game<'_> {
         }
     }
 
-    /// The mesher's per-block data for the pack (`None`: Horizon's own).
+    /// The mesher's per-block data for the pack (`None`: Horizon's own):
+    /// meshes carry the pack's `PackVertex` stream exactly while this is set,
+    /// so a change remeshes every section (as a resource reload does).
     fn set_shader_pack_tags(&mut self, compiled: Option<&Arc<CompiledPack>>) {
-        // TODO(vertex stream): swappable tags; until then they can only be set once.
-        if let Some(c) = compiled {
-            self.pack
-                .context
-                .tables
-                .set_pack_tags(horizon_client::mesher::PackTags::new(
-                    self.pack.assets.registry,
-                    &c.blocks,
-                    &c.plan,
-                ));
+        let tags = compiled.map(|c| {
+            Arc::new(horizon_client::mesher::PackTags::new(
+                self.pack.assets.registry,
+                &c.blocks,
+                &c.plan,
+            ))
+        });
+        let stream = self
+            .renderer
+            .as_ref()
+            .is_none_or(|r| r.pack_vertex_stream() == tags.is_some());
+        if stream
+            && self.pack.context.pack == tags
+            && self.streaming.context().pack == tags
+        {
+            return;
+        }
+        // New streamers and distant terrain take the pack resources' context.
+        self.pack.context = self.pack.context.with_pack(tags.clone());
+        self.clear_lod();
+        self.streaming
+            .reload_resources(&mut self.world, self.pack.context.clone());
+        self.pending_uploads.clear();
+        if let Some(renderer) = &mut self.renderer {
+            renderer.set_pack_vertex_stream(tags.is_some());
         }
     }
 
@@ -843,5 +897,131 @@ mod tests {
         strip_top_folder(&mut files);
         assert!(files.0.contains_key("shaders/final.fsh"));
         assert!(files.0.contains_key("readme.txt"));
+    }
+}
+
+// The Shader Packs pages (`horizon_client::shader_packs_ui`).
+impl Game<'_> {
+    /// What the pages show; set into `ui.options.shader_packs` every frame while one shows
+    /// (`poll_control`, game/control.rs).
+    pub(crate) fn shader_packs_view(&mut self) -> horizon_client::shader_packs_ui::ShaderPacksView {
+        use horizon_client::shader_packs_ui::{PackRow, SettingsView, ShaderPacksView};
+        let sp = &mut self.shader_packs;
+        sp.load();
+        let selected = match &sp.cli {
+            Some(c) => Some(c.file.clone()),
+            None => sp.selection.pack.clone(),
+        };
+        let packs = sp
+            .library
+            .iter()
+            .chain(sp.cli.iter())
+            .map(|p| PackRow {
+                file: p.file.clone(),
+                title: p
+                    .file
+                    .strip_suffix(".zip")
+                    .unwrap_or(&p.file)
+                    .to_string(),
+                status: sp.reports.get(&p.file).map(|r| r.status),
+            })
+            .collect();
+        let report = selected
+            .as_ref()
+            .and_then(|f| sp.reports.get(f).map(|r| r.text(f)))
+            .map(|t| t.lines().map(str::to_string).collect())
+            .unwrap_or_default();
+        let settings = match selected.as_ref() {
+            Some(f) => {
+                let model = sp.model_of(f);
+                model.map(|model| SettingsView {
+                    model,
+                    values: sp.values_of(f).clone(),
+                    screen: sp.settings_screen.clone(),
+                })
+            }
+            None => None,
+        };
+        ShaderPacksView {
+            enabled: sp.cli.is_some() || sp.selection.enabled,
+            packs,
+            selected,
+            applied: sp.applied.as_ref().map(|a| a.target.file.clone()),
+            progress: sp.progress(),
+            web: cfg!(target_arch = "wasm32"),
+            report,
+            settings,
+        }
+    }
+
+    /// A Shader Packs page event (`options_ui::Event::ShaderPacks`), handled while the click
+    /// that caused it is (the browser's file picker needs that).
+    pub(crate) fn shader_pack_event(&mut self, ev: horizon_client::shader_packs_ui::ShaderPackEvent) {
+        use horizon_client::shader_packs_ui::ShaderPackEvent as E;
+        self.shader_packs.load();
+        let sp = &mut self.shader_packs;
+        match ev {
+            E::SetEnabled(on) => {
+                sp.cli = None;
+                sp.selection.enabled = on;
+            }
+            E::Select(file) => {
+                sp.cli = None;
+                if sp.selection.pack.as_deref() != Some(file.as_str()) {
+                    sp.settings_screen = None;
+                }
+                sp.selection.pack = Some(file);
+            }
+            E::Apply => sp.apply(),
+            E::OpenFolder => {
+                let dir = ShaderPacks::folder();
+                let _ = fs::create_dir_all(&dir);
+                super::packs::open_folder(&dir);
+            }
+            E::AddPack => {
+                if !call_page("horizonPickShaderPack", None) {
+                    sp.rescan();
+                }
+            }
+            E::Delete(file) => sp.delete(&file),
+            E::CopyReport => {
+                let text = sp
+                    .selection
+                    .pack
+                    .as_ref()
+                    .and_then(|f| sp.reports.get(f).map(|r| r.text(f)))
+                    .unwrap_or_default();
+                if !call_page("horizonCopyText", Some(&text)) {
+                    use horizon_client::clipboard::Clipboard as _;
+                    self.clipboard.set(&text);
+                }
+            }
+            E::OpenScreen(screen) => sp.settings_screen = screen,
+            E::SetOption { name, value } => {
+                if let Some(file) = sp.selection.pack.clone()
+                    && let Some(model) = sp.model_of(&file)
+                {
+                    let mut values = model.values_from(sp.values_of(&file));
+                    values.insert(name, value);
+                    let changed = model.changed(&values);
+                    sp.save_values(&file, changed);
+                }
+            }
+            E::ApplyProfile(profile) => {
+                if let Some(file) = sp.selection.pack.clone()
+                    && let Some(model) = sp.model_of(&file)
+                {
+                    let values = model.values_from(sp.values_of(&file));
+                    let values = horizon_glsl_pack::screens::apply_profile(&model, &profile, &values);
+                    let changed = model.changed(&values);
+                    sp.save_values(&file, changed);
+                }
+            }
+            E::ResetOptions => {
+                if let Some(file) = sp.selection.pack.clone() {
+                    sp.save_values(&file, Vec::new());
+                }
+            }
+        }
     }
 }
