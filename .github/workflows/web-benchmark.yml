@@ -1,0 +1,178 @@
+name: Web frame-rate benchmark
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/web-benchmark.yml'
+      - '.cargo/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'content/open/**'
+      - 'crates/**'
+      - 'third_party/**'
+      - 'tools/web/**'
+      - 'web/**'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: web-benchmark-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  frame-rate:
+    runs-on: boat-large
+    timeout-minutes: 15
+    env:
+      CARGO_INCREMENTAL: '0'
+      HORIZON_TELEMETRY_URL: 'off'
+    steps:
+      - name: Check out the PR merge commit
+        uses: actions/checkout@v4
+        with:
+          path: pr
+          persist-credentials: false
+      - name: Check out the PR base commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        id: rust
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        id: node
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: pr/web/package.json
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pr -> target
+          shared-key: web-benchmark
+      - name: Restore the built base site
+        id: base-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: base/web/.build-open/static
+          key: web-bench-base-v1-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-${{ steps.node.outputs.node-version }}-${{ github.event.pull_request.base.sha }}
+      - name: Set up Chromium and WASM build tools
+        working-directory: pr/web
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps --no-shell chromium
+          chrome=$(node --input-type=module -e 'import { chromium } from "playwright"; console.log(chromium.executablePath());')
+          test -x "$chrome"
+          printf 'CHROME_PATH=%s\n' "$chrome" >> "$GITHUB_ENV"
+      - name: Build Horizon Open Creative
+        env:
+          BASE_CACHE_HIT: ${{ steps.base-cache.outputs.cache-hit }}
+        run: |
+          # Both build scripts read their checkout's target/ directly.
+          mkdir -p "$GITHUB_WORKSPACE/pr/target"
+          ln -s "$GITHUB_WORKSPACE/pr/target" base/target
+
+          build_open() (
+            cd "$1"
+            version=$(awk '/^name = "wasm-bindgen"$/ { getline; gsub(/"/, "", $3); print $3; exit }' Cargo.lock)
+            test -n "$version"
+            bindgen_dir="$RUNNER_TEMP/wasm-bindgen/$version"
+            if [[ ! -x "$bindgen_dir/wasm-bindgen" ]]; then
+              mkdir -p "$bindgen_dir"
+              curl --fail --silent --show-error --location --retry 3 \
+                "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$version/wasm-bindgen-$version-x86_64-unknown-linux-musl.tar.gz" \
+                | tar -xz --strip-components=1 -C "$bindgen_dir" --wildcards '*/wasm-bindgen'
+            fi
+            export PATH="$bindgen_dir:$PATH"
+            pnpm --dir web build:open
+          )
+
+          build_open pr
+          if [[ "$BASE_CACHE_HIT" != true ]]; then
+            pnpm --dir base/web install --frozen-lockfile
+            build_open base
+          fi
+      - name: Compare fixed dawn and noon scenes on SwiftShader
+        id: measure
+        env:
+          HORIZON_HOME: ${{ runner.temp }}/horizon-bench/game
+          HORIZON_LAUNCHER_HOME: ${{ runner.temp }}/horizon-bench/launcher
+          XDG_DATA_HOME: ${{ runner.temp }}/horizon-bench/data
+          XDG_CONFIG_HOME: ${{ runner.temp }}/horizon-bench/config
+          HORIZON_LAUNCHER_NO_SELF_UPDATE: '1'
+          HORIZON_NO_AUDIO: '1'
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          logs = Path("benchmark-logs")
+          logs.mkdir()
+          minimum_ratio = 0.85
+
+          def measure(build, scene, ticks, attempt):
+              site = Path(build, "web/.build-open/static").resolve()
+              args = (
+                  "--world Bench --creative --test-terrain --render-distance 4 --in-frame "
+                  "--name Bench --seed 0 --weather clear --spawn-radius 0 --look 30,15 "
+                  f"--time {ticks} --world-frames 18446744073709551615 --timeout-seconds 1000000000"
+              )
+              path = logs / f"{scene}-{attempt}-{build}.log"
+              with path.open("w") as log:
+                  result = subprocess.run(
+                      ["timeout", "--kill-after=5s", "65s", "pnpm", "bench", "--site", "open",
+                       "--seconds", "20", "--tail", "4", "--strict", "--verbose", f"--args={args}"],
+                      cwd="pr/web", env={**os.environ, "HORIZON_OPEN_SITE": str(site)},
+                      stdout=log, stderr=subprocess.STDOUT, check=False,
+                  )
+              output = path.read_text()
+              fps = re.search(r"^steady fps \(last 4 intervals\): ([\d.]+)$", output, re.M)
+              if result.returncode or not fps or float(fps[1]) <= 0:
+                  print("\n".join(output.splitlines()[-40:]))
+                  raise SystemExit(f"No valid frame-rate result for {scene} on {build} (exit {result.returncode})")
+              return float(fps[1])
+
+          failed = False
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", buffering=1) as summary:
+              print("### Horizon Open Creative · Chromium / SwiftShader\n", file=summary)
+              print("| Scene | Attempt | Base FPS | PR FPS | Change |", file=summary)
+              print("| --- | --- | ---: | ---: | ---: |", file=summary)
+              for scene, ticks, order in [("Dawn", 0, ("base", "pr")), ("Noon", 6000, ("pr", "base"))]:
+                  for attempt, builds in enumerate((order, order[::-1]), start=1):
+                      fps = {build: measure(build, scene, ticks, attempt) for build in builds}
+                      ratio = fps["pr"] / fps["base"]
+                      change = f"{ratio - 1:+.1%}"
+                      print(f"| {scene} | {attempt} | {fps['base']:.2f} | {fps['pr']:.2f} | {change} |", file=summary)
+                      print(f"{scene} (attempt {attempt}): {fps['base']:.2f} → {fps['pr']:.2f} FPS ({change})", flush=True)
+                      if ratio >= minimum_ratio:
+                          break
+                      if attempt == 2:
+                          print(f"::error::{scene} FPS dropped by more than 15% on both attempts")
+                          failed = True
+          raise SystemExit(int(failed))
+          PY
+      - name: Upload benchmark logs
+        if: ${{ !cancelled() && steps.measure.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-benchmark-logs
+          path: benchmark-logs/
+          retention-days: 7
+      - name: Cache the built base site for the next PR update
+        if: ${{ !cancelled() && steps.measure.outcome != 'skipped' && steps.base-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: base/web/.build-open/static
+          key: ${{ steps.base-cache.outputs.cache-primary-key }}

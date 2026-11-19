@@ -3,7 +3,7 @@
 // game's two-second status lines. --shaderpack serves a local zip to the page as ?shaderpack=.
 //   node scripts/bench.mjs [--site open] [--args="GAME ARGS"] [--shaderpack pack.zip] [--seconds 60]
 //     [--tail 15] [--shot frame.png] [--profile main.cpuprofile] [--trace trace.json]
-//     [--release other/release.json] [--gpu] [--verbose]
+//     [--release other/release.json] [--gpu] [--verbose] [--strict]
 // Without --gpu, WebGPU runs on SwiftShader (a machine without a GPU).
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
@@ -16,6 +16,7 @@ const { values } = parseArgs({ options: {
   shot: { type: "string" }, profile: { type: "string" }, trace: { type: "string" }, release: { type: "string" },
   site: { type: "string", default: "horizon" }, shaderpack: { type: "string" },
   gpu: { type: "boolean", default: false }, verbose: { type: "boolean", default: false },
+  strict: { type: "boolean", default: false },
 } });
 const seconds = Number(values.seconds), tail = Number(values.tail);
 const web = fileURLToPath(new URL("..", import.meta.url));
@@ -79,7 +80,10 @@ try {
   page.on("console", (message) => {
     const text = message.text(), s = (Date.now() - t0) / 1000;
     const status = text.match(/Horizon web: frame (\d+).*?chunks (\d+)/);
-    if (status) samples.push({ s, frame: Number(status[1]), chunks: Number(status[2]) });
+    if (status) {
+      const settled = text.match(/screen Playing title false paused false .*?chunks ([1-9]\d*) generated (\d+) meshed ([1-9]\d*) loading false entry false player Some/);
+      samples.push({ s, frame: Number(status[1]), settled: settled?.slice(1).join("/") });
+    }
     if (values.verbose || /error|panic|Failed/i.test(text)) console.log(`[${s.toFixed(1)}] ${text.slice(0, 300)}`);
   });
   page.on("pageerror", (error) => console.log("pageerror", error.message));
@@ -87,9 +91,12 @@ try {
   if (values.args) query.set("args", values.args);
   if (values.shaderpack) query.set("shaderpack", `${origin}/bench-shaderpack.zip`);
   await page.goto(`${origin}/?${query}`);
-  // The start page waits for its Play button.
-  const play = page.getByRole("button", { name: /^Play/ });
-  await play.first().waitFor({ timeout: 30000 }).then(() => play.first().click(), () => {});
+  // The menu starts automatically with ?args=. Older pages can still need a click.
+  const play = page.getByRole("button", { name: /^Play/ }).first();
+  await Promise.race([
+    play.waitFor({ timeout: 30000 }).then(() => play.click(), () => {}),
+    page.waitForFunction(() => window.horizonStatus, null, { timeout: 30000 }).catch(() => {}),
+  ]);
   await page.waitForFunction(() => window.horizonStarted || window.horizonError, null, { timeout: 300000 });
   const wait = (fraction) => new Promise((done) => setTimeout(done, seconds * 1000 * fraction));
   if (values.profile) {
@@ -119,6 +126,15 @@ try {
   const rates = samples.slice(1).map((x, i) => (x.frame - samples[i].frame) / (x.s - samples[i].s));
   console.log(`fps per status line: ${rates.map((x) => x.toFixed(1)).join(" ")}`);
   const last = samples.slice(-(tail + 1));
+  if (values.strict) {
+    if (error) throw new Error(error);
+    if (last.length <= 1 || last.length !== tail + 1 || !last[0].settled ||
+        last.some((sample) => sample.settled !== last[0].settled) ||
+        last.slice(1).some((sample, i) => sample.frame <= last[i].frame) ||
+        (Date.now() - t0) / 1000 - last.at(-1).s > 5) {
+      throw new Error("The game did not keep rendering a settled world through the measurement window");
+    }
+  }
   if (last.length > 1) {
     const fps = (last.at(-1).frame - last[0].frame) / (last.at(-1).s - last[0].s);
     console.log(`steady fps (last ${last.length - 1} intervals): ${fps.toFixed(2)}`);
