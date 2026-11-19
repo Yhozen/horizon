@@ -485,7 +485,9 @@ impl Pp<'_> {
             });
             i = j;
         }
-        Ok(expr::eval(&self.expand(&s, &mut Vec::new()))? != 0.0)
+        // A condition that does not parse is false, as in Iris (Pastel has
+        // `#if (in(biome, …)` in a live branch).
+        Ok(expr::eval(&self.expand(&s, &mut Vec::new())).is_ok_and(|v| v != 0.0))
     }
 
     /// Expands macros in `text`, whole identifiers only; `hide` holds the
@@ -709,6 +711,11 @@ mod tests {
             "#if defined IS_IRIS && MC_VERSION >= 260300 && IRIS_TAG_SUPPORT == 2\nV\n#endif\n";
         assert_eq!(pp_with_version(text, 260300).trim(), "V");
         assert_eq!(BIOMES[40], "plains");
+    }
+
+    #[test]
+    fn broken_conditions_are_false() {
+        assert_eq!(pp("#if (in(biome, 3)\nA\n#else\nB\n#endif\n").trim(), "B");
     }
 
     #[test]

@@ -19,14 +19,12 @@ pub fn glsl_to_wgsl(source: &str, stage: Stage) -> Result<String, String> {
         Stage::Vertex => naga::ShaderStage::Vertex,
         Stage::Fragment => naga::ShaderStage::Fragment,
     };
-    let mut frontend = glsl::Frontend::default();
-    let mut module = frontend
-        .parse(&glsl::Options::from(stage), source)
-        .map_err(|e| e.emit_to_string(source))?;
+    let (mut module, floated) = parse_floating_ambiguous(source, stage)?;
+    let source = floated.as_deref().unwrap_or(source);
     // `vector % scalar`: wrap the scalar in the source and parse again.
     let mut patched = String::new();
     for _ in 0..4 {
-        let splats = modulo_splats(&module);
+        let splats = modulo_splats(&module, if patched.is_empty() { source } else { &patched });
         if splats.is_empty() {
             break;
         }
@@ -493,7 +491,7 @@ fn flatten_block(
 /// scalar operand's byte range and the vector constructor to wrap it in.
 /// GLSL allows the mix; naga's GLSL front end keeps it as is and its
 /// validator rejects it.
-fn modulo_splats(module: &naga::Module) -> Vec<(std::ops::Range<usize>, String)> {
+fn modulo_splats(module: &naga::Module, source: &str) -> Vec<(std::ops::Range<usize>, String)> {
     use naga::{BinaryOperator, Expression, ScalarKind, TypeInner};
     let functions = module
         .functions
@@ -510,7 +508,7 @@ fn modulo_splats(module: &naga::Module) -> Vec<(std::ops::Range<usize>, String)>
         if types.grow(last, &f.expressions, &ctx).is_err() {
             continue;
         }
-        for (_, e) in f.expressions.iter() {
+        for (h, e) in f.expressions.iter() {
             let Expression::Binary {
                 op: BinaryOperator::Modulo,
                 left,
@@ -523,9 +521,9 @@ fn modulo_splats(module: &naga::Module) -> Vec<(std::ops::Range<usize>, String)>
                 types.get(left, &module.types),
                 types.get(right, &module.types),
             );
-            let (operand, size, scalar) = match (l, r) {
-                (TypeInner::Vector { size, scalar }, TypeInner::Scalar(_)) => (right, size, scalar),
-                (TypeInner::Scalar(_), TypeInner::Vector { size, scalar }) => (left, size, scalar),
+            let (is_right, size, scalar) = match (l, r) {
+                (TypeInner::Vector { size, scalar }, TypeInner::Scalar(_)) => (true, size, scalar),
+                (TypeInner::Scalar(_), TypeInner::Vector { size, scalar }) => (false, size, scalar),
                 _ => continue,
             };
             let prefix = match scalar.kind {
@@ -533,12 +531,124 @@ fn modulo_splats(module: &naga::Module) -> Vec<(std::ops::Range<usize>, String)>
                 ScalarKind::Uint => "uvec",
                 _ => "vec",
             };
-            if let Some(range) = f.expressions.get_span(operand).to_range() {
-                out.push((range, format!("{prefix}{}", *size as u8)));
+            // The operand's text is the `%`'s, split at its top-level `%`: an
+            // operand's own span may be elsewhere (a constant's declaration).
+            let Some(range) = f.expressions.get_span(h).to_range() else {
+                continue;
+            };
+            let Some(text) = source.get(range.clone()) else {
+                continue;
+            };
+            let Some(at) = top_level_percent(text) else {
+                continue;
+            };
+            let side = if is_right {
+                range.start + at + 1..range.end
+            } else {
+                range.start..range.start + at
+            };
+            let lead = source[side.clone()].len() - source[side.clone()].trim_start().len();
+            let trail = source[side.clone()].len() - source[side.clone()].trim_end().len();
+            let side = side.start + lead..side.end - trail;
+            if !side.is_empty() {
+                out.push((side, format!("{prefix}{}", *size as u8)));
             }
         }
     }
     out
+}
+
+/// Parses `source`; a call naga finds ambiguous (`max(x, 1)` with a float
+/// `x`: GLSL converts the `1`, naga's overload resolution does not choose)
+/// gets its integer literals written as floats, and the source is parsed
+/// again. Returns the patched source when it changed.
+fn parse_floating_ambiguous(
+    source: &str,
+    stage: naga::ShaderStage,
+) -> Result<(naga::Module, Option<String>), String> {
+    let mut text: Option<String> = None;
+    for _ in 0..16 {
+        let current = text.as_deref().unwrap_or(source);
+        let errors = match glsl::Frontend::default().parse(&glsl::Options::from(stage), current) {
+            Ok(module) => return Ok((module, text)),
+            Err(e) => e,
+        };
+        let ambiguous: Vec<_> = errors
+            .errors
+            .iter()
+            .filter(|e| e.kind.to_string().starts_with("Ambiguous best function"))
+            .filter_map(|e| e.meta.to_range())
+            .collect();
+        let patched = float_literals(current, &ambiguous);
+        if ambiguous.is_empty() || patched == current {
+            return Err(errors.emit_to_string(current));
+        }
+        text = Some(patched);
+    }
+    let current = text.as_deref().unwrap_or(source);
+    glsl::Frontend::default()
+        .parse(&glsl::Options::from(stage), current)
+        .map(|m| (m, text.clone()))
+        .map_err(|e| e.emit_to_string(current))
+}
+
+/// `source` with the integer literals inside `ranges` (outside `[…]`) as floats.
+fn float_literals(source: &str, ranges: &[std::ops::Range<usize>]) -> String {
+    let mut out = String::with_capacity(source.len() + 16);
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    let mut brackets = 0i32;
+    while i < bytes.len() {
+        let inside = ranges.iter().any(|r| r.contains(&i));
+        let c = bytes[i];
+        if !inside {
+            brackets = 0;
+            out.push(c as char);
+            i += 1;
+            continue;
+        }
+        match c {
+            b'[' => brackets += 1,
+            b']' => brackets -= 1,
+            _ => {}
+        }
+        let starts_number = c.is_ascii_digit()
+            && (i == 0
+                || !(bytes[i - 1].is_ascii_alphanumeric()
+                    || bytes[i - 1] == b'_'
+                    || bytes[i - 1] == b'.'));
+        if !starts_number || brackets > 0 {
+            out.push(c as char);
+            i += 1;
+            continue;
+        }
+        let end = (i..bytes.len())
+            .find(|&j| !(bytes[j].is_ascii_alphanumeric() || bytes[j] == b'.' || bytes[j] == b'_'))
+            .unwrap_or(bytes.len());
+        let literal = &source[i..end];
+        out.push_str(literal);
+        if literal.bytes().all(|b| b.is_ascii_digit()) {
+            out.push_str(".0");
+        }
+        i = end;
+    }
+    out
+}
+
+/// The byte offset of the last `%` outside parentheses and brackets (the
+/// top operator of a left-associative `a % b % c`), not `%=`.
+fn top_level_percent(text: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut found = None;
+    for (i, c) in text.char_indices() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            '%' if depth == 0 && !text[i + 1..].starts_with('=') => found = Some(i),
+            _ => {}
+        }
+    }
+    found
 }
 
 /// `source` with each range wrapped in its constructor (`ivec2(…)`);
@@ -561,6 +671,19 @@ fn wrap_ranges(source: &str, mut patches: Vec<(std::ops::Range<usize>, String)>)
 #[cfg(test)]
 mod modulo_tests {
     use super::*;
+
+    #[test]
+    fn ambiguous_calls_take_float_literals() {
+        let src = "#version 450\nlayout(location = 0) in vec2 v;\nlayout(location = 0) out vec4 c;\n\
+                   const int n = 4;\nvoid main() { float s = v.x; s /= max(s, 1); vec2 w[2]; \
+                   c = vec4(clamp(s, 0, 1), min(v.y, 2), w[1]); ivec2 p = ivec2(v) % n; c.x += float(p.x); }\n";
+        let wgsl = glsl_to_wgsl(src, Stage::Fragment).unwrap();
+        assert!(wgsl.contains("max("), "{wgsl}");
+        assert_eq!(
+            float_literals("f(a, 12, x2, 3u, v[1])", &[0..21]),
+            "f(a, 12.0, x2, 3u, v[1])"
+        );
+    }
 
     #[test]
     fn long_else_if_chains_are_flat() {

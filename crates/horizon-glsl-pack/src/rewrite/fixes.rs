@@ -28,9 +28,20 @@ const NOT_CONSTANT: &str = "mix smoothstep exp2 log2 determinant transpose inver
 
 /// Return types worth coercing to: the built-in scalars, vectors and matrices.
 fn is_value_type(ty: &str) -> bool {
-    let base = ty.trim_start_matches(['i', 'u', 'b', 'd']);
+    let base = ty.strip_prefix(['i', 'u', 'b', 'd']).unwrap_or(ty);
+    let dims = |d: &str| {
+        let b = d.as_bytes();
+        let ok = |c: u8| (b'2'..=b'4').contains(&c);
+        matches!(b, [c] if ok(*c)) || matches!(b, [c, b'x', r] if ok(*c) && ok(*r))
+    };
     matches!(ty, "float" | "int" | "uint" | "bool" | "double")
-        || (["vec", "mat"].iter().any(|p| base.starts_with(p)))
+        || base
+            .strip_prefix("vec")
+            .is_some_and(|d| d.len() == 1 && dims(d))
+        || ty
+            .strip_prefix("mat")
+            .or_else(|| ty.strip_prefix("dmat"))
+            .is_some_and(dims)
 }
 
 fn is_ident(w: &str) -> bool {
@@ -288,6 +299,16 @@ mod tests {
     }
 
     #[test]
+    fn struct_returns_are_not_coerced() {
+        let src = "struct materialLAB { float r; };\nmaterialLAB f() { materialLAB m; return m; }\n\
+                   mat2x3 g() { return mat2x3(1.0); }\nvec3 h() { return 1.0; }\nvoid main() { }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        assert!(out.contains("return m;"), "{out}");
+        assert!(out.contains("return mat2x3( mat2x3(1.0));"), "{out}");
+        assert!(out.contains("return vec3( 1.0);"), "{out}");
+    }
+
+    #[test]
     fn division_by_literal_zero_is_left_to_run_time() {
         let src = "void main() { gl_Position = vec4(-1.0 / 0.0, 1.0 / 0., 2.0 / 0.5, 1.0); }\n";
         let out = apply(&tokenize(src)).unwrap();
@@ -341,16 +362,17 @@ pub(super) fn size_arrays(toks: &[Tok]) -> Option<String> {
         .collect();
     let t = |j: usize| s.get(j).map_or("", |&i| toks[i].text);
     // Token index of an empty `[` → the length to write in it.
-    let mut fills: Vec<(usize, usize)> = Vec::new();
+    let mut fills: Vec<(usize, String)> = Vec::new();
     for k in 0..s.len() {
         let ctor = k + 1;
         if t(k) != "=" || !is_ident(t(ctor)) || t(ctor + 1) != "[" {
             continue;
         }
+        // The constructor's length: none, a literal, or a constant's name.
         let (close, given) = if t(ctor + 2) == "]" {
             (ctor + 2, None)
         } else if t(ctor + 3) == "]" {
-            (ctor + 3, t(ctor + 2).parse::<usize>().ok())
+            (ctor + 3, Some(t(ctor + 2).to_string()))
         } else {
             continue;
         };
@@ -386,8 +408,10 @@ pub(super) fn size_arrays(toks: &[Tok]) -> Option<String> {
                 empty = false;
             }
         }
-        let len = given.unwrap_or(if empty { 0 } else { commas + 1 });
-        fills.extend(holes.into_iter().map(|h| (s[h], len)));
+        let len = given
+            .clone()
+            .unwrap_or_else(|| (if empty { 0 } else { commas + 1 }).to_string());
+        fills.extend(holes.into_iter().map(|h| (s[h], len.clone())));
         if given.is_none() {
             fills.push((s[ctor + 1], len));
         }
@@ -399,7 +423,7 @@ pub(super) fn size_arrays(toks: &[Tok]) -> Option<String> {
     for (i, tok) in toks.iter().enumerate() {
         out.push_str(tok.text);
         if let Some((_, len)) = fills.iter().find(|(at, _)| *at == i) {
-            out.push_str(&len.to_string());
+            out.push_str(len);
         }
     }
     Some(out)
@@ -425,6 +449,10 @@ mod array_tests {
         );
         assert!(out.contains("int d[4] = int[4](1, 2, 3, 4)"), "{out}");
         assert_eq!(size_arrays(&tokenize("float x[4]; void main() {}")), None);
+        let named = "const int n = 2; void main() { vec3[] c = vec3[n](vec3(0.0), vec3(1.0)); vec3[n] d = vec3[n](c[0], c[1]); }";
+        let out = size_arrays(&tokenize(named)).unwrap();
+        assert!(out.contains("vec3[n] c = vec3[n]("), "{out}");
+        assert!(out.contains("vec3[n] d = vec3[n](c[0]"), "{out}");
     }
 }
 
