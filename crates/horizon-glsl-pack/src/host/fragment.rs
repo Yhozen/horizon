@@ -253,6 +253,13 @@ pub(super) fn fragment_source(
         Stage::Fragment,
         spec.geometry,
     )?;
+    // `dFdy` along GL's window y: the target's rows run up (bottom row first), except
+    // in `final`, which draws the upright screen.
+    let final_pass = spec.kind == ProgramKind::Final;
+    if body.contains("hz_dFdy") {
+        let sign = if final_pass { "-1.0" } else { "1.0" };
+        writeln!(out, "const float hz_dFdy_sign = {sign};").unwrap();
+    }
     out += &sampled.functions;
     out += &body;
     out += "\nvoid main() {\n";
@@ -264,6 +271,9 @@ pub(super) fn fragment_source(
         out += "    hz_uvWrap = hz_v_uvWrap;\n";
     }
     out += &init;
+    if final_pass && fragment.builtins.contains("hz_FragCoord") {
+        out += "    hz_FragCoord.y = viewHeight - hz_FragCoord.y;\n";
+    }
     out += "    hz_pack_main();\n";
     // Outputs to float targets go through `hz_gl_FragData` (the alpha test
     // reads location 0 there); integer ones straight to their target.
