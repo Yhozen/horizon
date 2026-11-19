@@ -321,6 +321,18 @@ def run_iris(pack: Path | None, out: Path, timeout: int, extra: list[str]) -> di
                 break
     logs = ctl("logs", "--lines", "2000")
     ctl("quit", limit=60)
+    # A game too slow to answer is still running: stop it.
+    try:
+        pid = int(json.loads(reply).get("pid") or json.loads(reply).get("launch", {}).get("pid"))
+    except (ValueError, TypeError, AttributeError):
+        pid = None
+    if pid:
+        try:
+            os.kill(pid, 0)
+            os.kill(pid, 15)
+            output.append(f"game {pid} did not quit: stopped")
+        except OSError:
+            pass
     log_lines = logs.splitlines()
     shutil.rmtree(home, ignore_errors=True)
     return {
@@ -395,7 +407,7 @@ def write_outputs(run_dir: Path, results: list[dict], md: Path | None) -> None:
     lines = [
         f"# Shader pack render check ({now})",
         "",
-        f"Scene `{SCENE}` ({SHOT.name}); one game at a time. Checks: black (mean luminance < 4), uniform "
+        f"Scene `{SCENE}` ({'the Iris oracle world, noon pose; dusk and underwater in their column' if SCENE == 'iris' else SHOT.name}, {SIZE[0]}×{SIZE[1]}); one game at a time. Checks: black (mean luminance < 4), uniform "
         "(stddev < 3), sky = ground (top quarter vs 60–85% band), magenta, black/white areas; "
         "`vs Iris` / `vs vanilla`: mean per-cell colour difference on a 16×9 grid, HUD masked (0 = same, "
         "lower is closer).",
@@ -509,7 +521,7 @@ def render_all(args: argparse.Namespace, run_dir: Path) -> int:
         name = pack_name(pack)
         out = run_dir / f"{name}.png"
         saved = run_dir / f"{name}.json"
-        if args.reuse and out.is_file() and saved.is_file():
+        if args.reuse and saved.is_file():
             r = json.loads(saved.read_text())
         else:
             if out.exists():
