@@ -250,14 +250,18 @@ def pack_row(result: dict, dimension: str, chrome: bool) -> dict:
         "features": {k: len(v) for k, v in sorted(features.items())},
         "plan_error": dim.get("plan_error"),
         "read_error": result.get("read_error"),
+        "shader_sources": result.get("shader_sources"),
     }
     row["status"] = status(row, features, bool(errors) or bool(fails))
     return row
 
 
 def status(row: dict, features: dict, any_failure: bool) -> str:
-    """Refused (requires Iris-only features), Fails (an essential program or the plan fails),
-    Partial (some optional program fails) or Works-candidate."""
+    """Not a pack (no program sources: a resource pack, say), Refused (requires Iris-only
+    features), Fails (an essential program or the plan fails), Partial (some optional program
+    fails) or Works-candidate."""
+    if row.get("shader_sources") == 0:
+        return "Not a pack"
     if features.get("iris_features_required"):
         return "Refused"
     if row.get("read_error") or row.get("plan_error") or not row["found"] or row["essential_failed"]:
@@ -418,7 +422,7 @@ def check(args: argparse.Namespace) -> int:
     summary = {"dimensions": dimensions, "chrome": args.chrome, "rows": rows, "buckets": groups,
                "unknown_uniforms": dict(unknown)}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-    counts = {s: sum(r["status"] == s for r in rows) for s in ("Works-candidate", "Partial", "Refused", "Fails")}
+    counts = {s: sum(r["status"] == s for r in rows) for s in ("Works-candidate", "Partial", "Refused", "Fails", "Not a pack")}
     md = [
         f"# Shader pack corpus check ({datetime.date.today()})", "",
         f"Dimensions: {', '.join(dimensions)}. Chrome: {'yes' if args.chrome else 'no'}. "

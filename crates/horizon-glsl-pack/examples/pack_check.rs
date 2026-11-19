@@ -286,6 +286,12 @@ fn check_pack(
     json!({
         "pack": name,
         "files": files.0.len(),
+        // 0: no program sources at all (a resource pack's core shaders, say).
+        "shader_sources": files
+            .0
+            .keys()
+            .filter(|k| k.starts_with("shaders/") && [".vsh", ".fsh", ".csh", ".gsh"].iter().any(|e| k.ends_with(e)))
+            .count(),
         "features": features(files),
         "dimensions": dims,
     })

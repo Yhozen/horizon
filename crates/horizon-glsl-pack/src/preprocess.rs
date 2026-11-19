@@ -167,10 +167,9 @@ pub fn preprocess_text(
         including: vec![file.to_string()],
         out: String::new(),
     };
+    // A conditional still open at the end of the file closes there, as Iris's
+    // preprocessor takes it (Bloop's `taa.fsh` leaves its `#ifdef TAA` open).
     pp.run(text, file)?;
-    if !pp.conds.is_empty() {
-        return Err(PackError::new(file, "`#if` without `#endif`"));
-    }
     Ok(pp.out)
 }
 
@@ -655,6 +654,17 @@ V
     }
 
     #[test]
+    fn open_conditionals_close_at_the_end() {
+        let out =
+            pp("#define T\nvoid main() {\n#ifdef T\nA;\n#ifdef U\nB;\n#else\nC;\n#endif\n}\n");
+        assert_eq!(
+            out.split_whitespace().collect::<Vec<_>>(),
+            ["void", "main()", "{", "A;", "C;", "}"]
+        );
+        assert_eq!(pp("#ifdef U\nA\n").trim(), "");
+    }
+
+    #[test]
     fn macro_calls_across_lines_and_pasting() {
         let text = "#define max0(x) max(x, 0.0)\n#define CAT(a, b) a ## b\n#define F(i) v ## i\n\
                     float y = max0(\n    a\n    + b\n);\nfloat CAT(fo, o) = F(2);\nfloat z = max0(c);\n";
@@ -770,7 +780,7 @@ V
             "k\nn\n"
         );
         assert!(pp_err("#if 1\n#error stop\n#endif").contains("stop"));
-        assert!(pp_err("#if 1\nx").contains("#endif"));
+        assert_eq!(pp("#if 1\nx"), "x\n");
         assert!(pp_err("#endif").contains("without"));
         assert_eq!(pp("#if 0\n#error dead\n#endif\nok"), "ok\n");
     }

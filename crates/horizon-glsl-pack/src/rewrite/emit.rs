@@ -191,6 +191,16 @@ impl Ctx<'_> {
             Op::Lod | Op::Fetch => 1,
             Op::Grad => 2,
             Op::Gather => usize::from(shadow),
+            Op::Levels => {
+                if n != 1 {
+                    return Err(passed());
+                }
+                let call = host::sampling_call("hz_levels_", dim, sample, &alias);
+                out.push_str(&call);
+                out.push_str("()");
+                self.out.sample_calls.insert(call);
+                return Ok(Some(after));
+            }
             Op::Size => {
                 if n > 2 {
                     return Err(passed());
@@ -293,7 +303,7 @@ impl Ctx<'_> {
                 None,
             ),
             (Op::QueryLod, _) => ("hz_queryLod_", vec![coord], None),
-            (Op::Size, _) => unreachable!(),
+            (Op::Size | Op::Levels, _) => unreachable!(),
         };
         if d3 && matches!(op, "hz_gather_" | "hz_shadow_" | "hz_shadowLod_") {
             return Err(format!("`{name}` on the 3D sampler `{sampler}`"));
@@ -328,6 +338,8 @@ enum Op {
     Size,
     Gather,
     QueryLod,
+    /// `textureQueryLevels`.
+    Levels,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -374,6 +386,9 @@ impl CallForm {
             rest = r;
             f.op = Op::Size;
             let _ = strip(&mut rest, "2D") || strip(&mut rest, "3D");
+        } else if name == "textureQueryLevels" {
+            rest = "";
+            f.op = Op::Levels;
         } else if let Some(r) = name.strip_prefix("textureQueryLod") {
             rest = r;
             f.op = Op::QueryLod;
