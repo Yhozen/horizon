@@ -1,19 +1,48 @@
 # Shader packs (experimental)
 
-Horizon can draw the overworld with an OptiFine-format shader pack, the `shaders/` folder of `.vsh`, `.fsh`
-and `.properties` files that OptiFine and Iris load. This is an experiment behind a command-line argument:
-nothing in the menus turns it on and nothing is saved. Two packs are known to work: **Miniature** and
-**SEUS Renewed** 1.0.1 (a fully deferred pack: 25 program slots, 8 render targets, 7 full-screen passes).
+Horizon can draw the world with an OptiFine- or Iris-format shader pack: the `shaders/` folder of `.vsh`,
+`.fsh` and `.properties` files those mods load, in a zip or a folder. It is off by default and looks exactly
+like vanilla until a pack is chosen.
+
+## Choosing a pack
+
+**Options → Horizon Settings… → Shader Packs…** lists the packs in the game folder's `shaderpacks` folder
+(zips, and folders holding a `shaders` folder). `Shaders: ON/OFF` turns packs on; clicking a pack chooses
+it; `Done` applies. The pack compiles while the world keeps running ("Compiling 12/41"), then replaces
+Horizon's own shaders; a chat line says whether it loaded fully, partly, or not at all.
+
+- **Adding packs**: `Open Shader Pack Folder…`, or drop zips on the window. In the browser, `Add Shader
+  Pack…` opens a file picker, and zips can be dropped on the page.
+- **Settings…**: the pack's own option screens (`screen=`, sub-screens, sliders, profiles, the labels of its
+  `lang/en_us.lang`). Values are saved in `shaderpacks/<pack file>.txt`, the `NAME=VALUE` file Iris and
+  OptiFine keep beside a pack, so a settings file copied from Iris gives the same configuration.
+- **Report…**: what the pack uses that Horizon does not have, every program that was skipped and why
+  (pack file and line), the GPU compiler's messages, uniforms that read zero. `Copy Report` puts it on the
+  clipboard; the same text is in the log (`logs/latest.log`, or the browser console).
+- The choice is saved in `horizon-shaders.txt` (`enabled:`, `pack:`) beside `options.txt`.
+
+Statuses: **Works** (every program the pack enables compiled), **Partial** (it runs; the report lists what is
+missing), **Not supported** (it requires something Horizon lacks, such as compute shaders; the report says
+what), **Failed** (an essential program could not be compiled, or the GPU rejected it: Horizon's own shaders
+stay).
+
+### In the browser
+
+The page keeps the `shaderpacks` folder and `horizon-shaders.txt` in the browser's private storage (the
+Origin Private File System), so packs and the choice survive a reload. `?shaderpack=<url of a zip>` adds that
+pack to the folder and chooses it. A pack whose shaders the browser's own compiler rejects is turned off
+during its first frames, and its report gives the browser's message; other programs of the pack fall back
+when they can.
+
+### From the command line
 
 ```sh
-horizon-client --resources … --world W --shader-pack path/to/pack.zip     # a zip or a folder
+horizon-client --resources … --world W --shader-pack path/to/pack.zip     # a zip or a folder, not saved
 horizon-client … --shader-pack pack.zip --shader-pack-option TAA_ENABLED=false --shader-pack-option shadowMapResolution=1024
 ```
 
-`--shader-pack-option NAME=VALUE` (repeatable) changes one of the pack's options: `true`/`false` for a
-`#define` toggle, a value for `#define NAME value` and for the `const` options (`shadowMapResolution`,
-`shadowDistance`, `sunPathRotation`…). In the browser build, add `?shaderpack=<url of the zip>` to the
-page's address (`web/menu/game.ts`).
+`--shader-pack-option NAME=VALUE` (repeatable) changes one of the pack's options on top of its saved ones:
+`true`/`false` for a `#define` toggle, a value for `#define NAME value` and for the `const` options.
 
 The code is a clean-room rewrite: it is written from the pack format, its public documentation and the packs
 themselves, not from Iris, OptiFine, or the shader-pack code Horizon removed in `4e7c25bb`. What a pack
