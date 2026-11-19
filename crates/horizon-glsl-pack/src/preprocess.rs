@@ -167,10 +167,9 @@ pub fn preprocess_text(
         including: vec![file.to_string()],
         out: String::new(),
     };
+    // A conditional still open at the end of the file closes there, as Iris's
+    // preprocessor takes it (Bloop's `taa.fsh` leaves its `#ifdef TAA` open).
     pp.run(text, file)?;
-    if !pp.conds.is_empty() {
-        return Err(PackError::new(file, "`#if` without `#endif`"));
-    }
     Ok(pp.out)
 }
 
@@ -641,8 +640,7 @@ mod tests {
         let out = pp(text);
         let words: Vec<&str> = out.split_whitespace().collect();
         assert_eq!(words, ["I", "0", "4", "0", "41", "16", "2"]);
-        let text =
-            "#if defined IS_IRIS && MC_VERSION >= 260300 && IRIS_TAG_SUPPORT == 2
+        let text = "#if defined IS_IRIS && MC_VERSION >= 260300 && IRIS_TAG_SUPPORT == 2
 V
 #endif
 ";
@@ -653,6 +651,17 @@ V
     #[test]
     fn broken_conditions_are_false() {
         assert_eq!(pp("#if (in(biome, 3)\nA\n#else\nB\n#endif\n").trim(), "B");
+    }
+
+    #[test]
+    fn open_conditionals_close_at_the_end() {
+        let out =
+            pp("#define T\nvoid main() {\n#ifdef T\nA;\n#ifdef U\nB;\n#else\nC;\n#endif\n}\n");
+        assert_eq!(
+            out.split_whitespace().collect::<Vec<_>>(),
+            ["void", "main()", "{", "A;", "C;", "}"]
+        );
+        assert_eq!(pp("#ifdef U\nA\n").trim(), "");
     }
 
     #[test]
@@ -771,7 +780,7 @@ V
             "k\nn\n"
         );
         assert!(pp_err("#if 1\n#error stop\n#endif").contains("stop"));
-        assert!(pp_err("#if 1\nx").contains("#endif"));
+        assert_eq!(pp("#if 1\nx"), "x\n");
         assert!(pp_err("#endif").contains("without"));
         assert_eq!(pp("#if 0\n#error dead\n#endif\nok"), "ok\n");
     }
