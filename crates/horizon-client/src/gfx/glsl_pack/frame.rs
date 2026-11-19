@@ -473,7 +473,10 @@ impl Renderer {
         }));
         let main = &pack.uniforms.main;
         let program = |kind| pack.programs.get(&kind);
+        // The sky box only where vanilla draws a sky (the overworld): the
+        // Nether has none, the End its own textured box below.
         if !frame.title
+            && frame.skybox
             && let Some(sky) = program(ProgramKind::SkyBasic)
         {
             let group = pack.group(&self.device, sky, main, sides);
@@ -485,7 +488,9 @@ impl Renderer {
             pass.set_vertex_buffer(0, pack.sky.slice(..));
             pass.draw_indexed(0..SKY_QUADS as u32 * 6, 0, 0..1);
         }
-        if counts.celestial_vertices > 0
+        // Textured sky: the End's sky box, then the sun and moon (or the End flash).
+        let end_sky = frame.end_sky && !frame.title;
+        if (counts.celestial_vertices > 0 || end_sky)
             && let Some(sky) = program(ProgramKind::SkyTextured)
         {
             let group = pack.group(&self.device, sky, main, sides);
@@ -494,8 +499,13 @@ impl Renderer {
             pass.set_bind_group(0, &self.entity_group, &[]);
             pass.set_bind_group(1, &group, &[]);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.set_vertex_buffer(0, self.celestial_buffer.slice(..));
-            pass.draw_indexed(0..(counts.celestial_vertices / 4) * 6, 0, 0..1);
+            if end_sky {
+                self.end_sky.draw(&mut pass);
+            }
+            if counts.celestial_vertices > 0 {
+                pass.set_vertex_buffer(0, self.celestial_buffer.slice(..));
+                pass.draw_indexed(0..(counts.celestial_vertices / 4) * 6, 0, 0..1);
+            }
         }
         if let Some(terrain) = program(ProgramKind::Terrain) {
             let group = pack.group(&self.device, terrain, main, sides);
