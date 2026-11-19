@@ -3308,7 +3308,7 @@ impl Renderer {
             return Ok(());
         };
         let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let renderer = glsl_pack::PackRenderer::new(
+        let mut renderer = glsl_pack::PackRenderer::new(
             &self.device,
             &self.queue,
             glsl_pack::Group0Layouts {
@@ -3320,6 +3320,16 @@ impl Renderer {
             files,
             resources,
         )?;
+        let sprite = self
+            .sprite_textures
+            .first()
+            .map_or(16, |t| t.width() / self.sprite_grid.max(1));
+        let atlas = self
+            .hud
+            .atlas_texture
+            .as_ref()
+            .map_or([0, 0], |t| [t.width(), t.height()]);
+        renderer.set_atlas_sizes([sprite, sprite], atlas);
         // Natively the verdict comes at once; the browser's arrives a few
         // frames later through `shader_pack_error`.
         self.pack_check = glsl_pack::Probation::default();

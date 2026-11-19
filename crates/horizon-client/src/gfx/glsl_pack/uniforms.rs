@@ -12,6 +12,8 @@ pub(crate) struct History {
     previous: PreviousFrame,
     eye: EyeBrightnessSmooth,
     wetness: Option<f32>,
+    /// The terrain sprites' and the shared atlas's sizes (`atlasSize`).
+    pub atlas: [[i32; 2]; 2],
     /// `centerDepthSmooth` so far.
     center_depth: Option<f32>,
     start: web_time::Instant,
@@ -25,6 +27,7 @@ impl Default for History {
             eye: EyeBrightnessSmooth::default(),
             wetness: None,
             center_depth: None,
+            atlas: [[0; 2]; 2],
             start: web_time::Instant::now(),
         }
     }
@@ -186,9 +189,8 @@ impl PackUniformInputs<'_> {
             darkness_factor: s.darkness[0],
             darkness_light_factor: s.darkness[1],
             center_depth_smooth: center_depth,
-            // TODO(packs): atlasSize / gtextureSize (terrain samples sprite
-            // arrays, not an atlas), cloudTime (undocumented), the
-            // Distant Horizons planes: 0.
+            // TODO(packs): cloudTime (undocumented), the Distant Horizons
+            // planes: 0.
             hz_view_proj: m4(self.view_proj),
             gbuffer_model_view: m4(model_view),
             gbuffer_model_view_inverse: m4(model_view.inverse()),
@@ -246,7 +248,11 @@ impl PackUniformInputs<'_> {
             entity_id: -1,
             block_entity_id: -1,
             hide_gui: i32::from(s.hide_gui),
-            atlas_size: [0, 0],
+            // Terrain samples sprite arrays with sprite-local UVs: its
+            // "atlas" is one sprite; entities sample the shared atlas.
+            atlas_size: history.atlas[0],
+            gtexture_size: history.atlas[0],
+            entity_atlas_size: history.atlas[1],
             ..Default::default()
         };
         // The light's matrices as the camera's; Horizon's clip matrix is the

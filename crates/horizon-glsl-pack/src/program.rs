@@ -281,11 +281,10 @@ impl ProgramKind {
 
     /// Whether the frame cannot run without this slot's program when the
     /// pack has one: when every candidate of its chain fails, the pack fails.
+    /// `final` is not: without it colortex0 goes to the screen, as OptiFine
+    /// shows colortex0 for a pack that has no `final`.
     pub fn is_essential(self) -> bool {
-        matches!(
-            self,
-            Self::Terrain | Self::Water | Self::Final | Self::Composite(_)
-        )
+        matches!(self, Self::Terrain | Self::Water | Self::Composite(_))
     }
 
     /// Whether the program draws into the shadow map.

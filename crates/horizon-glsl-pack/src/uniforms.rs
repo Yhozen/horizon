@@ -8,7 +8,7 @@ use bytemuck::{Pod, Zeroable};
 
 macro_rules! pack_uniforms {
     ($($field:ident: $rust:ty = $glsl_ty:literal $glsl:literal,)*) => {
-        /// Mirror of [`UNIFORM_BLOCK`] (std140, 1360 bytes), filled by the
+        /// Mirror of [`UNIFORM_BLOCK`] (std140, 1376 bytes), filled by the
         /// client every frame. Members are ordered so each `vec3` shares its
         /// 16 bytes with a `float`: the only padding is the tail.
         ///
@@ -138,8 +138,14 @@ pack_uniforms! {
     end_flash_intensity: f32 = "float" "endFlashIntensity",
     cloud_time: f32 = "float" "cloudTime",
     ambient_light: f32 = "float" "ambientLight",
-    // std140 rounds the block up to 16 bytes; spelt out so the struct is Pod.
     pad0: i32 = "int" "hz_pad0",
+    // `atlasSize` / `gtextureSize` of entity geometry, which samples the
+    // shared atlas; terrain reads the members above (its sprite's size,
+    // since terrain samples sprite arrays with sprite-local UVs).
+    entity_atlas_size: [i32; 2] = "ivec2" "hz_entityAtlasSize",
+    // std140 rounds the block up to 16 bytes; spelt out so the struct is Pod.
+    pad1: i32 = "int" "hz_pad1",
+    pad2: i32 = "int" "hz_pad2",
 }
 
 const IDENTITY: Mat4 = [
@@ -268,7 +274,7 @@ mod tests {
         }
         assert_eq!(*span as usize, size_of::<PackUniforms>());
         assert_eq!(layouter[block.ty].size as usize, size_of::<PackUniforms>());
-        assert_eq!(size_of::<PackUniforms>(), 1360);
+        assert_eq!(size_of::<PackUniforms>(), 1376);
     }
 
     #[test]

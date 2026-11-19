@@ -917,3 +917,45 @@ fn converted_and_custom_uniforms() {
     assert!(wgsl.contains("@group(1) @binding(1)"), "{wgsl}");
     glsl_to_wgsl(&out.vertex, Stage::Vertex).unwrap();
 }
+
+#[test]
+fn entity_geometry_reads_the_atlas_size() {
+    let blocks = BlockIds::default();
+    let plan = PackPlan::default();
+    let host = HostParams::default();
+    let spec = |geometry| ProgramSpec {
+        kind: ProgramKind::Entities,
+        geometry,
+        draw_buffers: &[0],
+        host: &host,
+        blocks: &blocks,
+        plan: &plan,
+    };
+    let (vertex, mut fragment) = final_program();
+    fragment.body = fragment.body.replace(
+        "hz_gl_FragData[0] = color",
+        "hz_gl_FragData[0] = vec4(vec2(atlasSize), vec2(gtextureSize)) + color",
+    );
+    for (ty, geometry) in [
+        ("ivec2", Geometry::Entity),
+        ("vec2", Geometry::Entity),
+        ("ivec2", Geometry::Fullscreen),
+    ] {
+        fragment.uniforms = uniforms(&[("atlasSize", ty), ("gtextureSize", ty)]);
+        let out = program_sources(&vertex, &fragment, &spec(geometry)).unwrap();
+        let entity = geometry == Geometry::Entity;
+        assert_eq!(
+            out.fragment.contains("hz_entityAtlasSize)"),
+            entity && ty == "vec2"
+        );
+        assert_eq!(
+            out.fragment
+                .contains("#define atlasSize hz_entityAtlasSize"),
+            entity
+        );
+        if geometry == Geometry::Fullscreen {
+            glsl_to_wgsl(&out.fragment, Stage::Fragment)
+                .unwrap_or_else(|e| panic!("{e}\n{}", out.fragment));
+        }
+    }
+}

@@ -83,7 +83,22 @@ fn uniform_block(extras: &Extras) -> String {
     } else {
         UNIFORM_BLOCK.to_string()
     };
+    if extras.entity {
+        // Entity geometry samples the shared atlas: its size is the atlas's.
+        out = out
+            .replace(" atlasSize;", " hz_terrain_atlasSize;")
+            .replace(" gtextureSize;", " hz_terrain_gtextureSize;");
+        out += "#define atlasSize hz_entityAtlasSize\n#define gtextureSize hz_entityAtlasSize\n";
+    }
     for (name, ty) in &extras.converted {
+        if extras.entity && matches!(name.as_str(), "atlasSize" | "gtextureSize") {
+            writeln!(
+                out,
+                "#undef {name}\n#define {name} {ty}(hz_entityAtlasSize)"
+            )
+            .unwrap();
+            continue;
+        }
         out = out.replace(&format!(" {name};\n"), &format!(" hz_b_{name};\n"));
         writeln!(out, "#define {name} {ty}(hz_b_{name})").unwrap();
     }
@@ -195,6 +210,8 @@ pub(super) struct Extras {
     pub(super) uv_wrap: bool,
     /// The program declares `watershadow` (then `shadow` is shadowtex1).
     pub(super) watershadow: bool,
+    /// Entity geometry (its atlas is the shared one, not the sprite arrays).
+    entity: bool,
     /// Block members the pack declares with another type: name → its type.
     converted: BTreeMap<String, String>,
     /// The custom uniform block, when the program declares one of them.
@@ -226,6 +243,7 @@ impl Extras {
                 .iter()
                 .chain(&fragment.samplers)
                 .any(|s| s == "watershadow"),
+            entity,
             converted: BTreeMap::new(),
             custom_block: None,
             customs: Vec::new(),

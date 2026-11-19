@@ -288,6 +288,13 @@ impl Renderer {
                 }
             }
         }
+        // No `final`: colortex0 (its latest side) goes to the screen.
+        if let Some(blit) = &pack.blit
+            && let Some(b) = pack.targets().buffer(0)
+        {
+            let view = &b.side(pack.schedule.latest[0]).view;
+            blit.draw(&self.device, &self.queue, encoder, view, final_view, size);
+        }
         if let Some(debug) = &pack.debug {
             let t = pack.targets();
             let source = match debug.show {

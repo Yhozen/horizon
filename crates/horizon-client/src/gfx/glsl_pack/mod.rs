@@ -55,6 +55,8 @@ pub(crate) struct PackRenderer {
     needs: [Need; 16],
     /// `size.buffer.colortexN`.
     sizes: [horizon_glsl_pack::plan::BufferSize; 16],
+    /// Copies colortex0 to the screen when the pack has no `final`.
+    pub(super) blit: Option<debug::Debug>,
     /// `scale.<program>` of full-screen passes.
     pub(super) scales: BTreeMap<ProgramKind, horizon_glsl_pack::plan::Scale>,
     screen_format: wgpu::TextureFormat,
@@ -110,11 +112,10 @@ impl PackRenderer {
         resources: &dyn Fn(&str) -> Option<Vec<u8>>,
     ) -> Result<Self, String> {
         let plan = pack.plan.clone();
-        for essential in [ProgramKind::Terrain, ProgramKind::Final] {
-            if !pack.programs.contains_key(&essential) {
-                return Err(format!("the pack has no {essential:?} program"));
-            }
+        if !pack.programs.contains_key(&ProgramKind::Terrain) {
+            return Err("the pack has no Terrain program".into());
         }
+        let (sizes, skip, mut size_notes) = buffer_sizes(&plan);
         let features = device.features();
         // colortex0 shares the world's format when the pack's is 8-bit, so
         // Horizon's pipelines can draw what the pack has no program for.
@@ -205,14 +206,18 @@ impl PackRenderer {
             screen: screen_format,
         };
         let mut programs = BTreeMap::new();
-        for (&kind, program) in &pack.programs {
+        for (&kind, program) in pack.programs.iter().filter(|(k, _)| !skip.contains(k)) {
             let state = pack.plan.state(kind);
             programs.insert(
                 kind,
                 pipelines::build(device, kind, program, &state, &layouts)?,
             );
         }
-        let textures = textures::Textures::new(device, queue, &plan, files, resources);
+        let mut textures = textures::Textures::new(device, queue, &plan, files, resources);
+        textures.notes.append(&mut size_notes);
+        // No `final`: colortex0 goes to the screen, as OptiFine shows it.
+        let blit = (!programs.contains_key(&ProgramKind::Final))
+            .then(|| debug::Debug::copy(device, screen_format));
         for note in &textures.notes {
             log::warn!("shader pack texture: {note}");
         }
@@ -226,7 +231,8 @@ impl PackRenderer {
             },
             formats,
             needs,
-            sizes: std::array::from_fn(|i| pack.plan.buffers[i].size),
+            sizes,
+            blit,
             scales: pack
                 .programs
                 .keys()
@@ -269,6 +275,12 @@ impl PackRenderer {
             .uniforms
             .evaluate(&|name| main.get(name), main.frame_time, &mut custom.bytes);
         queue.write_buffer(&custom.buffer, 0, &custom.bytes);
+    }
+
+    /// The terrain sprites' size and the shared atlas's (entities'), for
+    /// `atlasSize` / `gtextureSize`.
+    pub fn set_atlas_sizes(&mut self, sprite: [u32; 2], entity: [u32; 2]) {
+        self.history.atlas = [sprite.map(|v| v as i32), entity.map(|v| v as i32)];
     }
 
     pub fn has(&self, kind: ProgramKind) -> bool {
@@ -403,4 +415,63 @@ impl PackRenderer {
             entries: &entries,
         })
     }
+}
+
+/// Each colortex's size, the full-screen passes that cannot run, and report
+/// notes. A buffer a gbuffers program draws into keeps the screen's size
+/// whatever `size.buffer` says (gbuffers passes share the screen-sized
+/// depth buffer); only buffers that full-screen passes alone write take
+/// their own size. A full-screen pass whose targets would differ in size is
+/// skipped: WebGPU needs one size for all attachments of a pass.
+fn buffer_sizes(
+    plan: &PackPlan,
+) -> (
+    [horizon_glsl_pack::plan::BufferSize; 16],
+    std::collections::BTreeSet<ProgramKind>,
+    Vec<String>,
+) {
+    use horizon_glsl_pack::plan::BufferSize;
+    let mut sizes: [BufferSize; 16] = std::array::from_fn(|i| plan.buffers[i].size);
+    let mut notes = Vec::new();
+    // colortex0 is also where Horizon's own pipelines draw.
+    let mut screen = [false; 16];
+    screen[0] = true;
+    for (kind, buffers) in &plan.draw_buffers {
+        if kind.is_fullscreen() || kind.is_shadow() {
+            continue;
+        }
+        for &b in buffers {
+            if let Some(s) = screen.get_mut(usize::from(b)) {
+                *s = true;
+            }
+        }
+    }
+    for (b, size) in sizes.iter_mut().enumerate() {
+        if screen[b] && *size != BufferSize::Screen {
+            notes.push(format!(
+                "size.buffer.colortex{b} ignored: gbuffers programs draw into it, so it keeps the screen's size"
+            ));
+            *size = BufferSize::Screen;
+        }
+    }
+    let mut skip = std::collections::BTreeSet::new();
+    for (kind, buffers) in &plan.draw_buffers {
+        if !kind.is_fullscreen() || *kind == ProgramKind::Final {
+            continue;
+        }
+        let mut distinct: Vec<BufferSize> = Vec::new();
+        for &b in buffers {
+            let s = sizes[usize::from(b).min(15)];
+            if !distinct.contains(&s) {
+                distinct.push(s);
+            }
+        }
+        if distinct.len() > 1 {
+            notes.push(format!(
+                "{kind:?} skipped: its draw buffers {buffers:?} have different sizes ({distinct:?})"
+            ));
+            skip.insert(*kind);
+        }
+    }
+    (sizes, skip, notes)
 }

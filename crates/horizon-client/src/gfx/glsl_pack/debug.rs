@@ -68,6 +68,16 @@ pub(super) struct Debug {
 impl Debug {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Option<Self> {
         let show = Show::from_env()?;
+        log::info!("Horizon: shader pack debug view: {show:?}");
+        Some(Self::with(device, format, show))
+    }
+
+    /// A plain copy of colortex0 to the screen (a pack without `final`).
+    pub fn copy(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+        Self::with(device, format, Show::Color(0))
+    }
+
+    fn with(device: &wgpu::Device, format: wgpu::TextureFormat, show: Show) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader pack debug view"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -129,13 +139,12 @@ impl Debug {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        log::info!("Horizon: shader pack debug view: {show:?}");
-        Some(Self {
+        Self {
             show,
             pipeline,
             layout,
             params,
-        })
+        }
     }
 
     /// Draws `source` over the whole of `view` (`size` pixels).

@@ -165,18 +165,27 @@ fn every_slot_present_compiles_and_failures_are_skipped() {
 #[test]
 fn essential_failures_fail_the_pack() {
     // (A broken gbuffers_water falls back to gbuffers_terrain: see session_tests.)
-    for name in ["composite1", "final"] {
-        let files = pack_of(
-            &[
-                program("gbuffers_terrain", GBUFFERS_VSH, GBUFFERS_FSH),
-                program("final", PASS_VSH, PASS_FSH),
-                program(name, PASS_VSH, BROKEN_FSH),
-            ],
-            &[],
-        );
-        let e = compile_all(&files, &PackOptions::default()).unwrap_err();
-        assert!(e.file.contains(name), "{name}: {e}");
-    }
+    let files = pack_of(
+        &[
+            program("gbuffers_terrain", GBUFFERS_VSH, GBUFFERS_FSH),
+            program("final", PASS_VSH, PASS_FSH),
+            program("composite1", PASS_VSH, BROKEN_FSH),
+        ],
+        &[],
+    );
+    let e = compile_all(&files, &PackOptions::default()).unwrap_err();
+    assert!(e.file.contains("composite1"), "{e}");
+    // A broken `final` is skipped: colortex0 goes to the screen instead.
+    let files = pack_of(
+        &[
+            program("gbuffers_terrain", GBUFFERS_VSH, GBUFFERS_FSH),
+            program("final", PASS_VSH, BROKEN_FSH),
+        ],
+        &[],
+    );
+    let pack = compile_all(&files, &PackOptions::default()).unwrap();
+    assert!(!pack.programs.contains_key(&ProgramKind::Final));
+    assert!(pack.skipped.iter().any(|s| s.0 == ProgramKind::Final));
     // A missing include in a non-essential program skips it too.
     let files = pack_of(
         &[
