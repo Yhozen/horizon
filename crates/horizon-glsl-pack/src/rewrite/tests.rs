@@ -356,7 +356,11 @@ fn unsupported_input_is_an_error() {
             "uniform sampler2D s;\nvoid main() { texture3D(s, vec3(0.0)); }",
             "passed to `texture3D`",
         ),
-        ("void main() { gl_TexCoord[0] = vec4(0.0); }", "gl_TexCoord"),
+        // Literal indices are supported (compat.rs), computed ones are not.
+        (
+            "void main() { int i = 0; gl_TexCoord[i] = vec4(0.0); }",
+            "gl_TexCoord",
+        ),
         ("uniform sampler2D s[2];", "sampler array"),
         ("void main() { {", "unbalanced"),
     ];
@@ -661,4 +665,18 @@ fn isnan_and_isinf_are_polyfilled() {
     );
     // The WGSL writer, which has no `isnan`, takes it.
     naga(&rw, Stage::Fragment);
+}
+
+#[test]
+fn struct_varyings_are_declared_after_their_struct() {
+    let src = "struct Fog { vec3 color; float density; };\nflat varying Fog fog;\n\
+               void main() { gl_FragData[0] = vec4(fog.color, fog.density); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert_eq!(rw.varyings[0].ty, "Fog");
+    assert!(
+        rw.body
+            .contains("struct Fog { vec3 color; float density; }; Fog fog;"),
+        "{}",
+        rw.body
+    );
 }

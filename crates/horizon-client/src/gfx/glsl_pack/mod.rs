@@ -301,7 +301,6 @@ impl PackRenderer {
 
     /// Custom textures that did not load (each reads a 1×1 stand-in), for
     /// the pack's report (not shown there yet: logged when the pack loads).
-    #[allow(dead_code)]
     pub fn texture_notes(&self) -> &[String] {
         &self.textures.notes
     }

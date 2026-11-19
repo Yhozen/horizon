@@ -146,6 +146,7 @@ fn polyfill(text: &str) -> Option<(String, BTreeSet<String>)> {
     Some((out, used.iter().map(|(_, defs)| defs.to_string()).collect()))
 }
 
+mod compat;
 mod dead;
 mod decl;
 mod emit;
@@ -174,6 +175,8 @@ struct Ctx<'a> {
 
 /// Rewrites one preprocessed stage. See the module doc and the spec, section 3.
 pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
+    let compat = compat::apply(source, stage);
+    let source = compat.as_deref().unwrap_or(source);
     let mono = mono::monomorphise(source)?;
     let source = mono.as_deref().unwrap_or(source);
     let toks = dead::drop_dead_functions(drop_unreachable(tokenize(source)))?;
@@ -229,6 +232,23 @@ pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
             continue;
         }
         cx.emit(start, end, &mut body)?;
+    }
+    // Struct-typed varyings: their globals go right after their struct.
+    for v in &cx.out.varyings {
+        if !structs.contains(&v.ty) {
+            continue;
+        }
+        let decl = match v.array_len {
+            Some(n) => format!(" {} {}[{n}];", v.ty, v.name),
+            None => format!(" {} {};", v.ty, v.name),
+        };
+        let at = body
+            .find(&format!("struct {} ", v.ty))
+            .or_else(|| body.find(&format!("struct {}{{", v.ty)));
+        if let Some(close) = at.and_then(|a| body[a..].find('}').map(|c| a + c)) {
+            let semi = body[close..].find(';').map_or(close + 1, |s| close + s + 1);
+            body.insert_str(semi, &decl);
+        }
     }
     let mut prelude: String = cx.prelude.iter().map(|l| format!("{l}\n")).collect();
     prelude.push_str(&body);
