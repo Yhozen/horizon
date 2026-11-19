@@ -50,46 +50,74 @@ observes of its host is written down in [shader-pack-format-notes.md](shader-pac
 
 ## How it works
 
-`crates/horizon-glsl-pack` turns a pack into WGSL and a plan of its passes, with no wgpu and no file access:
+`crates/horizon-glsl-pack` turns a pack into WGSL and a plan of its passes, with no wgpu and no file access.
+A `Session` (`session.rs`) does it in small steps, so the browser can compile across frames; natively it
+runs on a thread. Its result is the compiled pack and a `PackReport` (`report.rs`).
 
-1. **Options** (`options.rs`): a pack's options are found in its sources and changed by rewriting the source
-   text, as the pack's own options screen would.
-2. **Plan** (`directives.rs`, `plan.rs`): the program slots present after OptiFine's fallbacks (an entities
-   slot without `gbuffers_entities` runs `gbuffers_textured_lit`, and so on), each buffer's format, clear and
-   mipmaps, the shadow map's constants, `shaders.properties` (`clouds`, `oldLighting`, custom textures,
-   disabled programs), the noise size and the light levels.
-3. **Preprocess** (`preprocess.rs`): `#include`, `#define` (expanded in the text), `#if`, OptiFine's
-   predefined macros (`MC_VERSION` is 1.21.11's `12111`).
-4. **Rewrite** (`rewrite/`): GLSL 120's compatibility profile to plain GLSL 450, in token passes:
+1. **Options and screens** (`options.rs`, `screens.rs`): options are found in the sources (`#define` toggles
+   tested anywhere, value lists, `const` options with a list) and changed by rewriting the source text, as
+   the pack's own options screen would; `screens.rs` reads `screen=`, `sliders=`, `profile.*` and the
+   pack's `lang/` labels for the Settings page, and the `<pack>.txt` option files.
+2. **Features** (`features.rs`): compute, geometry and tessellation stages, custom images, storage buffers,
+   `iris.features.required/optional`. A pack that requires one Horizon lacks is refused with that reason;
+   an optional one is simply not offered (its `IRIS_FEATURE_*` macro stays undefined), so the pack takes
+   its own fallback.
+3. **Plan** (`program.rs`, `directives.rs`, `shaders_properties.rs`, `plan.rs`): the program slots after
+   the documented fallback chains (Iris's split slots such as `gbuffers_terrain_cutout` or `shadow_water`
+   run when the pack has them), `deferredN`/`compositeN` up to 99, `prepare` passes, each buffer's format
+   (every format name, integer and signed ones included), size, clear and mipmaps, the shadow map's
+   constants, and `shaders.properties`: `blend.*`, `alphaTest.*`, `scale.*`, `flip.*`, `size.buffer.*`,
+   `program.*.enabled` (as expressions), custom textures, shadow and culling switches.
+4. **Ids** (`properties.rs`): `block.properties` by block state (`oak_log:axis=y`), `entity.properties`,
+   `item.properties`, each preprocessed with the options' macros; without a `block.properties`, the
+   pre-1.13 numeric ids old packs compare (`legacy_ids.rs`).
+5. **Custom uniforms** (`custom_uniforms.rs`): `uniform.*` and `variable.*` expressions, evaluated on the CPU
+   every frame from the standard uniforms, uploaded in a second block.
+6. **Preprocess** (`preprocess.rs`): `#include`, `#define` (function-like, across lines, `##`), `#if`, and the
+   macros Iris defines. Horizon says it is Iris 1.11.7 (`IRIS_VERSION` 11107, `MC_VERSION` 260300, values
+   measured on a real Iris) at the OpenGL 4.1 level (`MC_GL_VERSION`/`MC_GLSL_VERSION` 410): the level of
+   macOS, with no compute shaders, images or storage buffers, which mainstream packs keep a path for.
+7. **Rewrite** (`rewrite/`): GLSL 120–460 (compatibility or core profile) to plain GLSL 450, in token passes:
    - functions `main` does not reach are dropped (packs keep invalid code in unused functions);
-   - functions that take a `sampler2D` are cloned per sampler passed to them (`mono.rs`), as WGSL
+   - functions that take a sampler are cloned per sampler passed to them (`mono.rs`), as WGSL
      cannot pass textures around;
    - locals that shadow a sampler, a uniform or a built-in function are renamed (`scope.rs`);
    - `const` on locals and parameters is dropped, returns are converted to the function's type, global
-     initialisers that need run-time values move into `main` (`fixes.rs`);
-   - interface declarations are recorded and taken out; legacy built-ins become `hz_gl_*` globals; sampling
-     calls (`texture2D`, `texture2DLod`, `textureGrad`, `shadow2D`, `texelFetch`, `textureSize`…) become
-     calls to host functions per sampler.
-5. **Host** (`host/`, `uniforms.rs`): a generated `main` per stage around the pack's, per geometry:
-   - *terrain*: Horizon's `TerrainVertex`, with `mc_Entity` and the face normal from the vertex tag;
+     initialisers that need run-time values move into `main`, uniforms with initialisers become globals,
+     built-ins naga lacks (`modf`, `isnan`…) get small polyfills (`fixes.rs`, `mod.rs`);
+   - core-profile inputs (`vaPosition`, `modelViewMatrix`…) and `gl_TexCoord[]` become the compatibility
+     ones (`compat.rs`);
+   - interface declarations are recorded and taken out; legacy built-ins become `hz_gl_*` globals; every
+     sampling call (2D, 3D, shadow and integer samplers; `Lod`, `Grad`, `Proj`, `Offset`, `Gather`,
+     `texelFetch`, `textureSize`, `textureQueryLod`…) becomes a call to a host function per sampler.
+8. **Host** (`host/`, `uniforms.rs`): a generated `main` per stage around the pack's, per geometry:
+   - *terrain*: Horizon's `TerrainVertex` and, while a pack draws, a second vertex stream with each
+     vertex's block id (`mc_Entity`), true normal, `mc_midTexCoord` and block cell (`at_midBlock`);
    - *entity*: Horizon's entity `Vertex` (entities, block entities, particles, the hand, the sky box, the sun
      and moon), with `entityColor` from the hurt and flash overlays;
    - *full screen*: a quad from (0, 0) to (1, 1).
 
    Varyings travel as WGSL locations, matrices as columns, packed into `vec4`s past the device's limit.
    Every texture is read through a host function that picks its sampler (linear, trilinear, comparison…),
-   fills the channels its format lacks, converts depth, and filters in the shader what WebGPU cannot filter.
-   Outputs to normalized targets are clamped, as GL's fixed-point targets would. Every pack uniform comes
-   from one std140 block, `PackUniforms` on the Rust side; unknown uniforms read zero.
-6. **naga** (`naga_out.rs`): GLSL to a validated module to WGSL, with `diagnostic(off,
-   derivative_uniformity);` in front. Struct fields passed to `inout` parameters go through a temporary,
-   which naga's SPIR-V writer (Vulkan) needs.
-7. **Schedule and frame maths** (`schedule.rs`, `frame_math.rs`, `noise.rs`): the frame's clears, which side
-   of each buffer every full-screen pass reads and writes, mipmap generation and the copy-back at the end of
-   the frame; the shadow camera, the sun, the moon, smoothed wetness and eye brightness, the timers, the
-   previous frame's matrices; the noise texture.
+   fills the channels its format lacks, converts depth, and filters in the shader what WebGPU cannot filter;
+   a sampler nothing provides reads a constant texel, as GL's incomplete textures do. Outputs follow
+   `layout(location)` and are clamped for normalized targets. Uniforms come from one std140 block,
+   `PackUniforms` on the Rust side; a uniform declared with another type is converted; unknown uniforms
+   read zero and are listed in the report. A program over the device's limits (textures per stage, draw
+   buffers, attachment bytes, varyings) fails in the translator, so its slot falls back.
+9. **naga** (`naga_out.rs`): GLSL to a validated module to WGSL, with `diagnostic(off,
+   derivative_uniformity);` in front, plus the fixes the browser's compiler needs (long `else if` chains
+   flattened; struct fields passed to `inout` parameters go through a temporary for Vulkan).
+10. **Schedule and frame maths** (`schedule.rs`, `frame_math.rs`, `noise.rs`): the frame's clears, which side
+   of each buffer every full-screen pass reads and writes (`flip.*` honoured), mipmap generation and the
+   copy-back at the end of the frame; the shadow camera, the sun, the moon, smoothed wetness and eye
+   brightness, the timers, the previous frame's matrices; the noise texture.
 
-The client (`gfx/glsl_pack/`, `game/glsl_pack.rs`) builds the targets and one pipeline per program, and
+A program that fails at any step is recorded and its slot's next fallback is tried; only an exhausted chain
+skips the slot, or fails the pack when the frame cannot do without it (terrain, water, the composites,
+`final`).
+
+The client (`gfx/glsl_pack/`, `game/shader_packs.rs`, `game/glsl_pack.rs`) builds the targets and one pipeline per program, and
 draws the world when the pack is on:
 
 | Step | Program | Draws |
