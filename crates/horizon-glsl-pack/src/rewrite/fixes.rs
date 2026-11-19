@@ -427,3 +427,72 @@ mod array_tests {
         assert_eq!(size_arrays(&tokenize("float x[4]; void main() {}")), None);
     }
 }
+
+/// `m[i].x = v` → `m[i][0] = v`: naga's GLSL front end cannot assign to a
+/// one-component swizzle of an indexed matrix column ("Can't lookup field on
+/// this type"); the index form means the same for vectors too. None when
+/// the stage has none.
+pub(super) fn index_swizzle_stores(toks: &[Tok]) -> Option<String> {
+    let s: Vec<usize> = (0..toks.len())
+        .filter(|&i| toks[i].kind != Kind::Space)
+        .collect();
+    let t = |j: usize| s.get(j).map_or("", |&i| toks[i].text);
+    let component = |w: &str| {
+        ["xyzw", "rgba", "stpq"]
+            .iter()
+            .find_map(|set| set.find(w).filter(|_| w.len() == 1))
+    };
+    let mut swaps: Vec<(usize, usize, usize)> = Vec::new();
+    for j in 1..s.len() {
+        if t(j) == "."
+            && t(j - 1) == "]"
+            && matches!(t(j + 2), "=" | "+=" | "-=" | "*=" | "/=")
+            && let Some(k) = component(t(j + 1))
+        {
+            swaps.push((s[j], s[j + 1], k));
+        }
+    }
+    if swaps.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    let mut skip = None;
+    for (i, tok) in toks.iter().enumerate() {
+        if skip == Some(i) {
+            continue;
+        }
+        if let Some(&(_, field, k)) = swaps.iter().find(|(dot, _, _)| *dot == i) {
+            out.push_str(&format!("[{k}]"));
+            skip = Some(field);
+            continue;
+        }
+        if skip.is_some_and(|f| i < f) {
+            // Spaces between the dot and the field.
+            continue;
+        }
+        out.push_str(tok.text);
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod swizzle_tests {
+    use super::super::lex::tokenize;
+    use super::index_swizzle_stores;
+
+    #[test]
+    fn one_component_stores_into_indexed_columns() {
+        let src = "void main() { mat2 m; m[1].x = 1.0; m[0].g += 2.0; float a = m[1].x; m[1].xy = vec2(0.0); }";
+        let out = index_swizzle_stores(&tokenize(src)).unwrap();
+        assert!(
+            out.contains("m[1][0] = 1.0; m[0][1] += 2.0; float a = m[1].x; m[1].xy ="),
+            "{out}"
+        );
+        let rw = crate::rewrite::rewrite(
+            "varying vec2 c;\nvoid main() { mat2 m = mat2(1.0); m[1].y = c.x; gl_FragData[0] = vec4(m[1], 0.0, 1.0); }",
+            crate::Stage::Fragment,
+        )
+        .unwrap();
+        assert!(rw.body.contains("m[1][1] = c.x"), "{}", rw.body);
+    }
+}
