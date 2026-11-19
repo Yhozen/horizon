@@ -30,6 +30,14 @@ fixes). The 28-varying columns of the train set and batch 1 are one integration 
 which adds a fix to sampler declarations (e737596f); batch 2's 28 column is 2a28d2a4. The render column is
 from an earlier build of the same day.
 
+**Instrument fix (77fc9958).** Until then `pack_check` counted 9 of Horizon's own textures against each terrain
+program's 16. That was the old layout of 8 sprite arrays and the lightmap. The game binds the sprite
+arrays in use plus the lightmap: 2 when the sprites fit in one array. Only programs that had failed on that
+count can change. Those packs (Photon, MakeUp, Rethinking Voxels, Arc) were measured again at both limits
+with the fix, on the same day's integration build (f479a1b7, reports `fix-tt-16`, `fix-tt-28`); their rows
+show the new results. Rethinking Voxels stays Refused, and Arc's water passes, but its composite pass
+still fails on its own textures.
+
 ## Packs
 
 ### Train set
@@ -38,10 +46,10 @@ from an earlier build of the same day.
 |---|---|---|---|---|---|---|
 | 1 | [Complementary Shaders - Reimagined](https://modrinth.com/shader/complementary-reimagined) | r5.10 | Works-candidate | Works-candidate | Draws, Iris diff 13 | optional compute and storage buffers skipped |
 | 3 | [BSL Shaders](https://modrinth.com/shader/bsl-shaders) | 10.1.8 | Works-candidate | Works-candidate | Draws, Iris diff 22 | optional compute pass skipped |
-| 4 | [Photon Shaders](https://modrinth.com/shader/photon-shader) | v1.4 | Fails (O), Works-candidate (N), Partial (E) | Fails (O), Works-candidate (N), Partial (E) | Draws, Iris diff 115 | water needs 17 textures with Horizon's own; an End sky pass fails |
+| 4 | [Photon Shaders](https://modrinth.com/shader/photon-shader) | v1.4 | Partial (O/E), Works-candidate (N) | Partial (O/E), Works-candidate (N) | Draws, Iris diff 115 | an optional deferred pass fails (overworld: varyings or textures; End: a sky function) |
 | 5 | [Solas Shader](https://modrinth.com/shader/solas-shader) | 3.9 | Partial | Partial | Draws, Iris diff 23 | shadow programs use image writes |
 | 6 | [Bliss Shaders](https://modrinth.com/shader/bliss-shader) | 2.1.2 | Partial (O), Works-candidate (N/E) | Works-candidate | Black, Iris diff 129 | renders black; its optional deferred pass compiles from e737596f on (28 column) |
-| 7 | [MakeUp - Ultra Fast](https://modrinth.com/shader/makeup-ultra-fast-shaders) | 9.6 | Fails (O/E), Works-candidate (N) | Fails (O), Works-candidate (N/E) | Suspect, Iris diff 58 | water needs 17 varying locations, and 17 textures with Horizon's own |
+| 7 | [MakeUp - Ultra Fast](https://modrinth.com/shader/makeup-ultra-fast-shaders) | 9.6 | Fails (O/E), Works-candidate (N) | Works-candidate | Suspect, Iris diff 58 | water needs 17 varying locations |
 | 8 | [Rethinking Voxels](https://modrinth.com/shader/rethinking-voxels) | r0.1-beta9 | Refused | Refused | Looks vanilla | requires compute shaders, custom images, storage buffers |
 | 9 | [Super Duper Vanilla](https://modrinth.com/shader/super-duper-vanilla) | 1.3.8 | Works-candidate | Works-candidate | Draws, Iris diff 14 |  |
 | 10 | [Mellow](https://modrinth.com/shader/mellow) | 3.5 | Works-candidate | Works-candidate | Draws, Iris diff 13 | optional compute passes skipped |
@@ -84,7 +92,7 @@ from an earlier build of the same day.
 | 35 | [Fantasy Shaders Unbound](https://modrinth.com/shader/fantasy-shader-unbound) | 1.11 | Works-candidate | Works-candidate |  |  |
 | 36 | [RedHat Shaders](https://modrinth.com/shader/redhat-shaders) | 34.3.1 | Works-candidate | Works-candidate |  |  |
 | 37 | [No Fog](https://modrinth.com/shader/nofog) | 2.1.1 | Not a pack | Not a pack |  | a resource pack, not a shader pack |
-| 38 | [Arc](https://modrinth.com/shader/arc-shader) | 0.15.2 | Fails (O/E), Works-candidate (N) | Fails (O/E), Works-candidate (N) |  | two essential passes read more than 16 textures |
+| 38 | [Arc](https://modrinth.com/shader/arc-shader) | 0.15.2 | Fails (O/E), Works-candidate (N) | Fails (O/E), Works-candidate (N) |  | an essential composite pass reads 19 of its own textures (16 allowed) |
 | 39 | [Pegasus Shaders](https://modrinth.com/shader/pegasus) | 0.8.1 | Refused | Refused |  | requires custom images |
 | 40 | [Aurora's Shaders](https://modrinth.com/shader/auroras-shaders) | 1.9 | Works-candidate | Works-candidate |  |  |
 
@@ -130,5 +138,5 @@ Overworld statuses; "renders" counts Works-candidate and Partial.
     varying locations.
 - The fixes in both batches were translator gaps: GLSL forms naga's front end does not accept, sampler
   overloads, preprocessor leniency, built-ins without a host form.
-- No fix in either batch changed a train-set status. One train pack (Photon) started failing in the same
-  period, because of a client change to Horizon's own texture count.
+- No fix in either batch changed a train-set status. Photon's water failure in that period came from the
+  instrument, which counted 9 of Horizon's textures where the game binds 2; see the instrument fix above.
