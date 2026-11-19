@@ -17,7 +17,9 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
 @fragment
 fn fs(@builtin(position) p: vec4<f32>) -> @location(0) vec4<f32> {
     let size = vec2<f32>(textureDimensions(source));
-    let at = vec2<i32>(p.xy / params.xy * size);
+    // Pack targets are stored bottom row first: mirror rows to show them upright.
+    let px = vec2<i32>(p.xy / params.xy * size);
+    let at = vec2<i32>(px.x, i32(size.y) - 1 - px.y);
     let c = textureLoad(source, at, 0);
     if (params.z > 0.5) {
         // Reversed Z: 1 - d is GL depth; stretch the near range to see it.
