@@ -254,6 +254,35 @@ fn sampler_parameters_are_monomorphised() {
     naga(&rw, Stage::Fragment);
 }
 
+/// BSL Classic: `f(sampler2D, vec3)` beside `f(sampler2DShadow, vec3)`; a
+/// shadow sampler takes the shadow overload only.
+#[test]
+fn sampler_overloads_by_sampler_type() {
+    let src = "uniform sampler2DShadow shadowtex0;
+uniform sampler2D colortex0;
+float get(sampler2D t, vec2 p, float z) { return clamp((texture2D(t, p).x - z) * 64.0, 0.0, 1.0); }
+float soft(sampler2D t, vec3 p) { return get(t, p.xy, p.z); }
+float soft(sampler2DShadow t, vec3 p) { return shadow2D(t, p).x; }
+varying vec3 pos;
+void main() { gl_FragColor = vec4(soft(shadowtex0, pos) + soft(colortex0, pos)); }
+";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert_eq!(
+        rw.body.matches("float soft_hz_shadowtex0(").count(),
+        1,
+        "{}",
+        rw.body
+    );
+    assert_eq!(
+        rw.body.matches("float soft_hz_colortex0(").count(),
+        1,
+        "{}",
+        rw.body
+    );
+    assert!(!rw.body.contains("get_hz_shadowtex0"), "{}", rw.body);
+    naga(&rw, Stage::Fragment);
+}
+
 const FORMS: &str = "uniform sampler2D normals;
 uniform sampler2DShadow shadow;
 varying vec4 uv;
@@ -700,4 +729,26 @@ fn vertex_id_is_an_int() {
     let src = "int f(int i) { return i % 2; }\nvoid main() { gl_Position = vec4(float(f(gl_VertexID)), 0.0, 0.0, 1.0); }\n";
     let rw = rewrite(src, Stage::Vertex).unwrap();
     assert!(rw.body.contains("f(int(gl_VertexIndex))"), "{}", rw.body);
+}
+/// Arc: GLSL 4.30's `textureQueryLevels` on a pack buffer, and the
+/// pack's own fallback of the same name (with no `MC_GL_ARB_texture_query_levels`).
+#[test]
+fn texture_query_levels() {
+    let src = "uniform sampler2D colortex5;
+varying vec2 uv;
+void main() { gl_FragColor = vec4(float(textureQueryLevels(colortex5) - 1)); }
+";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(rw.body.contains("hz_levels_colortex5()"), "{}", rw.body);
+    let fallback = "uniform sampler2D colortex5;
+int textureQueryLevels(sampler2D s) { ivec2 t = textureSize(s, 0); return int(log2(float(min(t.x, t.y))) + 1.0); }
+varying vec2 uv;
+void main() { gl_FragColor = vec4(float(textureQueryLevels(colortex5) - 1)); }
+";
+    let rw = rewrite(fallback, Stage::Fragment).unwrap();
+    assert!(
+        rw.body.contains("textureQueryLevels_hz_colortex5()"),
+        "{}",
+        rw.body
+    );
 }

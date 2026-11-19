@@ -55,7 +55,7 @@ pub const MIPS_BINDING: u32 = 30;
 
 /// The host sampling operations the rewriter emits, as `<op>[<tag>]<sampler>`
 /// (see [`sampling_call`]).
-pub const SAMPLING_OPS: [&str; 10] = [
+pub const SAMPLING_OPS: [&str; 11] = [
     "hz_sampleLod_",
     "hz_sampleGrad_",
     "hz_sampleBias_",
@@ -66,6 +66,7 @@ pub const SAMPLING_OPS: [&str; 10] = [
     "hz_shadow_",
     "hz_gather_",
     "hz_queryLod_",
+    "hz_levels_",
 ];
 
 /// A parsed host sampling call: the operation, the sampler's declared
@@ -782,6 +783,7 @@ fn signature(c: &SamplingCall, call: &str) -> Option<String> {
         "hz_size_" => format!("{i} {call}(int lod)"),
         "hz_gather_" if c.dim == TexDim::D2 => format!("{r} {call}(vec2 uv, int comp)"),
         "hz_queryLod_" => format!("vec2 {call}({v} uv)"),
+        "hz_levels_" => format!("int {call}()"),
         "hz_shadow_" if c.dim == TexDim::D2 => format!("vec4 {call}(vec3 p)"),
         "hz_shadowLod_" if c.dim == TexDim::D2 => format!("vec4 {call}(vec3 p, float lod)"),
         _ => return None,
@@ -952,6 +954,20 @@ fn pack_function(
     let t = combined(e);
     let sig = signature(c, call)?;
     let op = c.op;
+    if op == "hz_levels_" {
+        // `textureQueryLevels`: a full chain when the pack mipmaps the texture, else one level.
+        let body = if e.mips {
+            let size = format!("textureSize({t}, 0)");
+            let mut largest = format!("max({size}.x, {size}.y)");
+            if e.dim == TexDim::D3 {
+                largest = format!("max({largest}, {size}.z)");
+            }
+            format!("return int(floor(log2(float(max({largest}, 1))))) + 1;")
+        } else {
+            "return 1;".into()
+        };
+        return Some((sig, body));
+    }
     if e.compare {
         // GL's LEQUAL on GL depth is GreaterEqual against `1 - ref` on Horizon's reversed depth.
         let compare = format!("return vec4(textureLod({t}, vec3(p.xy, 1.0 - p.z), 0.0));");
@@ -1049,6 +1065,7 @@ fn plain_function(
             let top = format!("float(textureQueryLevels({t}) - 1)");
             query_lod_body(implicit, &format!("vec2(textureSize({t}, 0))"), &top)
         }
+        "hz_levels_" => format!("return textureQueryLevels({t});"),
         _ => return None,
     };
     Some((sig, body))
@@ -1063,6 +1080,7 @@ fn constant_function(c: &SamplingCall, call: &str, value: &str) -> Option<(Strin
     let body = match c.op {
         "hz_size_" => format!("return {i}(1);"),
         "hz_queryLod_" => "return vec2(0.0);".into(),
+        "hz_levels_" => "return 1;".into(),
         "hz_gather_" => format!("return {r}({texel}[comp]);"),
         // A depth of the texel's red channel, compared as GL's LEQUAL.
         "hz_shadow_" | "hz_shadowLod_" => format!("return vec4(step(p.z, {value}.x));"),
@@ -1100,6 +1118,8 @@ fn sprite_function(
         "hz_queryLod_" if !fragment => {
             return Some((format!("vec2 {call}(vec2 uv)"), "return vec2(0.0);".into()));
         }
+        // The atlas's levels as `hz_queryLod_` sees them (a top level of 4).
+        "hz_levels_" => return Some((format!("int {call}()"), "return 5;".into())),
         "hz_queryLod_" => {
             // The sprite's own size, as the pack's mip level of the atlas would follow it.
             let size = format!("vec2(textureSize({}, 0).xy / {})", array(0), p.sprite_grid);
