@@ -2,7 +2,7 @@
 //! passes read one side and write the other), the depth buffer and its
 //! copies (`depthtex1`, `depthtex2`), and the shadow map's textures.
 
-use horizon_glsl_pack::plan::{BufferFormat, ShadowSpec};
+use horizon_glsl_pack::plan::{BufferFormat, ShadowSpec, StorageFormat};
 
 use super::mips;
 
@@ -42,6 +42,49 @@ pub(super) fn wgpu_format(
         }
         BufferFormat::R11G11B10F => T::Rgba16Float,
         BufferFormat::Rgb10A2 => T::Rgb10a2Unorm,
+        other => storage_format(other.storage(), float32),
+    }
+}
+
+/// The wgpu format of the crate's storage choice for every other format
+/// (snorm and packed small formats widened, integers as integer targets).
+fn storage_format(storage: StorageFormat, float32: bool) -> wgpu::TextureFormat {
+    use StorageFormat as S;
+    use wgpu::TextureFormat as T;
+    match storage {
+        S::R8Unorm => T::R8Unorm,
+        S::Rg8Unorm => T::Rg8Unorm,
+        S::Rgba8Unorm => T::Rgba8Unorm,
+        S::R16Float => T::R16Float,
+        S::Rg16Float => T::Rg16Float,
+        S::Rgba16Float => T::Rgba16Float,
+        S::R32Float if float32 => T::R32Float,
+        S::Rg32Float if float32 => T::Rg32Float,
+        S::Rgba32Float if float32 => T::Rgba32Float,
+        S::R32Float => T::R16Float,
+        S::Rg32Float => T::Rg16Float,
+        S::Rgba32Float => T::Rgba16Float,
+        S::Rg11b10Ufloat => T::Rg11b10Ufloat,
+        S::Rgb10a2Unorm => T::Rgb10a2Unorm,
+        S::Rgb10a2Uint => T::Rgb10a2Uint,
+        S::R8Sint => T::R8Sint,
+        S::Rg8Sint => T::Rg8Sint,
+        S::Rgba8Sint => T::Rgba8Sint,
+        S::R16Sint => T::R16Sint,
+        S::Rg16Sint => T::Rg16Sint,
+        S::Rgba16Sint => T::Rgba16Sint,
+        S::R32Sint => T::R32Sint,
+        S::Rg32Sint => T::Rg32Sint,
+        S::Rgba32Sint => T::Rgba32Sint,
+        S::R8Uint => T::R8Uint,
+        S::Rg8Uint => T::Rg8Uint,
+        S::Rgba8Uint => T::Rgba8Uint,
+        S::R16Uint => T::R16Uint,
+        S::Rg16Uint => T::Rg16Uint,
+        S::Rgba16Uint => T::Rgba16Uint,
+        S::R32Uint => T::R32Uint,
+        S::Rg32Uint => T::Rg32Uint,
+        S::Rgba32Uint => T::Rgba32Uint,
     }
 }
 
@@ -128,11 +171,16 @@ impl Targets {
         size: [u32; 2],
         needs: &[Need; 16],
         formats: &[wgpu::TextureFormat; 16],
+        sizes: &[horizon_glsl_pack::plan::BufferSize; 16],
         mips: &mut mips::Mips,
     ) -> Self {
+        let screen = size;
         let buffers = (0..16)
             .map(|i| {
                 let need = needs[i];
+                // `size.buffer.colortexN`: a fixed or relative size.
+                let (w, h) = sizes[i].pixels(screen[0], screen[1]);
+                let size = [w, h];
                 need.used.then(|| {
                     let levels = if need.mipmaps { mips::levels(size) } else { 1 };
                     if levels > 1 {
@@ -164,7 +212,7 @@ impl Targets {
         let copy_usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
         let depth32 = wgpu::TextureFormat::Depth32Float;
         Self {
-            size,
+            size: screen,
             buffers,
             depth: image(device, "depthtex0", size, depth32, 1, depth_usage),
             depth_copies: [

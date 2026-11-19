@@ -6,8 +6,8 @@
 //! `_<k>` per element, `_c<j>` per column). When the pieces, plus Horizon's
 //! own `hz_sprite` on terrain, need more locations than
 //! [`HostParams::max_varyings`], they are packed into `vec4` slots instead
-//! (`hz_vp<n>`): interpolated floats together, flat floats together, integers
-//! together in flat `ivec4`s.
+//! (`hz_vp<n>`): interpolated floats together in `vec4`s, integers and flat
+//! floats (as their bits) together in flat `ivec4`s.
 
 use super::*;
 
@@ -30,6 +30,8 @@ struct Piece {
     slot: usize,
     /// The slot's components it takes (`.xyz`), or `None` when it is the whole slot.
     swizzle: Option<String>,
+    /// A flat float carried as its bits in an integer slot.
+    bits: bool,
 }
 
 /// What the two stages pass each other.
@@ -106,8 +108,17 @@ impl Interface {
         // name → (vertex type, fragment type, flat, array length)
         let mut by_name = BTreeMap::new();
         let mut zeroed = Vec::new();
-        for f in &fragment.varyings {
-            let Some(v) = vertex.varyings.iter().find(|v| v.name == f.name) else {
+        // Struct varyings travel member by member.
+        let bodies = [vertex.body.as_str(), fragment.body.as_str()];
+        let vertex_vars = expand_structs(&vertex.varyings, &bodies);
+        let fragment_vars = expand_structs(&fragment.varyings, &bodies);
+        for f in &fragment_vars {
+            // A varying the fragment stage never reads costs no location.
+            let base = f.name.split(['.', '[']).next().unwrap_or(&f.name);
+            if !uses(&fragment.body, base) {
+                continue;
+            }
+            let Some(v) = vertex_vars.iter().find(|v| v.name == f.name) else {
                 zeroed.push(f.clone());
                 continue;
             };
@@ -196,9 +207,10 @@ impl Interface {
                     fragment_ty,
                     slot: interface.slots.len(),
                     swizzle: None,
+                    bits: false,
                 });
                 interface.slots.push(Slot {
-                    name: format!("hz_v_{suffix}"),
+                    name: format!("hz_v_{}", suffix.replace(['.', '[', ']'], "_")),
                     ty: vertex_ty,
                     flat,
                 });
@@ -216,9 +228,10 @@ impl Interface {
     }
 
     /// Packs pieces into 4-wide slots, widest first (first fit), one group
-    /// of slots per kind: interpolated floats, flat floats, integers.
+    /// of slots per kind: interpolated floats, then everything flat (integers,
+    /// and flat floats as their bits) in `ivec4`s.
     fn pack(&mut self, parts: Vec<(String, String, String, String, bool)>) {
-        for (group, slot_ty, flat) in [(0, "vec4", false), (1, "vec4", true), (2, "ivec4", true)] {
+        for (group, slot_ty, flat) in [(0, "vec4", false), (2, "ivec4", true)] {
             let mut members: Vec<_> = parts
                 .iter()
                 .filter(|p| {
@@ -226,8 +239,7 @@ impl Interface {
                         integer_type(&p.2) == Some(true) || integer_type(&p.3) == Some(true);
                     match group {
                         0 => !p.4 && !integer,
-                        1 => p.4 && !integer,
-                        _ => integer,
+                        _ => p.4 || integer,
                     }
                 })
                 .collect();
@@ -235,7 +247,10 @@ impl Interface {
             members.sort_by_key(|p| std::cmp::Reverse(width(&p.2)));
             let first = self.slots.len();
             let mut used: Vec<u32> = Vec::new();
-            for (_, global, vertex_ty, fragment_ty, _) in members {
+            for (_, global, vertex_ty, fragment_ty, piece_flat) in members {
+                let bits = *piece_flat
+                    && integer_type(vertex_ty) == Some(false)
+                    && integer_type(fragment_ty) == Some(false);
                 let w = width(vertex_ty);
                 let at = match used.iter().position(|u| u + w <= 4) {
                     Some(i) => i,
@@ -258,6 +273,7 @@ impl Interface {
                     carrier: vector(slot_ty, w),
                     slot: first + at,
                     swizzle: Some("xyzw"[offset as usize..(offset + w) as usize].into()),
+                    bits,
                 });
             }
         }
@@ -299,7 +315,11 @@ impl Interface {
                 .swizzle
                 .as_ref()
                 .map_or(String::new(), |s| format!(".{s}"));
-            let value = convert(&p.carrier, &p.vertex_ty, &p.global);
+            let value = if p.bits {
+                format!("floatBitsToInt({})", p.global)
+            } else {
+                convert(&p.carrier, &p.vertex_ty, &p.global)
+            };
             writeln!(out, "    {slot}{swizzle} = {value};").unwrap();
         }
     }
@@ -312,7 +332,11 @@ impl Interface {
                 .swizzle
                 .as_ref()
                 .map_or(String::new(), |s| format!(".{s}"));
-            let value = convert(&p.fragment_ty, &p.carrier, &format!("{slot}{swizzle}"));
+            let value = if p.bits {
+                format!("intBitsToFloat({slot}{swizzle})")
+            } else {
+                convert(&p.fragment_ty, &p.carrier, &format!("{slot}{swizzle}"))
+            };
             writeln!(out, "    {} = {value};", p.global).unwrap();
         }
         for z in &self.zeroed {
@@ -329,7 +353,99 @@ impl Interface {
     }
 }
 
+/// `vars` with each struct-typed varying (`S s;`, `S s[2];`) replaced by
+/// one varying per member (`s.a`, `s[1].b`), nested structs included; the
+/// struct definitions come from `bodies`.
+fn expand_structs(vars: &[Var], bodies: &[&str]) -> Vec<Var> {
+    let mut out = Vec::new();
+    for var in vars {
+        let Some(members) = bodies.iter().find_map(|b| struct_members(b, &var.ty)) else {
+            out.push(var.clone());
+            continue;
+        };
+        let elements: Vec<String> = match var.array_len {
+            None => vec![String::new()],
+            Some(n) => (0..n).map(|k| format!("[{k}]")).collect(),
+        };
+        let mut expanded = Vec::new();
+        for index in &elements {
+            for (ty, name, len) in &members {
+                expanded.push(Var {
+                    name: format!("{}{index}.{name}", var.name),
+                    ty: ty.clone(),
+                    flat: var.flat,
+                    array_len: *len,
+                });
+            }
+        }
+        out.extend(expand_structs(&expanded, bodies));
+    }
+    out
+}
+
+/// The members `(type, name, array length)` of `struct ty { … }` in `body`.
+fn struct_members(body: &str, ty: &str) -> Option<Vec<(String, String, Option<u32>)>> {
+    let words: Vec<&str> = body
+        .split(|c: char| c.is_whitespace())
+        .flat_map(split_punct)
+        .filter(|w| !w.is_empty())
+        .collect();
+    let at = words
+        .windows(3)
+        .position(|w| w[0] == "struct" && w[1] == ty && w[2] == "{")?;
+    let end = at + 3 + words[at + 3..].iter().position(|w| *w == "}")?;
+    let mut members = Vec::new();
+    for decl in words[at + 3..end].split(|w| *w == ";") {
+        // Qualifiers (precision) before the type are skipped.
+        let decl: Vec<&str> = decl
+            .iter()
+            .copied()
+            .skip_while(|w| matches!(*w, "highp" | "mediump" | "lowp" | "flat"))
+            .collect();
+        let Some((&mty, rest)) = decl.split_first() else {
+            continue;
+        };
+        for d in rest.split(|w| *w == ",") {
+            match d {
+                [name] => members.push((mty.to_string(), name.to_string(), None)),
+                [name, "[", n, "]"] => {
+                    members.push((mty.to_string(), name.to_string(), n.parse().ok()))
+                }
+                _ => return None,
+            }
+        }
+    }
+    Some(members)
+}
+
+/// `word` split around the punctuation struct definitions use.
+fn split_punct(word: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, c) in word.char_indices() {
+        if matches!(c, '{' | '}' | ';' | ',' | '[' | ']') {
+            out.push(&word[start..i]);
+            out.push(&word[i..i + 1]);
+            start = i + 1;
+        }
+    }
+    out.push(&word[start..]);
+    out
+}
+
+/// Whether `body` mentions the identifier `name`.
+fn uses(body: &str, name: &str) -> bool {
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    body.match_indices(name)
+        .any(|(i, _)| !body[..i].ends_with(ident) && !body[i + name.len()..].starts_with(ident))
+}
+
+/// Declares a varying's global; struct-typed ones are declared by the
+/// rewritten body, after their struct.
 pub(super) fn declare(out: &mut String, var: &Var) {
+    if integer_type(&var.ty).is_none() && matrix(&var.ty).is_none() && var.ty != "bool" {
+        return;
+    }
     match var.array_len {
         Some(n) => writeln!(out, "{} {}[{n}];", var.ty, var.name),
         None => writeln!(out, "{} {};", var.ty, var.name),
@@ -482,10 +598,10 @@ mod tests {
         vars.push(var("c", "vec4", false, None));
         let p = program(vars.clone(), vars);
         let i = Interface::new(&p.0, &p.1, Geometry::Fullscreen, 16).unwrap();
-        // c | n f0 | uv0 uv1 | f1..f4 | f5..f8 | f9, then id, then mask level.
+        // c | n f0 | uv0 uv1 | f1..f4 | f5..f8 | f9, then mask id level (id as its bits).
         let slots: Vec<_> = i.slots.iter().map(|s| (s.ty.as_str(), s.flat)).collect();
         let mut want = vec![("vec4", false); 6];
-        want.extend([("vec4", true), ("ivec4", true)]);
+        want.push(("ivec4", true));
         assert_eq!(slots, want);
         let mut write = String::new();
         i.write(&mut write);
@@ -496,18 +612,19 @@ mod tests {
             "hz_vp1.w = f0;",
             "hz_vp2.zw = uv[1];",
             "hz_vp5.x = f9;",
-            "hz_vp6.x = id;",
-            "hz_vp7.xy = ivec2(mask);",
-            "hz_vp7.z = level;",
+            "hz_vp6.xy = ivec2(mask);",
+            "hz_vp6.z = floatBitsToInt(id);",
+            "hz_vp6.w = level;",
         ] {
             assert!(write.contains(line), "{line}\n{write}");
         }
         let mut read = String::new();
         i.read(&mut read);
-        assert!(read.contains("mask = uvec2(hz_vp7.xy);"), "{read}");
+        assert!(read.contains("mask = uvec2(hz_vp6.xy);"), "{read}");
+        assert!(read.contains("id = intBitsToFloat(hz_vp6.z);"), "{read}");
         let (_, fs) = translate(&p, Geometry::Fullscreen, 16).unwrap();
         assert!(
-            fs.contains("@location(7)") && !fs.contains("@location(8)"),
+            fs.contains("@location(6)") && !fs.contains("@location(7)"),
             "{fs}"
         );
         // Terrain needs one more for hz_sprite: still fits.
@@ -519,8 +636,8 @@ mod tests {
             "{vs}"
         );
         // Too many even packed.
-        let err = translate(&p, Geometry::Terrain, 8).unwrap_err();
-        assert!(err.contains("9 varying locations"), "{err}");
+        let err = translate(&p, Geometry::Terrain, 7).unwrap_err();
+        assert!(err.contains("8 varying locations"), "{err}");
     }
 
     #[test]
@@ -618,5 +735,72 @@ mod tests {
             assert!(vs.contains(want), "{want}\n{vs}");
             glsl_to_wgsl(&vs, Stage::Vertex).unwrap_or_else(|e| panic!("{e}\n{vs}"));
         }
+    }
+}
+
+#[cfg(test)]
+mod unread_tests {
+    use super::*;
+
+    #[test]
+    fn struct_varyings_travel_by_member() {
+        let defs = "struct Inner { vec2 uv; float w[2]; };\nstruct Fog { vec3 color; float density, start; Inner inner; };\n";
+        let vertex = Rewritten {
+            body: format!("{defs}void hz_pack_main() {{ fog.color = vec3(1.0); }}"),
+            varyings: vec![Var {
+                name: "fog".into(),
+                ty: "Fog".into(),
+                flat: true,
+                array_len: None,
+            }],
+            ..Default::default()
+        };
+        let fragment = Rewritten {
+            body: format!(
+                "{defs}void hz_pack_main() {{ hz_gl_FragData[0] = vec4(fog.color, fog.inner.w[1]); }}"
+            ),
+            ..vertex.clone()
+        };
+        let i = Interface::new(&vertex, &fragment, Geometry::Fullscreen, 16).unwrap();
+        let names: Vec<&str> = i.slots.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "hz_v_fog_color",
+                "hz_v_fog_density",
+                "hz_v_fog_inner_uv",
+                "hz_v_fog_inner_w_0",
+                "hz_v_fog_inner_w_1",
+                "hz_v_fog_start"
+            ]
+        );
+        let mut read = String::new();
+        i.read(&mut read);
+        assert!(
+            read.contains("fog.inner.w[1] = hz_v_fog_inner_w_1;"),
+            "{read}"
+        );
+    }
+
+    #[test]
+    fn unread_varyings_get_no_location() {
+        let v = |name: &str| Var {
+            name: name.into(),
+            ty: "vec3".into(),
+            flat: false,
+            array_len: None,
+        };
+        let vertex = Rewritten {
+            varyings: vec![v("used"), v("unused"), v("used_2")],
+            ..Default::default()
+        };
+        let fragment = Rewritten {
+            body: "void hz_pack_main() { hz_gl_FragData[0] = vec4(used + used_2, 1.0); }".into(),
+            varyings: vec![v("used"), v("unused"), v("used_2")],
+            ..Default::default()
+        };
+        let i = Interface::new(&vertex, &fragment, Geometry::Fullscreen, 16).unwrap();
+        let names: Vec<&str> = i.slots.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["hz_v_used", "hz_v_used_2"]);
     }
 }

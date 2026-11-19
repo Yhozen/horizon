@@ -11,7 +11,9 @@
 //! the pack's results out) → [`naga_out`] (naga: GLSL → validated module →
 //! WGSL text). Nothing here touches wgpu or the file system.
 
+pub mod custom_uniforms;
 pub mod directives;
+pub mod features;
 pub mod frame_math;
 pub mod host;
 pub mod legacy_ids;
@@ -25,8 +27,10 @@ pub mod properties;
 pub mod report;
 pub mod rewrite;
 pub mod schedule;
+pub mod screens;
 pub mod session;
 pub mod shaders_properties;
+pub mod textures;
 pub mod types;
 pub mod uniforms;
 
@@ -34,10 +38,12 @@ pub use naga_out::Stage;
 pub use plan::PackPlan;
 pub use program::{ProgramKind, find_program, world_folder};
 pub use properties::BlockIds;
-pub use report::PackReport;
-pub use session::{compile, compile_kinds, read_plan};
+pub use report::{Feature, PackReport, PackStatus, ProgramOutcome};
+pub use session::{Session, compile, compile_kinds, compile_report, read_plan};
 pub use types::*;
 pub use uniforms::PackUniforms;
 
+#[cfg(test)]
+mod session_tests;
 #[cfg(test)]
 mod tests;

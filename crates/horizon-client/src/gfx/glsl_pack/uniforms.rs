@@ -12,6 +12,8 @@ pub(crate) struct History {
     previous: PreviousFrame,
     eye: EyeBrightnessSmooth,
     wetness: Option<f32>,
+    /// `centerDepthSmooth` so far.
+    center_depth: Option<f32>,
     start: web_time::Instant,
 }
 
@@ -22,6 +24,7 @@ impl Default for History {
             previous: PreviousFrame::default(),
             eye: EyeBrightnessSmooth::default(),
             wetness: None,
+            center_depth: None,
             start: web_time::Instant::now(),
         }
     }
@@ -117,8 +120,75 @@ impl PackUniformInputs<'_> {
         let eye_smooth = history
             .eye
             .update(s.eye_brightness, dt, plan.eye_brightness_half_life);
+        // The view-axis distance as the pack's projection's depth (0..1), smoothed
+        // with centerDepthHalflife's default (1, i.e. 0.1 s).
+        let center = if s.center_distance.is_finite() {
+            let clip = projection * glam::Vec4::new(0.0, 0.0, -s.center_distance, 1.0);
+            (clip.z / clip.w * 0.5 + 0.5).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let center_depth = match history.center_depth {
+            Some(c) => frame_math::smooth(c, center, dt, frame_math::half_life_seconds(1.0)),
+            None => center,
+        };
+        history.center_depth = Some(center_depth);
         let [w, h] = self.size;
+        let split = |p: [f32; 3]| {
+            let int = p.map(|c| c.floor());
+            (
+                int.map(|c| c as i32),
+                [p[0] - int[0], p[1] - int[1], p[2] - int[2]],
+            )
+        };
+        let (camera_int, camera_fract) = split(previous.camera_position);
+        let (previous_int, previous_fract) = split(previous.previous_camera_position);
+        // Where the player looks, in world space (vanilla's view vector).
+        let (yaw, pitch) = (frame.yaw.to_radians(), frame.pitch.to_radians());
+        let look = [
+            -yaw.sin() * pitch.cos(),
+            -pitch.sin(),
+            yaw.cos() * pitch.cos(),
+        ];
         let main = PackUniforms {
+            camera_position_int: camera_int,
+            camera_position_fract: camera_fract,
+            previous_camera_position_int: previous_int,
+            previous_camera_position_fract: previous_fract,
+            // The camera is the eye in first person.
+            eye_position: previous.camera_position,
+            relative_eye_position: [0.0; 3],
+            player_look_vector: look,
+            player_body_vector: [-yaw.sin(), 0.0, yaw.cos()],
+            biome: s.biome,
+            biome_category: s.biome_category,
+            biome_precipitation: s.biome_precipitation,
+            temperature: s.temperature,
+            rainfall: s.rainfall,
+            thunder_strength: s.thunder_strength,
+            current_player_health: s.health[0],
+            max_player_health: s.health[1],
+            current_player_hunger: s.hunger[0],
+            max_player_hunger: s.hunger[1],
+            current_player_air: s.air[0],
+            max_player_air: s.air[1],
+            player_mood: s.mood,
+            // TODO(packs): Iris's mood that holds at 1; the plain mood for now.
+            constant_mood: s.mood,
+            is_spectator: i32::from(s.spectator),
+            is_sneaking: i32::from(s.sneaking),
+            is_sprinting: i32::from(s.sprinting),
+            is_hurt: i32::from(s.hurt),
+            is_invisible: i32::from(s.invisible),
+            is_burning: i32::from(s.burning),
+            is_on_ground: i32::from(s.on_ground),
+            lightning_bolt_position: s.lightning,
+            darkness_factor: s.darkness[0],
+            darkness_light_factor: s.darkness[1],
+            center_depth_smooth: center_depth,
+            // TODO(packs): atlasSize / gtextureSize (terrain samples sprite
+            // arrays, not an atlas), cloudTime (undocumented), the
+            // Distant Horizons planes: 0.
             hz_view_proj: m4(self.view_proj),
             gbuffer_model_view: m4(model_view),
             gbuffer_model_view_inverse: m4(model_view.inverse()),

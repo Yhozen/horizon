@@ -1,25 +1,16 @@
-//! `--shader-pack PATH`: an OptiFine-format shader pack (zip or folder) that
-//! draws the overworld (docs/shader-packs.md), with `--shader-pack-option
-//! NAME=VALUE` to change its options. Off unless the argument is given;
-//! nothing is saved.
+//! The shader pack's per-frame inputs, and `--shader-pack PATH` /
+//! `--shader-pack-option NAME=VALUE` (a pack for this run, not saved; the
+//! manager is `game/shader_packs.rs`).
 
-use super::{Dim, Game, PackResources};
-use horizon_client::gfx::{PackFrame, Renderer};
-use horizon_core::fs::{self, PathExt as _};
-use horizon_glsl_pack::{PackFiles, PackOptions, ProgramKind};
-use horizon_client::mesher::PackTags;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use super::Game;
+use horizon_client::gfx::PackFrame;
+use std::path::PathBuf;
+use std::sync::OnceLock;
 
 /// The pack's path, from `--shader-pack`.
 static PATH: OnceLock<PathBuf> = OnceLock::new();
-/// The pack's files, read once (a renderer is rebuilt on every resource reload).
-static FILES: OnceLock<Result<PackFiles, String>> = OnceLock::new();
 /// `--shader-pack-option NAME=VALUE` (repeatable), in order.
 static OPTIONS: std::sync::Mutex<Vec<(String, Option<String>)>> = std::sync::Mutex::new(Vec::new());
-/// The compiled pack's mesher tags (`install`); meshes carry them only while
-/// the pack draws (`sync_pack_tags`).
-static TAGS: std::sync::Mutex<Option<Arc<PackTags>>> = std::sync::Mutex::new(None);
 
 pub(super) fn set_path(path: PathBuf) {
     let _ = PATH.set(path);
@@ -37,122 +28,22 @@ pub(super) fn add_option(arg: &str) {
         .push((name, Some(value)));
 }
 
-/// Every file of a folder or zip, by its path inside the pack.
-fn read_files(path: &Path) -> Result<PackFiles, String> {
-    let mut files = PackFiles::default();
-    if path.is_dir_vfs() {
-        let mut stack = vec![path.to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            for entry in fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))? {
-                let entry = entry.map_err(|e| e.to_string())?.path();
-                if entry.is_dir_vfs() {
-                    stack.push(entry);
-                } else if let Ok(name) = entry.strip_prefix(path) {
-                    let name = name.to_string_lossy().replace('\\', "/");
-                    let bytes = fs::read(&entry).map_err(|e| format!("{name}: {e}"))?;
-                    files.0.insert(name, bytes);
-                }
-            }
-        }
-    } else {
-        let zip =
-            horizon_client::zip::Zip::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        for name in zip.names() {
-            let bytes = zip.read(name).map_err(|e| format!("{name}: {e}"))?;
-            files.0.insert(name.to_string(), bytes);
-        }
-    }
-    // Packs zipped from their folder keep it as the top level.
-    if !files.0.keys().any(|k| k.starts_with("shaders/"))
-        && let Some(top) = files
-            .0
-            .keys()
-            .find_map(|k| k.split_once("/shaders/").map(|(t, _)| t.to_string()))
-    {
-        let prefix = format!("{top}/");
-        files.0 = std::mem::take(&mut files.0)
-            .into_iter()
-            .filter_map(|(k, v)| Some((k.strip_prefix(&prefix)?.to_string(), v)))
-            .collect();
-    }
-    Ok(files)
-}
-
-/// Compiles the pack for `renderer` and installs it, with the mesher's vertex
-/// tags; a pack that fails leaves Horizon's own shaders (and says why).
-pub(super) fn install(renderer: &mut Renderer, pack: &PackResources) {
-    let Some(path) = PATH.get() else {
-        return;
-    };
-    let files = match FILES.get_or_init(|| read_files(path)) {
-        Ok(files) => files,
-        Err(e) => {
-            log::warn!("Horizon: shader pack {}: {e}", path.display());
-            return;
-        }
-    };
-    let started = web_time::Instant::now();
-    let mut host = renderer.shader_pack_host();
-    let mut try_compile = |shadows: bool| {
-        let mut options = PackOptions::default();
-        options.overrides.extend(
-            OPTIONS
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .iter()
-                .cloned(),
-        );
-        if !shadows {
-            // Without a shadow program the pack must not read a shadow map.
-            options.overrides.push(("ENABLE_SHADOWS".into(), None));
-        }
-        host.max_varyings = renderer.max_varyings();
-        horizon_glsl_pack::compile(files, "minecraft:overworld", &options, &host)
-            .map_err(|e| e.to_string())
-            .and_then(|mut compiled| {
-                if !shadows {
-                    compiled.programs.remove(&ProgramKind::Shadow);
-                    compiled.programs.remove(&ProgramKind::ShadowEntities);
-                    compiled.plan.programs.remove(&ProgramKind::Shadow);
-                    compiled.plan.programs.remove(&ProgramKind::ShadowEntities);
-                }
-                for (kind, why) in &compiled.skipped {
-                    log::warn!("Horizon: shader pack {kind:?} skipped: {why}");
-                }
-                renderer
-                    .set_shader_pack(Some((&compiled, files)))
-                    .map(|()| compiled)
-            })
-    };
-    let shadows = std::env::var("HORIZON_SHADER_PACK_SHADOWS").map_or(true, |v| v != "0");
-    let compiled = match try_compile(shadows) {
-        Ok(compiled) => Ok(compiled),
-        Err(e) if shadows => {
-            log::warn!("Horizon: shader pack with shadows failed ({e}); trying without");
-            try_compile(false)
-        }
-        Err(e) => Err(e),
-    };
-    match compiled {
-        Ok(compiled) => {
-            let tags = PackTags::new(pack.assets.registry, &compiled.blocks, &compiled.plan);
-            *TAGS.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(tags));
-            log::info!(
-                "Horizon: shader pack {} ready in {} ms ({} programs)",
-                path.display(),
-                started.elapsed().as_millis(),
-                compiled.programs.len()
-            );
-        }
-        Err(e) => log::warn!("Horizon: shader pack {} not used: {e}", path.display()),
-    }
+/// The `--shader-pack` path and options given on the command line.
+pub(super) fn cli_pack() -> (Option<PathBuf>, Vec<(String, String)>) {
+    let options = OPTIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone().unwrap_or_else(|| "true".into())))
+        .collect();
+    (PATH.get().cloned(), options)
 }
 
 impl Game<'_> {
     /// The frame's state for the pack's uniforms; `None` draws with
     /// Horizon's shaders (no pack, another dimension, the title screen).
     pub(super) fn pack_frame(&self, eye: [f64; 3], title: bool) -> Option<PackFrame> {
-        if PATH.get().is_none() || title || self.dim != Dim::Overworld {
+        if !self.shader_pack_draws(title) {
             return None;
         }
         let packed = self.world.light(
@@ -178,7 +69,73 @@ impl Game<'_> {
                 horizon_client::camera::CameraFluid::Lava => 2,
                 horizon_client::camera::CameraFluid::PowderSnow => 3,
             },
+            ..self.pack_player_state(eye)
         })
+    }
+
+    /// The biome, weather and player parts of [`Self::pack_frame`]: a few
+    /// field reads and one ray along the view.
+    fn pack_player_state(&self, eye: [f64; 3]) -> PackFrame {
+        use horizon_glsl_pack::custom_uniforms::{biome_category, biome_id};
+        let mut f = PackFrame::default();
+        let [x, y, z] = eye.map(|v| v.floor() as i32);
+        if let Some(chunk) = self.world.chunks.get(&(x >> 4, z >> 4)) {
+            let info = &self.res.biomes().list[chunk.biome(x, y, z) as usize];
+            f.biome = biome_id(&info.name);
+            f.biome_category = biome_category(&info.name);
+            // Biome.getPrecipitationAt without the height adjustment.
+            f.biome_precipitation = match (info.precipitation, info.temperature < 0.15) {
+                (false, _) => 0,
+                (true, false) => 1,
+                (true, true) => 2,
+            };
+            f.temperature = info.temperature;
+            f.rainfall = info.downfall;
+        }
+        let partial = self.clock.fraction() as f32;
+        f.thunder_strength = self.world.weather.levels(partial).1;
+        f.mood = self.ambience.moodiness.clamp(0.0, 1.0);
+        f.darkness = [
+            self.darkness_fog().unwrap_or(0.0),
+            self.darkness_lighting(partial).1,
+        ];
+        if let Some(bolt) = self.bolts.first() {
+            let at = std::array::from_fn::<f32, 3, _>(|i| (bolt.at[i] - eye[i]) as f32);
+            f.lightning = [at[0], at[1], at[2], 1.0];
+        }
+        // The first block along the view, as far as the shadows reach at most.
+        let dir = super::view_vector(self.yaw, self.pitch);
+        f.center_distance = self.clip_ray(eye, dir, 256.0).map_or(f32::INFINITY, |hit| {
+            let d: f64 = (0..3).map(|i| (hit.point[i] - eye[i]) * dir[i]).sum();
+            d as f32
+        });
+        f.spectator = self.spectator();
+        let unbounded = self.creative || f.spectator;
+        f.health = [if unbounded { -1.0 } else { 0.0 }, 20.0];
+        f.hunger = [if unbounded { -1.0 } else { 0.0 }, 20.0];
+        f.air = [if unbounded { -1.0 } else { 0.0 }, 300.0];
+        if let Some(p) = &self.player {
+            // Health boost adds 4 per level to the base 20 (the attribute
+            // needs a mutable borrow; nothing else changes it in vanilla).
+            let boost = self
+                .potions
+                .effects
+                .get("health_boost")
+                .map_or(0.0, |e| 4.0 * (e.amplifier + 1) as f32);
+            f.health[1] = 20.0 + boost;
+            if !unbounded {
+                f.health[0] = (p.health.health() / f.health[1]).clamp(0.0, 1.0);
+                f.hunger[0] = p.health.food.food as f32 / 20.0;
+                f.air[0] = (p.air as f32 / 300.0).clamp(0.0, 1.0);
+            }
+            f.sneaking = p.pose == horizon_client::pose::Pose::Crouching;
+            f.sprinting = p.sprinting;
+            f.hurt = p.health.hurt.hurt_time > 0;
+            f.burning = p.fire_ticks > 0;
+            f.on_ground = p.ground.on_ground && !p.flying;
+        }
+        f.invisible = f.spectator || self.potions.effects.get("invisibility").is_some();
+        f
     }
 }
 
@@ -195,39 +152,11 @@ impl Game<'_> {
         [held(self.selected), held(super::shield::OFFHAND_SLOT)]
     }
 
-    /// Meshes carry the pack's tags (and the renderer their stream) exactly
-    /// while the pack draws terrain: switching remeshes every section.
-    fn sync_pack_tags(&mut self) {
-        let drawing = PATH.get().is_some() && self.title.is_none() && self.dim == Dim::Overworld;
-        let wanted = drawing
-            .then(|| TAGS.lock().unwrap_or_else(|e| e.into_inner()).clone())
-            .flatten();
-        let stream = self
-            .renderer
-            .as_ref()
-            .is_none_or(|r| r.pack_vertex_stream() == wanted.is_some());
-        if stream
-            && self.pack.context.pack.as_deref() == wanted.as_deref()
-            && self.streaming.context().pack.as_deref() == wanted.as_deref()
-        {
-            return;
-        }
-        // New streamers and distant terrain take the pack resources' context.
-        self.pack.context = self.pack.context.with_pack(wanted.clone());
-        self.clear_lod();
-        self.streaming
-            .reload_resources(&mut self.world, self.pack.context.clone());
-        self.pending_uploads.clear();
-        if let Some(renderer) = &mut self.renderer {
-            renderer.set_pack_vertex_stream(wanted.is_some());
-        }
-    }
-
-    /// Builds the item light table the pack's held light reads, once, and
-    /// keeps the meshes' pack tags in step with what draws.
-    pub(super) fn prepare_pack_frame(&mut self) {
-        self.sync_pack_tags();
-        if PATH.get().is_some() && self.luminance.is_none() {
+    /// Keeps the running pack in step with the selection, then builds the
+    /// item light table the pack's held light reads, once.
+    pub(super) fn prepare_pack_frame(&mut self, title: bool) {
+        self.tick_shader_packs(title);
+        if self.shader_packs.applied.is_some() && self.luminance.is_none() {
             self.luminance = Some(horizon_client::dynamic_light::Luminance::new(
                 self.res.facts(),
                 self.pack.assets.registry,

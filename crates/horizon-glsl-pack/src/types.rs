@@ -31,7 +31,8 @@ impl PackFiles {
 /// How the pack is configured.
 #[derive(Clone, Debug)]
 pub struct PackOptions {
-    /// OptiFine's `MC_VERSION` macro (1.21.11 = 12111).
+    /// The `MC_VERSION` macro: Iris numbers 26.3 as 260300
+    /// (major × 10000 + minor × 100 + patch, measured).
     pub mc_version: u32,
     /// Option values, written into the sources before preprocessing (see
     /// [`options::apply`]): `(name, None)` or `Some("false")` turns a boolean
@@ -48,7 +49,7 @@ pub struct PackOptions {
 impl Default for PackOptions {
     fn default() -> Self {
         Self {
-            mc_version: 12111,
+            mc_version: 260300,
             overrides: Vec::new(),
             excluded: BTreeSet::new(),
         }
@@ -69,6 +70,10 @@ pub struct HostParams {
     /// Sampled textures one stage may bind (`maxSampledTexturesPerShaderStage`,
     /// 16 in WebGPU), Horizon's own included.
     pub max_textures: u32,
+    /// Sampled textures Horizon's terrain group 0 layout declares for both
+    /// stages, used or not (gfx.rs: 8 sprite arrays and the lightmap); they
+    /// count against `max_textures` in terrain programs.
+    pub terrain_textures: u32,
     /// Colour attachments one pass may write (`maxColorAttachments`, 8).
     pub max_draw_buffers: u32,
     /// Bytes per pixel of all colour attachments together
@@ -84,6 +89,7 @@ impl Default for HostParams {
             sprite_grid: 1,
             max_varyings: 16,
             max_textures: 16,
+            terrain_textures: 9,
             max_draw_buffers: 8,
             max_attachment_bytes: 128,
         }
@@ -143,14 +149,43 @@ impl SamplerKind {
     }
 }
 
+/// A texture's dimension.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TexDim {
+    #[default]
+    D2,
+    D3,
+}
+
+/// What a texture binding's texels are, which decides its WGSL type:
+/// `texture_2d<f32>`, `texture_depth_2d`, `texture_2d<i32>`, `texture_2d<u32>`
+/// (and the 3D forms).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SampleKind {
+    /// Float, filterable unless its sampler is [`SamplerKind::Point`] or
+    /// [`SamplerKind::PointRepeat`] (depth textures read as unfilterable float).
+    #[default]
+    Float,
+    /// A depth texture read with a depth compare (`texture_depth_2d`).
+    Depth,
+    /// Signed integer texels, read with `textureLoad` only.
+    Sint,
+    /// Unsigned integer texels, read with `textureLoad` only.
+    Uint,
+}
+
 /// One texture a program reads from group 1, at `binding` (see
-/// [`host::sampler_binding`]); the WGSL declares it as a `texture_2d<f32>`
-/// (`texture_depth_2d` when `sampler` is [`SamplerKind::Compare`]).
+/// [`host::sampler_binding`]; custom textures at 64 + their index in
+/// `PackPlan::custom_textures`); the WGSL declares it by `dimension` and
+/// `sample` (`texture_2d<f32>`, `texture_depth_2d` when `sampler` is
+/// [`SamplerKind::Compare`], `texture_3d<f32>`, `texture_2d<u32>`…).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextureBinding {
     pub binding: u32,
     pub source: TextureSource,
     pub sampler: SamplerKind,
+    pub dimension: TexDim,
+    pub sample: SampleKind,
     /// The stages that read it.
     pub vertex: bool,
     pub fragment: bool,
@@ -178,6 +213,9 @@ pub struct CompiledProgram {
     pub textures: Vec<TextureBinding>,
     /// Uniforms the pack declares that Horizon does not provide (read as zero).
     pub unknown_uniforms: BTreeSet<String>,
+    /// Things that translated but may not look as in Iris (a sampler nothing
+    /// provides reads a 1×1 default…), for the pack report.
+    pub notes: Vec<String>,
 }
 
 /// A compiled pack.
@@ -194,6 +232,13 @@ pub struct CompiledPack {
     pub skipped: Vec<(ProgramKind, String)>,
     /// `block.properties`: block names to `mc_Entity.x` ids.
     pub blocks: BlockIds,
+    /// `entity.properties`: entity names to `entityId` ids.
+    pub entities: crate::properties::IdMap,
+    /// `item.properties`: item names to `currentRenderedItemId` ids.
+    pub items: crate::properties::IdMap,
+    /// The custom uniforms to evaluate every frame (a copy of
+    /// `plan.custom_uniforms` the client keeps the per-frame state in).
+    pub custom_uniforms: crate::custom_uniforms::CustomUniforms,
     /// The shadow map's settings (derived from `plan.shadow`; kept until the
     /// client reads the plan).
     pub shadow: ShadowSettings,

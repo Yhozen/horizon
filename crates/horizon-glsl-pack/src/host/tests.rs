@@ -76,6 +76,7 @@ void hz_pack_main() {
             "hz_gl_FogFragCoord",
         ]),
         sample_calls: set(&["hz_sample_gtexture", "hz_sample_lightmap", "hz_fetch_lightmap", "hz_size_lightmap"]),
+        ..Default::default()
     };
     // The fragment stage skips `level`; `weights` has an array.
     varyings.retain(|v| v.name != "level");
@@ -248,6 +249,15 @@ fn locations_are_sorted_and_limited() {
             ..vertex
         },
         Rewritten {
+            // The fragment stage reads them all (unread varyings get no location).
+            body: format!(
+                "{}\nfloat hz_sum() {{ return {}; }}\n",
+                fragment.body,
+                (0..16)
+                    .map(|i| format!("v{i}"))
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            ),
             varyings: many,
             builtins: set(&[]),
             ..fragment
@@ -300,7 +310,7 @@ fn unknown_uniforms_are_zero_and_mistyped_ones_fail() {
     assert!(out.fragment.contains("vec3 hz_test_unknown;"));
     glsl_to_wgsl(&out.fragment, Stage::Fragment)
         .unwrap_or_else(|e| panic!("{e}\n{}", out.fragment));
-    let err = sources(&vertex, &with(&[("worldTime", "float")]), &spec).unwrap_err();
+    let err = sources(&vertex, &with(&[("worldTime", "mat4")]), &spec).unwrap_err();
     assert!(err.contains("worldTime"), "{err}");
 }
 
@@ -524,6 +534,7 @@ fn entity_geometry_reads_horizon_s_entity_vertex() {
         stage: crate::plan::TextureStage::Gbuffers,
         sampler: "colortex4".into(),
         path: "shaders/textures/a.png".into(),
+        ..Default::default()
     });
     plan.buffers[2].format = crate::plan::BufferFormat::Rgba16F;
     let (out, vs, fs) = run(ProgramKind::Entities, &plan, &[0, 2], &entity_program());
@@ -558,6 +569,8 @@ fn entity_geometry_reads_horizon_s_entity_vertex() {
             binding: 6,
             source: TextureSource::Custom(0),
             sampler: SamplerKind::PointRepeat,
+            dimension: crate::TexDim::D2,
+            sample: crate::SampleKind::Float,
             vertex: false,
             fragment: true,
         }]
@@ -623,6 +636,7 @@ fn sampling_kinds_follow_the_plan() {
         stage: crate::plan::TextureStage::Composite,
         sampler: "colortex4".into(),
         path: "shaders/textures/a.png".into(),
+        ..Default::default()
     });
     let calls = [
         "hz_shadow_shadow",
@@ -656,7 +670,7 @@ fn sampling_kinds_follow_the_plan() {
     assert_eq!(
         got,
         vec![
-            (2, Buffer(0), SamplerKind::Linear),
+            // `mysteryTexture` reads a 1×1 default, not colortex0.
             (3, Buffer(1), SamplerKind::Point),
             (4, Buffer(2), SamplerKind::Linear),
             // An earlier composite wrote colortex4: the custom texture no longer applies.
@@ -838,4 +852,68 @@ fn terrain_reads_the_pack_vertex_stream() {
         // No alpha tag is read any more.
         assert!(!out.vertex.contains("hz_in_color.a"), "{}", out.vertex);
     }
+}
+
+#[test]
+fn converted_and_custom_uniforms() {
+    let blocks = BlockIds::default();
+    let entries: Vec<(String, String)> = [
+        ("uniform.float.sunHeight", "sin(sunAngle)"),
+        ("uniform.bool.flag", "true"),
+        ("uniform.vec3.tint", "vec3(1, 0.5, 0.25)"),
+        ("uniform.float.asInt", "2.0"),
+        ("variable.float.hidden", "1"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let plan = PackPlan {
+        custom_uniforms: crate::custom_uniforms::CustomUniforms::parse(&entries),
+        ..PackPlan::default()
+    };
+    let spec = ProgramSpec {
+        kind: ProgramKind::Final,
+        geometry: Geometry::Fullscreen,
+        draw_buffers: &[0],
+        host: &HostParams::default(),
+        blocks: &blocks,
+        plan: &plan,
+    };
+    let (vertex, mut fragment) = final_program();
+    fragment.uniforms = uniforms(&[
+        ("worldTime", "float"),
+        ("is_sneaking", "bool"),
+        ("cameraPosition", "ivec3"),
+        ("sunHeight", "float"),
+        ("flag", "bool"),
+        ("tint", "vec3"),
+        ("asInt", "int"),
+        ("hidden", "float"),
+        ("notThere", "float"),
+    ]);
+    fragment.body = fragment.body.replace(
+        "hz_gl_FragData[0] = color",
+        "float k = worldTime / 24000.0 + float(cameraPosition.y) + sunHeight + float(asInt) + hidden + notThere;\n    \
+         if (is_sneaking && flag) { k += 1.0; }\n    hz_gl_FragData[0] = vec4(tint * k, 1.0) + color",
+    );
+    let out = program_sources(&vertex, &fragment, &spec).unwrap();
+    // Variables are not uploaded: `hidden` reads 0 like any unknown name.
+    assert_eq!(out.unknown_uniforms, set(&["hidden", "notThere"]));
+    let fs = &out.fragment;
+    for line in [
+        "int hz_b_worldTime;",
+        "#define worldTime float(hz_b_worldTime)",
+        "#define is_sneaking bool(hz_b_is_sneaking)",
+        "#define cameraPosition ivec3(hz_b_cameraPosition)",
+        "layout(std140, set = 1, binding = 1) uniform HzCustomUniforms",
+        "#define sunHeight hz_c_sunHeight",
+        "#define flag bool(hz_c_flag)",
+        "#define asInt int(hz_c_asInt)",
+        "float notThere;",
+    ] {
+        assert!(fs.contains(line), "{line}\n{fs}");
+    }
+    let wgsl = glsl_to_wgsl(fs, Stage::Fragment).unwrap_or_else(|e| panic!("{e}\n{fs}"));
+    assert!(wgsl.contains("@group(1) @binding(1)"), "{wgsl}");
+    glsl_to_wgsl(&out.vertex, Stage::Vertex).unwrap();
 }

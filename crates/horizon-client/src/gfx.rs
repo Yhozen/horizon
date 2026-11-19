@@ -298,6 +298,37 @@ pub struct PackFrame {
     pub hide_gui: bool,
     /// `isEyeInWater`: 1 water, 2 lava, 3 powder snow, else 0.
     pub eye_in_fluid: i32,
+    /// The biome at the camera: `BIOME_*` index, `CAT_*` index,
+    /// precipitation (0 none, 1 rain, 2 snow), temperature and downfall.
+    pub biome: i32,
+    pub biome_category: i32,
+    pub biome_precipitation: i32,
+    pub temperature: f32,
+    pub rainfall: f32,
+    /// `thunderStrength` (0..1, scaled by the rain as vanilla's).
+    pub thunder_strength: f32,
+    /// Health, hunger and air as fractions of their maxima (-1 in creative
+    /// and spectator), and the maxima (`currentPlayer*`, `maxPlayer*`).
+    pub health: [f32; 2],
+    pub hunger: [f32; 2],
+    pub air: [f32; 2],
+    pub spectator: bool,
+    pub sneaking: bool,
+    pub sprinting: bool,
+    pub hurt: bool,
+    pub invisible: bool,
+    pub burning: bool,
+    pub on_ground: bool,
+    /// The cave ambience's mood, 0..1 (`playerMood`).
+    pub mood: f32,
+    /// A bolt being drawn, camera-relative, w = 1; zero without one.
+    pub lightning: [f32; 4],
+    /// Blocks from the camera to the first block along its view, for
+    /// `centerDepthSmooth`; infinite when the ray meets nothing.
+    pub center_distance: f32,
+    /// The darkness effect's blend and its pulsing light dim
+    /// (`darknessFactor`, `darknessLightFactor`).
+    pub darkness: [f32; 2],
 }
 
 /// What `draw_frame` worked out for the world pass, for the pack's frame
@@ -523,6 +554,8 @@ pub struct Renderer {
     world_post: world_post::Post,
     /// The shader pack's pipelines and targets (`set_shader_pack`).
     glsl_pack: Option<glsl_pack::PackRenderer>,
+    /// GPU validation of the pack's first frames (`shader_pack_error`).
+    pack_check: glsl_pack::Probation,
     /// The terrain bind group's sprite layout, for the pack's generated shaders.
     sprite_host: horizon_glsl_pack::HostParams,
     /// The entity bind group's layout (pack programs on entity geometry).
@@ -2585,6 +2618,7 @@ impl Renderer {
             occlusion: occlusion::Occlusion::new(crate::chunk::MIN_Y, crate::chunk::HEIGHT / 16),
             world_post,
             glsl_pack: None,
+            pack_check: glsl_pack::Probation::default(),
             sprite_host: horizon_glsl_pack::HostParams {
                 sprite_arrays,
                 sprite_split: split,
@@ -2721,6 +2755,7 @@ impl Renderer {
         }
     }
     pub fn resize(&mut self, width: u32, height: u32) {
+        self.pack_check.rewatch();
         self.suspended = width == 0 || height == 0;
         if self.suspended {
             return;
@@ -3120,8 +3155,26 @@ impl Renderer {
         self.device.limits().max_inter_stage_shader_variables
     }
     /// How the terrain bind group holds block sprites, for compiling a pack.
+    /// and the device's limits a pack's programs must fit.
     pub fn shader_pack_host(&self) -> horizon_glsl_pack::HostParams {
-        self.sprite_host
+        let limits = self.device.limits();
+        horizon_glsl_pack::HostParams {
+            max_varyings: limits.max_inter_stage_shader_variables,
+            max_textures: limits.max_sampled_textures_per_shader_stage,
+            max_draw_buffers: limits.max_color_attachments,
+            max_attachment_bytes: limits.max_color_attachment_bytes_per_sample,
+            ..self.sprite_host
+        }
+    }
+    /// Whether a shader pack is installed.
+    pub fn has_shader_pack(&self) -> bool {
+        self.glsl_pack.is_some()
+    }
+    /// What went wrong loading the installed pack's textures (for its report).
+    pub fn shader_pack_notes(&self) -> Vec<String> {
+        self.glsl_pack
+            .as_ref()
+            .map_or_else(Vec::new, |p| p.texture_notes().to_vec())
     }
     /// Draws the overworld with a compiled shader pack's programs from now on
     /// (`None`: Horizon's own). Errors leave the renderer without a pack.
@@ -3148,15 +3201,22 @@ impl Renderer {
             pack,
             files,
         )?;
-        // The browser cannot wait for the scope: its errors reach the console.
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(error) = pollster::block_on(scope.pop()) {
-            return Err(error.to_string());
+        // Natively the verdict comes at once; the browser's arrives a few
+        // frames later through `shader_pack_error`.
+        self.pack_check = glsl_pack::Probation::default();
+        self.pack_check.watch("pipelines", scope.pop());
+        if let Some(error) = self.pack_check.error() {
+            return Err(error);
         }
-        #[cfg(target_arch = "wasm32")]
-        drop(scope);
         self.glsl_pack = Some(renderer);
         Ok(())
+    }
+    /// An error the GPU reported for the installed pack (its pipelines, or
+    /// its first frames); the pack is removed. Asked once a frame.
+    pub fn shader_pack_error(&mut self) -> Option<String> {
+        let error = self.pack_check.error()?;
+        self.glsl_pack = None;
+        Some(error)
     }
     pub fn view_projection(&self, frame: &Frame) -> Mat4 {
         self.projection(
@@ -3252,7 +3312,14 @@ impl Renderer {
             .animate(encoder, &mut self.uploads, &self.queue, tick);
     }
     pub fn render(&mut self, frame: &Frame) -> Result<bool> {
+        // A pack's first frames run inside an error scope: a pipeline or bind
+        // group the GPU rejects turns the pack off instead of drawing black.
+        let scope = (self.glsl_pack.is_some() && self.pack_check.watching())
+            .then(|| self.device.push_error_scope(wgpu::ErrorFilter::Validation));
         let rendered = self.draw_frame(frame);
+        if let Some(scope) = scope {
+            self.pack_check.watch("first frames", scope.pop());
+        }
         if !matches!(rendered, Ok(true)) {
             self.held_patches.extend(frame.hud.patches.iter().cloned());
         }
@@ -4089,9 +4156,14 @@ impl Renderer {
             timer.begin(&mut encoder);
         }
         // The world's targets: the screen, or the scaled target of `post`.
-        let scaled = self
-            .world_post
-            .prepare(&self.device, [self.config.width, self.config.height]);
+        // A shader pack draws at the window's size, with its own
+        // anti-aliasing: resolution scale and FXAA wait while it runs.
+        let scaled = if pack_on {
+            None
+        } else {
+            self.world_post
+                .prepare(&self.device, [self.config.width, self.config.height])
+        };
         let (world_view, world_depth) = match &scaled {
             Some((color, depth)) => (color, depth),
             None => (&view_target, &self.depth),
@@ -4109,7 +4181,6 @@ impl Renderer {
         };
         // With a pack, its programs draw the world into the view, then
         // Horizon's overlays over its depth (`gfx/glsl_pack/frame.rs`).
-        let pack_on = pack_on && scaled.is_none();
         let pack_hand = pack_on
             && self
                 .glsl_pack

@@ -356,7 +356,11 @@ fn unsupported_input_is_an_error() {
             "uniform sampler2D s;\nvoid main() { texture3D(s, vec3(0.0)); }",
             "passed to `texture3D`",
         ),
-        ("void main() { gl_TexCoord[0] = vec4(0.0); }", "gl_TexCoord"),
+        // Literal indices are supported (compat.rs), computed ones are not.
+        (
+            "void main() { int i = 0; gl_TexCoord[i] = vec4(0.0); }",
+            "gl_TexCoord",
+        ),
         ("uniform sampler2D s[2];", "sampler array"),
         ("void main() { {", "unbalanced"),
     ];
@@ -543,4 +547,136 @@ fn dfdy_is_negated_in_fragment_shaders() {
     // Vertex shaders have no derivatives to fix.
     let vs = "void main() { gl_Position = vec4(0.0); }\n";
     assert!(!rewrite(vs, Stage::Vertex).unwrap().body.contains("hz_dFdy"));
+}
+
+#[test]
+fn sampler_types_and_tagged_calls() {
+    let src = "uniform sampler3D vol;\nuniform usampler2D ids;\nuniform sampler2DShadow sh;\nuniform samplerCube sky;\n\
+               void main() {\n    vec4 a = texture3D(vol, vec3(0.5)) + texelFetchOffset(vol, ivec3(1), 0, ivec3(1));\n    \
+               uvec4 b = texture(ids, vec2(0.5));\n    float s = texture(sh, vec3(0.5));\n    \
+               vec4 t = shadow2D(sh, vec3(0.5));\n    float u = texture(sh, vec3(0.5)).x;\n}\n";
+    let out = rewrite(src, Stage::Fragment).unwrap();
+    assert_eq!(out.sampler_types["vol"], "sampler3D");
+    assert_eq!(out.sampler_types["sky"], "samplerCube");
+    assert_eq!(
+        out.sample_calls,
+        set(&[
+            "hz_fetch_3_vol",
+            "hz_sample_2u_ids",
+            "hz_sample_3_vol",
+            "hz_shadow_sh"
+        ])
+    );
+    // The fetch offset is added to the coordinate; modern shadow reads are scalars.
+    assert!(
+        out.body
+            .contains("hz_fetch_3_vol((( ivec3(1)) + ( ivec3(1))), 0)"),
+        "{}",
+        out.body
+    );
+    assert!(
+        out.body.contains("float s = hz_shadow_sh( vec3(0.5)).x;"),
+        "{}",
+        out.body
+    );
+    assert!(
+        out.body.contains("vec4 t = hz_shadow_sh( vec3(0.5));"),
+        "{}",
+        out.body
+    );
+    assert!(
+        out.body.contains("float u = hz_shadow_sh( vec3(0.5)).x;"),
+        "{}",
+        out.body
+    );
+    let parsed = crate::host::parse_sampling_call("hz_sample_2u_ids").unwrap();
+    assert_eq!(
+        (parsed.op, parsed.dim, parsed.sample, parsed.name),
+        (
+            "hz_sample_",
+            crate::TexDim::D2,
+            crate::SampleKind::Uint,
+            "ids"
+        )
+    );
+}
+
+#[test]
+fn a_plain_overload_beside_a_sampler_one() {
+    let src = "uniform sampler2D colortex9;\nvec3 f(vec3 p, bool lod) { return p; }\n\
+               vec3 f(vec3 p, sampler2D v) { return texelFetch(v, ivec2(p.xy), 0).xyz + f(p, false); }\n\
+               void main() { gl_FragData[0] = vec4(f(vec3(0.5), colortex9) + f(vec3(0.5), true), 1.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(rw.body.contains("f_hz_colortex9("), "{}", rw.body);
+    assert!(rw.body.contains("f(vec3(0.5), true)"), "{}", rw.body);
+}
+
+#[test]
+fn uniform_initializers() {
+    // GLSL 330: Horizon's value wins for its own uniforms; others keep the pack's value.
+    let src = "uniform float viewWidth = 1.0, heavyFog = max(0.25, 0.5);\n\
+               uniform vec2 offset = vec2(1.0, -2.0);\n\
+               out vec4 color;\n\
+               void main() { color = vec4(viewWidth, heavyFog, offset); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    let names: Vec<_> = rw.uniforms.iter().map(|u| u.name.as_str()).collect();
+    assert_eq!(names, ["viewWidth"], "{}", rw.body);
+    assert!(
+        rw.body.contains("float heavyFog = max ( 0.25 , 0.5 );"),
+        "{}",
+        rw.body
+    );
+    assert!(
+        rw.body.contains("vec2 offset = vec2 ( 1.0 , - 2.0 );"),
+        "{}",
+        rw.body
+    );
+    naga(&rw, Stage::Fragment);
+}
+
+#[test]
+fn modf_and_frexp_are_polyfilled() {
+    let src = "varying vec2 uv;\n\
+               void main() { float i, f = modf(uv.x, i); vec2 w; vec2 g = modf(uv, w); ivec3 e;\n\
+               vec3 m = frexp(vec3(uv, 1.0), e); gl_FragData[0] = vec4(f + i, g + w, 0.0) + vec4(m, e.x); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(rw.body.contains("hz_modf(uv.x, i)"), "{}", rw.body);
+    naga(&rw, Stage::Fragment);
+    // A pack's own `modf` stays.
+    let own = "float modf(float x, float y) { return x; }\nvoid main() { gl_FragData[0] = vec4(modf(1.0, 2.0)); }\n";
+    assert!(
+        !rewrite(own, Stage::Fragment)
+            .unwrap()
+            .body
+            .contains("hz_modf")
+    );
+}
+
+#[test]
+fn isnan_and_isinf_are_polyfilled() {
+    let src = "varying vec3 c;\n\
+               void main() { bool a = isnan(c.x) || isinf(c.y); bvec3 b = isnan(c);\n\
+               gl_FragData[0] = vec4(a || any(b) || any(isinf(vec2(c))) ? 1.0 : 0.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(
+        rw.body.contains("hz_isnan(c.x) || hz_isinf(c.y)"),
+        "{}",
+        rw.body
+    );
+    // The WGSL writer, which has no `isnan`, takes it.
+    naga(&rw, Stage::Fragment);
+}
+
+#[test]
+fn struct_varyings_are_declared_after_their_struct() {
+    let src = "struct Fog { vec3 color; float density; };\nflat varying Fog fog;\n\
+               void main() { gl_FragData[0] = vec4(fog.color, fog.density); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert_eq!(rw.varyings[0].ty, "Fog");
+    assert!(
+        rw.body
+            .contains("struct Fog { vec3 color; float density; }; Fog fog;"),
+        "{}",
+        rw.body
+    );
 }
