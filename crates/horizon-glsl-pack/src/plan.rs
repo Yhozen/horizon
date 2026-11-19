@@ -398,24 +398,42 @@ impl Default for ShadowSpec {
 }
 
 /// Which program family a `texture.<stage>.<name>` override applies to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TextureStage {
     /// gbuffers programs (and, as the spec says, shadow programs).
+    #[default]
     Gbuffers,
     Shadow,
     Deferred,
+    /// `composite*` and `final`.
     Composite,
+    /// Stages Horizon does not run yet: stored so the report can name them.
+    Prepare,
+    Shadowcomp,
+    Begin,
+    Setup,
+    /// `customTexture.<name>`: every program that declares the sampler.
+    All,
 }
 
-/// A PNG the pack binds in place of one of its samplers
-/// (`texture.gbuffers.gaux1=textures/ripples.png`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A texture the pack binds to one of its samplers
+/// (`texture.gbuffers.gaux1=textures/ripples.png`, `customTexture.lut=…`).
+/// The client loads it (see [`crate::textures`]); nothing here decodes images.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CustomTexture {
     pub stage: TextureStage,
-    /// The sampler it replaces, canonical (`colortex4`, not `gaux1`).
+    /// The sampler it replaces, canonical (`colortex4`, not `gaux1`), or the
+    /// pack's own sampler name.
     pub sampler: String,
-    /// Pack path of the image (`shaders/textures/ripples.png`).
+    /// Pack path of the file (`shaders/textures/ripples.png`); for a
+    /// [`crate::textures::CustomTextureKind::Resource`], the resource name.
     pub path: String,
+    /// What the file is: a PNG, raw texels, or a resource-pack texture.
+    pub kind: crate::textures::CustomTextureKind,
+    /// Linear filtering (a `.mcmeta` with `"blur": true`; raw textures: true).
+    pub blur: bool,
+    /// Clamp to edge rather than repeat (`"clamp": true`; raw textures: true).
+    pub clamp: bool,
 }
 
 /// `clouds=` in shaders.properties.
@@ -744,6 +762,8 @@ pub struct PackPlan {
     /// The fragment outputs each slot's program declares (empty when it
     /// writes `gl_FragData`/`gl_FragColor`).
     pub outputs: BTreeMap<ProgramKind, Vec<FragOutput>>,
+    /// `uniform.*` / `variable.*` of `shaders.properties` (group 1, binding 1).
+    pub custom_uniforms: crate::custom_uniforms::CustomUniforms,
 }
 
 impl Default for PackPlan {
@@ -764,6 +784,7 @@ impl Default for PackPlan {
             options: Vec::new(),
             program_states: BTreeMap::new(),
             outputs: BTreeMap::new(),
+            custom_uniforms: Default::default(),
         }
     }
 }

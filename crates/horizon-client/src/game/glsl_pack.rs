@@ -69,7 +69,73 @@ impl Game<'_> {
                 horizon_client::camera::CameraFluid::Lava => 2,
                 horizon_client::camera::CameraFluid::PowderSnow => 3,
             },
+            ..self.pack_player_state(eye)
         })
+    }
+
+    /// The biome, weather and player parts of [`Self::pack_frame`]: a few
+    /// field reads and one ray along the view.
+    fn pack_player_state(&self, eye: [f64; 3]) -> PackFrame {
+        use horizon_glsl_pack::custom_uniforms::{biome_category, biome_id};
+        let mut f = PackFrame::default();
+        let [x, y, z] = eye.map(|v| v.floor() as i32);
+        if let Some(chunk) = self.world.chunks.get(&(x >> 4, z >> 4)) {
+            let info = &self.res.biomes().list[chunk.biome(x, y, z) as usize];
+            f.biome = biome_id(&info.name);
+            f.biome_category = biome_category(&info.name);
+            // Biome.getPrecipitationAt without the height adjustment.
+            f.biome_precipitation = match (info.precipitation, info.temperature < 0.15) {
+                (false, _) => 0,
+                (true, false) => 1,
+                (true, true) => 2,
+            };
+            f.temperature = info.temperature;
+            f.rainfall = info.downfall;
+        }
+        let partial = self.clock.fraction() as f32;
+        f.thunder_strength = self.world.weather.levels(partial).1;
+        f.mood = self.ambience.moodiness.clamp(0.0, 1.0);
+        f.darkness = [
+            self.darkness_fog().unwrap_or(0.0),
+            self.darkness_lighting(partial).1,
+        ];
+        if let Some(bolt) = self.bolts.first() {
+            let at = std::array::from_fn::<f32, 3, _>(|i| (bolt.at[i] - eye[i]) as f32);
+            f.lightning = [at[0], at[1], at[2], 1.0];
+        }
+        // The first block along the view, as far as the shadows reach at most.
+        let dir = super::view_vector(self.yaw, self.pitch);
+        f.center_distance = self.clip_ray(eye, dir, 256.0).map_or(f32::INFINITY, |hit| {
+            let d: f64 = (0..3).map(|i| (hit.point[i] - eye[i]) * dir[i]).sum();
+            d as f32
+        });
+        f.spectator = self.spectator();
+        let unbounded = self.creative || f.spectator;
+        f.health = [if unbounded { -1.0 } else { 0.0 }, 20.0];
+        f.hunger = [if unbounded { -1.0 } else { 0.0 }, 20.0];
+        f.air = [if unbounded { -1.0 } else { 0.0 }, 300.0];
+        if let Some(p) = &self.player {
+            // Health boost adds 4 per level to the base 20 (the attribute
+            // needs a mutable borrow; nothing else changes it in vanilla).
+            let boost = self
+                .potions
+                .effects
+                .get("health_boost")
+                .map_or(0.0, |e| 4.0 * (e.amplifier + 1) as f32);
+            f.health[1] = 20.0 + boost;
+            if !unbounded {
+                f.health[0] = (p.health.health() / f.health[1]).clamp(0.0, 1.0);
+                f.hunger[0] = p.health.food.food as f32 / 20.0;
+                f.air[0] = (p.air as f32 / 300.0).clamp(0.0, 1.0);
+            }
+            f.sneaking = p.pose == horizon_client::pose::Pose::Crouching;
+            f.sprinting = p.sprinting;
+            f.hurt = p.health.hurt.hurt_time > 0;
+            f.burning = p.fire_ticks > 0;
+            f.on_ground = p.ground.on_ground && !p.flying;
+        }
+        f.invisible = f.spectator || self.potions.effects.get("invisibility").is_some();
+        f
     }
 }
 

@@ -298,6 +298,37 @@ pub struct PackFrame {
     pub hide_gui: bool,
     /// `isEyeInWater`: 1 water, 2 lava, 3 powder snow, else 0.
     pub eye_in_fluid: i32,
+    /// The biome at the camera: `BIOME_*` index, `CAT_*` index,
+    /// precipitation (0 none, 1 rain, 2 snow), temperature and downfall.
+    pub biome: i32,
+    pub biome_category: i32,
+    pub biome_precipitation: i32,
+    pub temperature: f32,
+    pub rainfall: f32,
+    /// `thunderStrength` (0..1, scaled by the rain as vanilla's).
+    pub thunder_strength: f32,
+    /// Health, hunger and air as fractions of their maxima (-1 in creative
+    /// and spectator), and the maxima (`currentPlayer*`, `maxPlayer*`).
+    pub health: [f32; 2],
+    pub hunger: [f32; 2],
+    pub air: [f32; 2],
+    pub spectator: bool,
+    pub sneaking: bool,
+    pub sprinting: bool,
+    pub hurt: bool,
+    pub invisible: bool,
+    pub burning: bool,
+    pub on_ground: bool,
+    /// The cave ambience's mood, 0..1 (`playerMood`).
+    pub mood: f32,
+    /// A bolt being drawn, camera-relative, w = 1; zero without one.
+    pub lightning: [f32; 4],
+    /// Blocks from the camera to the first block along its view, for
+    /// `centerDepthSmooth`; infinite when the ray meets nothing.
+    pub center_distance: f32,
+    /// The darkness effect's blend and its pulsing light dim
+    /// (`darknessFactor`, `darknessLightFactor`).
+    pub darkness: [f32; 2],
 }
 
 /// What `draw_frame` worked out for the world pass, for the pack's frame
@@ -3087,6 +3118,12 @@ impl Renderer {
     /// Whether a shader pack is installed.
     pub fn has_shader_pack(&self) -> bool {
         self.glsl_pack.is_some()
+    }
+    /// What went wrong loading the installed pack's textures (for its report).
+    pub fn shader_pack_notes(&self) -> Vec<String> {
+        self.glsl_pack
+            .as_ref()
+            .map_or_else(Vec::new, |p| p.texture_notes().to_vec())
     }
     /// Draws the overworld with a compiled shader pack's programs from now on
     /// (`None`: Horizon's own). Errors leave the renderer without a pack.

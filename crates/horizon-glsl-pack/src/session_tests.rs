@@ -578,3 +578,54 @@ fn targets_get_their_format_s_range_and_type() {
     assert!(t.contains("discard"), "{t}");
     assert_ne!(t, &pack.programs[&K::Water].fragment_wgsl);
 }
+
+#[test]
+fn properties_continuations_stop_at_directives() {
+    // A continued line before `#else` must not swallow it.
+    let props = "#ifdef NOPE\nprogram.composite.enabled = \\\n  false \\\n#else\nsun = false\n#endif\nmoon = \\\n  false\n";
+    let files = programs(
+        &[("gbuffers_terrain", FSH), ("composite", FSH)],
+        &[("shaders/shaders.properties", props)],
+    );
+    let plan = read_plan(&files, "minecraft:overworld", &PackOptions::default()).unwrap();
+    assert!(plan.programs.contains_key(&ProgramKind::Composite(0)));
+    assert!(!plan.properties.sun && !plan.properties.moon);
+}
+
+#[test]
+fn one_read_then_chosen_slots() {
+    let files = programs(
+        &[
+            ("gbuffers_terrain", FSH),
+            ("gbuffers_water", BROKEN_FSH),
+            ("composite", BROKEN_FSH),
+            ("final", FSH),
+        ],
+        &[],
+    );
+    let mut s = Session::read(
+        &files,
+        "minecraft:overworld",
+        &PackOptions::default(),
+        &HostParams::default(),
+    );
+    use ProgramKind as K;
+    assert_eq!(
+        s.candidates(K::Water),
+        ["shaders/gbuffers_water", "shaders/gbuffers_terrain"]
+    );
+    assert!(s.compile_slot(K::Water, 0).unwrap().is_err());
+    let water = s.compile_slot(K::Water, 1).unwrap().unwrap();
+    assert_eq!(water.source, "shaders/gbuffers_terrain");
+    assert!(s.compile_slot(K::Water, 2).is_none());
+    assert!(s.compile_slot(K::Hand, 0).is_none());
+    assert!(s.plan().unwrap().programs.is_empty());
+
+    // A failing essential slot fails the pack, and the report still has
+    // every slot after it.
+    let (pack, r) = report(&files, &PackOptions::default());
+    assert!(pack.is_none());
+    assert_eq!(r.status, PackStatus::Failed);
+    assert!(outcome(&r, "composite").error.is_some());
+    assert_eq!(outcome(&r, "final").file.as_deref(), Some("shaders/final"));
+}

@@ -191,6 +191,8 @@ struct State {
     files: PackFiles,
     predefined: BTreeMap<String, String>,
     blocks: BlockIds,
+    entities: properties::IdMap,
+    items: properties::IdMap,
     plan: PackPlan,
     /// Every slot the pack has (any of `ProgramKind::all()`), with its
     /// usable candidates, best first.
@@ -204,6 +206,53 @@ struct State {
     cache: Vec<(Key, Result<CompiledProgram, PackError>)>,
     programs: BTreeMap<ProgramKind, CompiledProgram>,
     skipped: Vec<(ProgramKind, String)>,
+}
+
+impl State {
+    /// Runs `path` in slot `kind`: preprocessed if it is not yet, then
+    /// compiled (or a compile of the same key reused) when `compile`.
+    /// Returns the program and its draw buffers.
+    fn attempt(
+        &mut self,
+        kind: ProgramKind,
+        path: &str,
+        host: &HostParams,
+        compile: bool,
+    ) -> Result<(Option<CompiledProgram>, Vec<u8>), PackError> {
+        if !self.prepared.contains_key(path) {
+            let p = Prepared::new(&self.files, path, &self.predefined);
+            self.prepared.insert(path.to_string(), p);
+        }
+        let p = match &self.prepared[path] {
+            Err(e) => return Err(e.clone()),
+            Ok(p) => p,
+        };
+        let draw_buffers = p.draw_buffers(kind);
+        self.plan
+            .outputs
+            .insert(kind, directives::fragment_outputs(&p.fsh));
+        if !compile {
+            return Ok((None, draw_buffers));
+        }
+        let key: Key = (
+            path.to_string(),
+            kind.geometry(),
+            kind.is_shadow(),
+            draw_buffers.clone(),
+            host::variant(kind),
+            Some(format!("{:?}", self.plan.alpha_test(kind))),
+        );
+        let r = match self.cache.iter().find(|(k, _)| *k == key) {
+            Some((_, r)) => r.clone(),
+            None => {
+                let r =
+                    compile_program(path, p, kind, &draw_buffers, host, &self.blocks, &self.plan);
+                self.cache.push((key, r.clone()));
+                r
+            }
+        };
+        r.map(|c| (Some(c), draw_buffers))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,8 +274,10 @@ pub struct Session {
     phase: Phase,
     state: Option<State>,
     report: PackReport,
-    /// Why the pack failed (an essential slot, or the setup).
+    /// Why the session stopped (the setup, a refusal, a strict slot).
     error: Option<PackError>,
+    /// The first essential slot whose chain was exhausted: the pack fails.
+    essential: Option<PackError>,
     done: usize,
     total: usize,
 }
@@ -272,6 +323,7 @@ impl Session {
             state: None,
             report: PackReport::default(),
             error: None,
+            essential: None,
             done: 0,
             total: 1,
         }
@@ -319,6 +371,79 @@ impl Session {
         }
     }
 
+    /// A session that only reads the pack (properties, options, every
+    /// slot's best candidate preprocessed, the plan's pack-wide settings),
+    /// run to its end: then [`Self::compile_slot`] compiles chosen slots on
+    /// top of that one read (the corpus checker's way).
+    pub fn read(
+        files: &PackFiles,
+        dimension: &str,
+        options: &PackOptions,
+        host: &HostParams,
+    ) -> Session {
+        let mut s = Self::with(
+            files,
+            dimension,
+            options,
+            host,
+            Mode {
+                kinds: Vec::new(),
+                strict: false,
+                compile: true,
+                refuse: false,
+            },
+        );
+        s.run();
+        s
+    }
+
+    /// The candidates slot `kind` may run, best first (after
+    /// `program.*.enabled` and [`PackOptions::excluded`]); empty when the
+    /// pack has none or the session has not read the pack.
+    pub fn candidates(&self, kind: ProgramKind) -> &[String] {
+        self.state
+            .as_ref()
+            .and_then(|st| st.chains.get(&kind))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// Compiles candidate `index` of slot `kind` ([`Self::candidates`]) as
+    /// that slot, with no fallback and without changing the session's
+    /// outcome; `None` when there is no such candidate. Compiles are shared
+    /// with the session's own.
+    pub fn compile_slot(
+        &mut self,
+        kind: ProgramKind,
+        index: usize,
+    ) -> Option<Result<CompiledProgram, PackError>> {
+        let host = self.host;
+        let st = self.state.as_mut()?;
+        let path = st.chains.get(&kind)?.get(index)?.clone();
+        let outputs = st.plan.outputs.get(&kind).cloned();
+        let r = st.attempt(kind, &path, &host, true);
+        match outputs {
+            Some(o) => st.plan.outputs.insert(kind, o),
+            None => st.plan.outputs.remove(&kind),
+        };
+        Some(r.map(|(c, _)| c.expect("compiled")))
+    }
+
+    /// The plan as read so far (`None` before the setup step, or when the
+    /// setup failed). Slots appear in `programs` once settled.
+    pub fn plan(&self) -> Option<&PackPlan> {
+        self.state.as_ref().map(|st| &st.plan)
+    }
+
+    /// The programs compiled so far, by slot (also when the pack fails).
+    pub fn programs(&self) -> Option<&BTreeMap<ProgramKind, CompiledProgram>> {
+        self.state.as_ref().map(|st| &st.programs)
+    }
+
+    /// The report as it stands (the final one comes from [`Self::finish`]).
+    pub fn report(&self) -> PackReport {
+        self.outcome().1
+    }
+
     fn run(&mut self) {
         while !self.step() {}
     }
@@ -352,10 +477,24 @@ impl Session {
             predefined.extend(flags);
             (props, predefined)
         };
-        let blocks = match properties::block_ids(&files, &macros) {
-            Ok(b) => b,
-            Err(e) => return self.fail(e),
+        // An id file that does not read leaves its ids unlisted: the pack
+        // still runs, and the report says why its materials look off.
+        let blocks = properties::block_ids(&files, &macros).unwrap_or_else(|e| {
+            self.report
+                .notes
+                .push(format!("{e} (block ids left unlisted)"));
+            BlockIds::default()
+        });
+        let mut ids = |kind: &str, unlisted: i32| {
+            properties::id_map(&files, &macros, kind, unlisted).unwrap_or_else(|e| {
+                self.report
+                    .notes
+                    .push(format!("{e} ({kind} ids left unlisted)"));
+                properties::IdMap::default()
+            })
         };
+        let entities = ids("entity", properties::UNLISTED_ENTITY);
+        let items = ids("item", properties::UNLISTED_ITEM);
         let folder = world_folder(&files, &self.dimension);
         self.report.features = features::detect(&files, &folder, &props);
         if self.mode.refuse
@@ -406,6 +545,7 @@ impl Session {
         let plan = PackPlan {
             properties: props.properties,
             custom_textures: props.textures.clone(),
+            custom_uniforms: crate::custom_uniforms::CustomUniforms::parse(&props.entries),
             options: defaults,
             ..PackPlan::default()
         };
@@ -416,6 +556,8 @@ impl Session {
             files,
             predefined,
             blocks,
+            entities,
+            items,
             plan,
             chains,
             prepared: BTreeMap::new(),
@@ -478,48 +620,7 @@ impl Session {
         };
         let at = *st.cursor.get(&kind).unwrap_or(&0);
         let path = st.chains[&kind][at].clone();
-        if !st.prepared.contains_key(&path) {
-            let p = Prepared::new(&st.files, &path, &st.predefined);
-            st.prepared.insert(path.clone(), p);
-        }
-        let result = match &st.prepared[&path] {
-            Err(e) => Err(e.clone()),
-            Ok(p) => {
-                let draw_buffers = p.draw_buffers(kind);
-                st.plan
-                    .outputs
-                    .insert(kind, directives::fragment_outputs(&p.fsh));
-                if !compile {
-                    Ok(None)
-                } else {
-                    let key: Key = (
-                        path.clone(),
-                        kind.geometry(),
-                        kind.is_shadow(),
-                        draw_buffers.clone(),
-                        host::variant(kind),
-                        format!("{:?}", st.plan.alpha_test(kind)).into(),
-                    );
-                    match st.cache.iter().find(|(k, _)| *k == key) {
-                        Some((_, r)) => r.clone().map(Some),
-                        None => {
-                            let r = compile_program(
-                                &path,
-                                p,
-                                kind,
-                                &draw_buffers,
-                                &host,
-                                &st.blocks,
-                                &st.plan,
-                            );
-                            st.cache.push((key, r.clone()));
-                            r.map(Some)
-                        }
-                    }
-                }
-                .map(|c| (c, draw_buffers))
-            }
-        };
+        let result = st.attempt(kind, &path, &host, compile);
         match result {
             Ok((compiled, draw_buffers)) => {
                 let p = st.prepared[&path].as_ref().expect("prepared");
@@ -549,9 +650,11 @@ impl Session {
                     st.queue.pop_front();
                     let first = st.failed[&kind][0].clone();
                     if kind.is_essential() {
-                        return self.fail(first);
+                        // The pack fails; the other slots still go in the report.
+                        self.essential.get_or_insert(first);
+                    } else {
+                        st.skipped.push((kind, first.to_string()));
                     }
-                    st.skipped.push((kind, first.to_string()));
                 }
             }
         }
@@ -601,7 +704,9 @@ impl Session {
         }
         report.unknown_uniforms = unknown.into_iter().collect();
         report.settle();
-        if self.error.is_some() && report.status != PackStatus::Refused {
+        if (self.error.is_some() || self.essential.is_some())
+            && report.status != PackStatus::Refused
+        {
             report.status = PackStatus::Failed;
         }
         (Some(st), report)
@@ -609,7 +714,7 @@ impl Session {
 
     /// The compiled pack and the report, or the error that stopped it.
     fn result(&self) -> Result<(CompiledPack, PackReport), PackError> {
-        if let Some(e) = &self.error {
+        if let Some(e) = self.error.as_ref().or(self.essential.as_ref()) {
             return Err(e.clone());
         }
         let (st, report) = self.outcome();
@@ -619,11 +724,12 @@ impl Session {
             CompiledPack {
                 programs: st.programs.clone(),
                 shadow: ShadowSettings::from(&plan.shadow),
+                custom_uniforms: plan.custom_uniforms.clone(),
                 plan,
                 skipped: st.skipped.clone(),
                 blocks: st.blocks.clone(),
-                entities: properties::entity_ids(&self.files, &self.options),
-                items: properties::item_ids(&self.files, &self.options),
+                entities: st.entities.clone(),
+                items: st.items.clone(),
             },
             report,
         ))
@@ -715,6 +821,7 @@ fn compile_program(
         fragment: fs_glsl,
         textures,
         unknown_uniforms,
+        notes,
     } = host::program_sources(&vertex, &fragment, &spec).map_err(|m| PackError::new(program, m))?;
     let vertex_wgsl = naga_out::glsl_to_wgsl(&vs_glsl, Stage::Vertex)
         .map_err(|m| PackError::new(&vsh_path, m))?;
@@ -735,5 +842,6 @@ fn compile_program(
         samplers,
         textures,
         unknown_uniforms,
+        notes,
     })
 }

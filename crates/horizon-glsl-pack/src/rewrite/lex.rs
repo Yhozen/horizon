@@ -16,6 +16,12 @@ pub(super) struct Tok<'a> {
     pub(super) text: &'a str,
 }
 
+/// GLSL's operators of more than one character, longest first.
+const OPERATORS: [&str; 22] = [
+    "<<=", ">>=", "||", "&&", "^^", "==", "!=", "<=", ">=", "<<", ">>", "++", "--", "+=", "-=",
+    "*=", "/=", "%=", "&=", "|=", "^=", "->",
+];
+
 pub(super) fn tokenize(src: &str) -> Vec<Tok<'_>> {
     let b = src.as_bytes();
     let mut toks = Vec::new();
@@ -47,7 +53,13 @@ pub(super) fn tokenize(src: &str) -> Vec<Tok<'_>> {
             }
             Kind::Number
         } else {
-            i += src[i..].chars().next().map_or(1, char::len_utf8);
+            // Multi-character operators stay one token, so passes that rebuild text from
+            // tokens with spaces between them keep `||`, `==`, `<<=`… intact.
+            let op = OPERATORS.iter().find(|op| src[i..].starts_with(**op));
+            i += op.map_or_else(
+                || src[i..].chars().next().map_or(1, char::len_utf8),
+                |op| op.len(),
+            );
             Kind::Punct
         };
         toks.push(Tok {
@@ -144,4 +156,23 @@ pub(super) fn top_level_items(toks: &[Tok]) -> Result<Vec<(usize, usize)>, Strin
     }
     items.push((start, toks.len()));
     Ok(items)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tokenize;
+
+    #[test]
+    fn operators_are_one_token() {
+        let texts: Vec<&str> = tokenize("a<<=b||c&&-d==e>>f<=g++")
+            .into_iter()
+            .map(|t| t.text)
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                "a", "<<=", "b", "||", "c", "&&", "-", "d", "==", "e", ">>", "f", "<=", "g", "++"
+            ]
+        );
+    }
 }

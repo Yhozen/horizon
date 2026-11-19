@@ -393,9 +393,12 @@ def check(args: argparse.Namespace) -> int:
     packs = pack_paths(args.packs)
     if not args.reuse:
         binary = args.binary and Path(args.binary) or build_pack_check()
-        command = [str(binary), *map(str, packs), "--out", str(out), "--dimension", args.dimension]
+        command = [str(binary), *map(str, packs), "--out", str(out), "--dimension", args.dimension,
+                   "--jobs", str(args.jobs)]
         for option in args.option:
             command += ["--option", option]
+        if args.max_varyings:
+            command += ["--max-varyings", str(args.max_varyings)]
         subprocess.run(command, check=True)
     dimensions = (["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"]
                   if args.dimension == "all" else [args.dimension])
@@ -445,6 +448,8 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--option", action="append", default=[], help="NAME=VALUE, passed to every pack")
     c.add_argument("--chrome", action="store_true", help="also compile the WGSL in headless Chrome")
     c.add_argument("--web", default=str(ROOT / "web"), help="the web folder with node_modules")
+    c.add_argument("--max-varyings", type=int, help="the device's inter-stage locations (default: 16, WebGPU's)")
+    c.add_argument("--jobs", type=int, default=3, help="packs checked in parallel")
     c.add_argument("--reuse", action="store_true",
                    help="skip pack_check: reuse the result.json files in --out (with --chrome, rerun Chrome only)")
     c.add_argument("--binary", help="a pack_check binary already built")

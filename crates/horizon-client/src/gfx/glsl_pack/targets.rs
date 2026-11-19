@@ -171,11 +171,16 @@ impl Targets {
         size: [u32; 2],
         needs: &[Need; 16],
         formats: &[wgpu::TextureFormat; 16],
+        sizes: &[horizon_glsl_pack::plan::BufferSize; 16],
         mips: &mut mips::Mips,
     ) -> Self {
+        let screen = size;
         let buffers = (0..16)
             .map(|i| {
                 let need = needs[i];
+                // `size.buffer.colortexN`: a fixed or relative size.
+                let (w, h) = sizes[i].pixels(screen[0], screen[1]);
+                let size = [w, h];
                 need.used.then(|| {
                     let levels = if need.mipmaps { mips::levels(size) } else { 1 };
                     if levels > 1 {
@@ -207,7 +212,7 @@ impl Targets {
         let copy_usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
         let depth32 = wgpu::TextureFormat::Depth32Float;
         Self {
-            size,
+            size: screen,
             buffers,
             depth: image(device, "depthtex0", size, depth32, 1, depth_usage),
             depth_copies: [
