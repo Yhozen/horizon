@@ -194,6 +194,10 @@ pub struct CompiledPack {
     pub skipped: Vec<(ProgramKind, String)>,
     /// `block.properties`: block names to `mc_Entity.x` ids.
     pub blocks: BlockIds,
+    /// `entity.properties`: entity names to `entityId` ids.
+    pub entities: crate::properties::IdMap,
+    /// `item.properties`: item names to `currentRenderedItemId` ids.
+    pub items: crate::properties::IdMap,
     /// The shadow map's settings (derived from `plan.shadow`; kept until the
     /// client reads the plan).
     pub shadow: ShadowSettings,

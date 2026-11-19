@@ -18,11 +18,16 @@
 //! - Buffers with `Clear` on are cleared (both sides) every frame; the others
 //!   only when the targets are created (first frame, resize):
 //!   [`FrameSchedule::initial_clears`].
+//! - `flip.<program>.<buffer>=false` keeps a buffer on its side after the
+//!   pass wrote the other one (the next pass reads the old contents again);
+//!   `=true` flips a buffer the pass does not write.
+//! - `prepare*` passes run after the shadow map and before the opaque
+//!   gbuffers, which then draw into the side each buffer is on.
 
 use std::collections::BTreeSet;
 
 use crate::ProgramKind;
-use crate::plan::PackPlan;
+use crate::plan::{BufferSize, PackPlan, Scale};
 
 /// Number of `colortexN` buffers.
 pub const BUFFERS: usize = 16;
@@ -65,7 +70,8 @@ pub struct BufferClear {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GbufferPhase {
     /// Sky, opaque and cutout terrain, entities, block entities, opaque
-    /// particles, the solid hand (everything before `deferred`).
+    /// particles, the solid hand (everything before `deferred`). It draws
+    /// into the sides the `prepare` passes left (main without them).
     Opaque,
     /// Translucent terrain and particles, weather, the translucent hand
     /// (everything after `deferred`, before `composite`).
@@ -87,6 +93,11 @@ pub struct Pass {
     /// runs (the side is the one the pass reads). From then on the buffer is
     /// sampled trilinearly for the rest of the frame.
     pub regenerate_mips: Vec<(u8, Side)>,
+    /// The size of the targets it draws into (its first draw buffer's
+    /// `size.buffer`; the screen's for `final`).
+    pub size: BufferSize,
+    /// `scale.<program>`: the viewport inside those targets.
+    pub scale: Option<Scale>,
 }
 
 /// One step of a frame, in order.
@@ -192,14 +203,20 @@ impl FrameSchedule {
             steps.push(Step::Shadow);
         }
         let mut sides = [Side::Main; BUFFERS];
+        let passes = plan.fullscreen_passes();
+        let (prepare, passes): (Vec<_>, Vec<_>) = passes
+            .iter()
+            .partition(|k| matches!(k, ProgramKind::Prepare(_)));
+        let (deferred, rest): (Vec<_>, Vec<_>) = passes
+            .into_iter()
+            .partition(|k| matches!(k, ProgramKind::Deferred(_)));
+        for kind in prepare {
+            steps.push(Step::Pass(pass(plan, kind, &mut sides)));
+        }
         steps.push(Step::Gbuffers {
             phase: GbufferPhase::Opaque,
             sides,
         });
-        let passes = plan.fullscreen_passes();
-        let (deferred, rest): (Vec<_>, Vec<_>) = passes
-            .iter()
-            .partition(|k| matches!(k, ProgramKind::Deferred(_)));
         for kind in deferred {
             steps.push(Step::Pass(pass(plan, kind, &mut sides)));
         }
@@ -263,14 +280,29 @@ fn pass(plan: &PackPlan, kind: ProgramKind, sides: &mut [Side; BUFFERS]) -> Pass
             .map(|b| (b, reads[usize::from(b)].other()))
             .collect()
     };
+    let state = plan.state(kind);
     for &(b, side) in &writes {
-        sides[usize::from(b)] = side;
+        if state.flip.get(&b) != Some(&false) {
+            sides[usize::from(b)] = side;
+        }
     }
+    for (&b, &flip) in &state.flip {
+        let written = writes.iter().any(|w| w.0 == b);
+        if flip && !written && usize::from(b) < BUFFERS {
+            let s = &mut sides[usize::from(b)];
+            *s = s.other();
+        }
+    }
+    let size = writes.first().map_or(BufferSize::Screen, |&(b, _)| {
+        plan.buffers[usize::from(b)].size
+    });
     Pass {
         kind,
         reads,
         writes,
         regenerate_mips,
+        size,
+        scale: state.scale,
     }
 }
 
@@ -397,6 +429,61 @@ mod tests {
         assert_eq!(s.written, BTreeSet::from([0, 2]));
         // Two flips of colortex0: back on main.
         assert_eq!(s.latest, sides(&[]));
+    }
+
+    #[test]
+    fn prepare_flips_and_sizes() {
+        use crate::plan::{ProgramState, Scale};
+        let mut p = plan(&[
+            (ProgramKind::Prepare(0), &[5]),
+            (ProgramKind::Terrain, &[0]),
+            (ProgramKind::Composite(0), &[3, 4]),
+            (ProgramKind::Composite(1), &[3]),
+            (ProgramKind::Final, &[]),
+        ]);
+        p.buffers[3].size = BufferSize::Relative(0.5, 0.5);
+        p.program_states.insert(
+            "composite".into(),
+            ProgramState {
+                flip: [(4, false), (6, true)].into(),
+                scale: Some(Scale {
+                    scale: 0.5,
+                    offset: [0.0; 2],
+                }),
+                ..ProgramState::default()
+            },
+        );
+        let s = FrameSchedule::new(&p);
+        let kinds: Vec<String> = s
+            .steps
+            .iter()
+            .map(|st| match st {
+                Step::Gbuffers { phase, sides } => format!("{phase:?}{:?}", sides[5]),
+                Step::Pass(p) => format!("{:?}", p.kind),
+                _ => String::new(),
+            })
+            .filter(|n| !n.is_empty())
+            .collect();
+        // The prepare pass runs first and the opaque gbuffers draw on its side.
+        assert_eq!(
+            kinds,
+            [
+                "Prepare(0)",
+                "OpaqueAlt",
+                "TranslucentAlt",
+                "Composite(0)",
+                "Composite(1)",
+                "Final"
+            ]
+        );
+        let passes: Vec<&Pass> = s.passes().collect();
+        assert_eq!(passes[1].writes, [(3, Alt), (4, Alt)]);
+        assert_eq!(passes[1].size, BufferSize::Relative(0.5, 0.5));
+        assert_eq!(passes[1].scale.map(|s| s.scale), Some(0.5));
+        // colortex4 did not flip, colortex6 did without being written.
+        assert_eq!(passes[2].reads, sides(&[3, 5, 6]));
+        assert_eq!(passes[3].reads, sides(&[5, 6]));
+        assert_eq!(passes[3].size, BufferSize::Screen);
     }
 
     #[test]

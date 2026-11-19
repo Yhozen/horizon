@@ -1525,7 +1525,7 @@ impl OptionsUi {
         let Some(value) = ui_::slider_pick(&ui_::option_choices(settings, name), fraction) else {
             return Vec::new();
         };
-        if ui_::value_of(settings, name) == Some(value.as_str()) {
+        if ui_::value_of(settings, name).as_deref() == Some(value.as_str()) {
             return Vec::new();
         }
         ui_::set_value(settings, name, &value);
@@ -3513,37 +3513,36 @@ mod tests {
     #[test]
     fn shader_packs_ui_settings_cycle_both_ways_open_screens_and_apply_on_done() {
         use crate::shader_packs_ui::{
-            Entry, OptionDef, OptionModel, Screen, SettingsView, ShaderPackEvent as E,
+            Entry, OptionInfo, OptionModel, Screen, SettingsView, ShaderPackEvent as E,
             ShaderPacksView,
         };
         let mut s = Settings::default();
+        let option = |name: &str, slider: bool| OptionInfo {
+            name: name.into(),
+            kind: horizon_glsl_pack::options::OptionKind::Value,
+            default: "1".into(),
+            values: vec!["0".into(), "1".into(), "2".into()],
+            slider,
+            boolean: false,
+        };
         let model = OptionModel {
-            options: vec![
-                OptionDef {
-                    name: "QUALITY".into(),
-                    default: "1".into(),
-                    values: vec!["0".into(), "1".into(), "2".into()],
-                    ..Default::default()
-                },
-                OptionDef {
-                    name: "SUN".into(),
-                    default: "1".into(),
-                    values: vec!["0".into(), "1".into(), "2".into()],
-                    slider: true,
-                    ..Default::default()
-                },
-            ],
-            root: Some(Screen {
-                entries: vec![Entry::Option("QUALITY".into()), Entry::Screen("SKY".into())],
-                columns: 0,
-            }),
-            screens: [(
-                "SKY".to_string(),
-                Screen {
-                    entries: vec![Entry::Option("SUN".into())],
-                    columns: 1,
-                },
-            )]
+            options: vec![option("QUALITY", false), option("SUN", true)],
+            screens: [
+                (
+                    String::new(),
+                    Screen {
+                        entries: vec![Entry::Option("QUALITY".into()), Entry::Screen("SKY".into())],
+                        columns: 0,
+                    },
+                ),
+                (
+                    "SKY".to_string(),
+                    Screen {
+                        entries: vec![Entry::Option("SUN".into())],
+                        columns: 1,
+                    },
+                ),
+            ]
             .into(),
             ..Default::default()
         };

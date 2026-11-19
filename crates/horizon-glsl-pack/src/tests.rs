@@ -84,7 +84,7 @@ fn compile_all(files: &PackFiles, options: &PackOptions) -> Result<CompiledPack,
 #[test]
 fn slots() {
     let all = ProgramKind::all();
-    assert_eq!(all.len(), 17 + 16 + 16 + 1);
+    assert_eq!(all.len(), 17 + 15 + 3 * 100 + 1);
     assert_eq!(
         [
             ProgramKind::Composite(0).name(),
@@ -164,7 +164,8 @@ fn every_slot_present_compiles_and_failures_are_skipped() {
 
 #[test]
 fn essential_failures_fail_the_pack() {
-    for name in ["gbuffers_water", "composite1", "final"] {
+    // (A broken gbuffers_water falls back to gbuffers_terrain: see session_tests.)
+    for name in ["composite1", "final"] {
         let files = pack_of(
             &[
                 program("gbuffers_terrain", GBUFFERS_VSH, GBUFFERS_FSH),

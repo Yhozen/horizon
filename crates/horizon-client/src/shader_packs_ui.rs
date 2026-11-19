@@ -1,86 +1,14 @@
 //! What the three shader pack pages show (Shader Packs, Shader Pack Settings, Shader Pack Report)
 //! and the events they send to the game. The game fills [`ShaderPacksView`] every frame while one
 //! of the pages shows (`OptionsUi::shader_packs`); `options_ui` lays the pages out from the pure
-//! functions here with vanilla's widgets.
+//! functions here with vanilla's widgets. The Settings page is built from the pack's own
+//! [`OptionModel`] (`horizon_glsl_pack::screens`).
 
 use crate::text::{self, Text};
 use horizon_glsl_pack::report::PackStatus;
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
-pub use model::{Entry, OptionDef, OptionModel, Screen};
-
-/// The pack options model the Settings page is built from. A local stand-in for
-/// `horizon_glsl_pack::screens` until that module lands; the page reads it only through the
-/// accessors below, so the switch touches this module alone.
-pub mod model {
-    use std::collections::BTreeMap;
-
-    /// Every option of a pack, its screens, profiles and language strings.
-    #[derive(Clone, Debug, Default, PartialEq)]
-    pub struct OptionModel {
-        pub options: Vec<OptionDef>,
-        /// `screen=`; `None` when the pack has none (the page lists every option).
-        pub root: Option<Screen>,
-        /// `screen.NAME=`, by name.
-        pub screens: BTreeMap<String, Screen>,
-        /// `profile.NAME=`, in file order, each resolved to option values.
-        pub profiles: Vec<(String, Vec<(String, String)>)>,
-        /// `lang/en_us.lang` (`option.X`, `value.X.v`, `screen.X`...).
-        pub lang: BTreeMap<String, String>,
-    }
-    #[derive(Clone, Debug, Default, PartialEq)]
-    pub struct OptionDef {
-        pub name: String,
-        pub default: String,
-        /// The allowed values in order (a boolean has `true` and `false` or none).
-        pub values: Vec<String>,
-        /// Listed in `sliders=`.
-        pub slider: bool,
-        /// A `#define NAME` switch rather than a value.
-        pub boolean: bool,
-    }
-    #[derive(Clone, Debug, Default, PartialEq)]
-    pub struct Screen {
-        pub entries: Vec<Entry>,
-        /// `screen.NAME.columns` (0: the default, 2).
-        pub columns: usize,
-    }
-    #[derive(Clone, Debug, PartialEq)]
-    pub enum Entry {
-        Option(String),
-        Screen(String),
-        /// `<profile>`.
-        Profile,
-        /// `<empty>`.
-        Empty,
-        /// `*`: every option no screen lists.
-        Rest,
-    }
-}
-
-// The only places that read the model's fields.
-fn find_option<'a>(m: &'a OptionModel, name: &str) -> Option<&'a OptionDef> {
-    m.options.iter().find(|o| o.name == name)
-}
-fn screen_of<'a>(m: &'a OptionModel, name: Option<&str>) -> Option<&'a Screen> {
-    match name {
-        None => m.root.as_ref(),
-        Some(name) => m.screens.get(name),
-    }
-}
-fn all_screens(m: &OptionModel) -> impl Iterator<Item = (Option<&str>, &Screen)> {
-    m.root
-        .iter()
-        .map(|s| (None, s))
-        .chain(m.screens.iter().map(|(n, s)| (Some(n.as_str()), s)))
-}
-fn lang<'a>(m: &'a OptionModel, key: &str) -> Option<&'a str> {
-    m.lang.get(key).map(String::as_str)
-}
-fn profiles(m: &OptionModel) -> &[(String, Vec<(String, String)>)] {
-    &m.profiles
-}
+pub use horizon_glsl_pack::screens::{Entry, OptionInfo, OptionModel, Screen, Values};
 
 /// What the game shows on the three pages; refreshed every frame while one shows.
 #[derive(Clone, Debug, Default)]
@@ -197,77 +125,73 @@ pub fn slider_pick(values: &[String], fraction: f32) -> Option<String> {
     values.get(i.min(last)).cloned()
 }
 
-/// The values an option cycles through (a switch: on, off).
-fn option_values(o: &OptionDef) -> Vec<String> {
-    if o.boolean && o.values.is_empty() {
-        vec!["true".into(), "false".into()]
-    } else {
-        o.values.clone()
+impl SettingsView {
+    /// Every option's current value.
+    pub fn current(&self) -> Values {
+        self.model.values_from(&self.values)
+    }
+    /// The screen shown, as the model names it (`""`: the main screen).
+    fn screen_key(&self) -> &str {
+        self.screen.as_deref().unwrap_or("")
+    }
+    /// Replaces the values, keeping only the non-default ones.
+    fn store(&mut self, values: &Values) {
+        self.values = self.model.changed(values);
     }
 }
+
 /// The values a slider of `name` spans.
 pub fn option_choices(view: &SettingsView, name: &str) -> Vec<String> {
-    find_option(&view.model, name).map_or_else(Vec::new, option_values)
+    view.model
+        .option(name)
+        .map_or_else(Vec::new, |o| o.values.clone())
 }
 /// An option's hover text (`option.X.comment`), without its `§` codes.
 pub fn option_tooltip(view: &SettingsView, name: &str) -> Option<String> {
-    lang(&view.model, &format!("option.{name}.comment")).map(|t| Text::legacy(t).plain())
+    view.model
+        .lang
+        .option_comment(name)
+        .map(|t| Text::legacy(t).plain())
 }
 /// An option's current value.
-pub fn value_of<'a>(view: &'a SettingsView, name: &'a str) -> Option<&'a str> {
+pub fn value_of(view: &SettingsView, name: &str) -> Option<String> {
     view.values
         .iter()
         .find(|(n, _)| n == name)
-        .map(|(_, v)| v.as_str())
-        .or_else(|| find_option(&view.model, name).map(|o| o.default.as_str()))
+        .map(|(_, v)| v.clone())
+        .or_else(|| view.model.option(name).map(|o| o.default.clone()))
 }
-/// Sets an option in the view at once (the game confirms on its next refresh): a value equal to
-/// the default is dropped from `values`.
+/// Sets an option in the view at once (the game confirms on its next refresh).
 pub fn set_value(view: &mut SettingsView, name: &str, value: &str) {
-    let default = find_option(&view.model, name).map(|o| o.default.clone());
-    view.values.retain(|(n, _)| n != name);
-    if default.as_deref() != Some(value) {
-        view.values.push((name.to_string(), value.to_string()));
-    }
+    let mut values = view.current();
+    values.insert(name.to_string(), value.to_string());
+    view.store(&values);
 }
 /// The value after a click on an option (right-click goes back).
 pub fn next_value(view: &SettingsView, name: &str, back: bool) -> Option<String> {
-    let o = find_option(&view.model, name)?;
-    Some(cycle(&option_values(o), value_of(view, name)?, back))
+    view.model.next_value(name, &value_of(view, name)?, back)
 }
 /// The first profile whose values all match the current ones.
-pub fn current_profile(view: &SettingsView) -> Option<&str> {
-    profiles(&view.model)
-        .iter()
-        .find(|(_, values)| {
-            values
-                .iter()
-                .all(|(n, v)| value_of(view, n) == Some(v.as_str()))
-        })
-        .map(|(name, _)| name.as_str())
+pub fn current_profile(view: &SettingsView) -> Option<String> {
+    view.model
+        .current_profile(&view.current())
+        .map(str::to_string)
 }
 /// The profile a click on the profile button applies.
 pub fn next_profile(view: &SettingsView, back: bool) -> Option<String> {
-    let names: Vec<String> = profiles(&view.model)
-        .iter()
-        .map(|(n, _)| n.clone())
-        .collect();
+    let names: Vec<String> = view.model.profiles.iter().map(|p| p.name.clone()).collect();
     if names.is_empty() {
         return None;
     }
     match current_profile(view) {
-        Some(current) => Some(cycle(&names, current, back)),
+        Some(current) => Some(cycle(&names, &current, back)),
         None => names.first().cloned(),
     }
 }
 /// Applies a profile's values to the view at once.
 pub fn apply_profile(view: &mut SettingsView, profile: &str) {
-    let model = view.model.clone();
-    if let Some((_, values)) = profiles(&model).iter().find(|(n, _)| n == profile) {
-        for (name, value) in values {
-            set_value(view, name, value);
-        }
-    }
+    let values = horizon_glsl_pack::screens::apply_profile(&view.model, profile, &view.current());
+    view.store(&values);
 }
 
 /// One cell of the Settings page.
@@ -296,36 +220,30 @@ pub struct SettingsPage {
     pub items: Vec<Item>,
 }
 
-/// `option.X`, else the option's name.
-fn option_caption(m: &OptionModel, name: &str) -> Text {
-    Text::legacy(lang(m, &format!("option.{name}")).unwrap_or(name))
-}
 /// "Caption: value" as the pack's language file words it (value names, prefix, suffix); a
-/// switch says ON in green or OFF in red.
-pub fn option_label(m: &OptionModel, o: &OptionDef, value: &str) -> Text {
-    let caption = option_caption(m, &o.name).append(": ");
-    if o.boolean {
-        let on = value == "true";
-        return caption.append(Text::colored(
-            if on { "ON" } else { "OFF" },
-            if on { text::GREEN } else { text::RED },
-        ));
+/// switch without its own value names says ON in green or OFF in red.
+pub fn option_label(m: &OptionModel, o: &OptionInfo, value: &str) -> Text {
+    let caption = Text::legacy(&m.lang.option(&o.name)).append(": ");
+    let shown = m.lang.value(o, value);
+    let named = m.lang.get(&format!("value.{}.{value}", o.name)).is_some();
+    if o.boolean && !named {
+        let color = if value == "true" {
+            text::GREEN
+        } else {
+            text::RED
+        };
+        return caption.append(Text::colored(shown, color));
     }
-    let shown = lang(m, &format!("value.{}.{value}", o.name)).unwrap_or(value);
-    let prefix = lang(m, &format!("prefix.{}", o.name)).unwrap_or("");
-    let suffix = lang(m, &format!("suffix.{}", o.name)).unwrap_or("");
-    caption.append(Text::legacy(&format!("{prefix}{shown}{suffix}")))
+    caption.append(Text::legacy(&shown))
 }
 /// `screen.X`, else the screen's name, then "...".
 pub fn screen_label(m: &OptionModel, name: &str) -> Text {
-    Text::legacy(lang(m, &format!("screen.{name}")).unwrap_or(name)).append("...")
+    Text::legacy(&m.lang.screen(name)).append("...")
 }
 /// "Profile: NAME" (`profile.X`), or "Custom" when no profile matches.
 pub fn profile_label(view: &SettingsView) -> Text {
     let name = match current_profile(view) {
-        Some(p) => lang(&view.model, &format!("profile.{p}"))
-            .unwrap_or(p)
-            .to_string(),
+        Some(p) => view.model.lang.profile(&p),
         None => "Custom".to_string(),
     };
     Text::literal("Profile: ").append(Text::legacy(&name))
@@ -334,81 +252,69 @@ pub fn profile_label(view: &SettingsView) -> Text {
 pub fn settings_title(view: &SettingsView) -> String {
     match &view.screen {
         None => "Shader Pack Settings".to_string(),
-        Some(name) => lang(&view.model, &format!("screen.{name}"))
-            .map(|s| Text::legacy(s).plain())
-            .unwrap_or_else(|| name.clone()),
+        Some(name) => Text::legacy(&view.model.lang.screen(name)).plain(),
     }
 }
-/// The screen holding a link to `screen` (`None`: the root); the root has no parent.
+/// The screen holding a link to `screen` (`None`: the main screen).
 pub fn parent_screen(m: &OptionModel, screen: &str) -> Option<String> {
-    all_screens(m)
+    m.screens
+        .iter()
         .find(|(_, s)| {
             s.entries
                 .iter()
                 .any(|e| matches!(e, Entry::Screen(n) if n == screen))
         })
-        .and_then(|(name, _)| name.map(str::to_string))
+        .map(|(name, _)| name.clone())
+        .filter(|name| !name.is_empty())
 }
 
-fn option_item(view: &SettingsView, name: &str) -> Option<Item> {
-    let o = find_option(&view.model, name)?;
-    let value = value_of(view, name).unwrap_or(&o.default);
-    let values = option_values(o);
+fn option_item(view: &SettingsView, values: &Values, name: &str) -> Option<Item> {
+    let o = view.model.option(name)?;
+    let value = values.get(name).unwrap_or(&o.default);
     Some(Item::Option {
         name: name.to_string(),
         label: option_label(&view.model, o, value),
         tooltip: option_tooltip(view, name),
-        slider: (o.slider && !o.boolean && values.len() > 1)
-            .then(|| slider_fraction(&values, value)),
+        slider: (o.slider && !o.boolean && o.values.len() > 1)
+            .then(|| slider_fraction(&o.values, value)),
     })
 }
 
-/// The cells of the screen shown: its entries in order, `*` as every option no screen lists, and
-/// every option (two columns) when the pack has no `screen=`.
+/// The cells of the screen shown, `*` expanded by the model; every option (two columns) when the
+/// model has no such screen.
 pub fn settings_page(view: &SettingsView) -> SettingsPage {
     let m = &*view.model;
-    let Some(screen) = screen_of(m, view.screen.as_deref()) else {
+    let values = view.current();
+    let Some(screen) = m.screens.get(view.screen_key()) else {
         return SettingsPage {
             columns: 2,
             items: m
                 .options
                 .iter()
-                .filter_map(|o| option_item(view, &o.name))
+                .filter_map(|o| option_item(view, &values, &o.name))
                 .collect(),
         };
     };
-    let listed: BTreeSet<&str> = all_screens(m)
-        .flat_map(|(_, s)| s.entries.iter())
-        .filter_map(|e| match e {
-            Entry::Option(n) => Some(n.as_str()),
-            _ => None,
-        })
-        .collect();
-    let mut items = Vec::new();
-    for entry in &screen.entries {
-        match entry {
-            Entry::Option(name) => items.extend(option_item(view, name)),
-            Entry::Screen(name) => items.push(Item::Screen {
-                name: name.clone(),
-                label: screen_label(m, name),
+    let items = m
+        .entries(view.screen_key())
+        .into_iter()
+        .filter_map(|entry| match entry {
+            Entry::Option(name) => option_item(view, &values, &name),
+            Entry::Screen(name) => Some(Item::Screen {
+                label: screen_label(m, &name),
+                name,
             }),
-            Entry::Profile => items.push(Item::Profile {
+            Entry::Profile => Some(Item::Profile {
                 label: profile_label(view),
             }),
-            Entry::Empty => items.push(Item::Empty),
-            Entry::Rest => items.extend(
-                m.options
-                    .iter()
-                    .filter(|o| !listed.contains(o.name.as_str()))
-                    .filter_map(|o| option_item(view, &o.name)),
-            ),
-        }
-    }
+            Entry::Empty | Entry::Rest => Some(Item::Empty),
+        })
+        .collect();
     SettingsPage {
         columns: if screen.columns == 0 {
             2
         } else {
-            screen.columns
+            screen.columns as usize
         },
         items,
     }
@@ -469,63 +375,86 @@ pub fn wrap(lines: &[String], width: f32, measure: impl Fn(&str) -> f32) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_glsl_pack::options::OptionKind;
+    use horizon_glsl_pack::screens::{Lang, Profile};
 
     fn s(v: &str) -> String {
         v.to_string()
     }
+    fn opt(name: &str, default: &str, values: &[&str], slider: bool) -> OptionInfo {
+        let boolean = values.is_empty();
+        OptionInfo {
+            name: s(name),
+            kind: if boolean {
+                OptionKind::Bool
+            } else {
+                OptionKind::Value
+            },
+            default: s(default),
+            values: if boolean {
+                vec![s("false"), s("true")]
+            } else {
+                values.iter().map(|v| s(v)).collect()
+            },
+            slider,
+            boolean,
+        }
+    }
     fn model() -> OptionModel {
-        let opt =
-            |name: &str, default: &str, values: &[&str], slider: bool, boolean: bool| OptionDef {
-                name: s(name),
-                default: s(default),
-                values: values.iter().map(|v| s(v)).collect(),
-                slider,
-                boolean,
-            };
         OptionModel {
             options: vec![
-                opt("SHADOWS", "true", &[], false, true),
-                opt("SUN", "1.0", &["0.5", "1.0", "2.0"], true, false),
-                opt("QUALITY", "1", &["0", "1", "2"], false, false),
-                opt("LOOSE", "a", &["a", "b"], false, false),
+                opt("SHADOWS", "true", &[], false),
+                opt("SUN", "1.0", &["0.5", "1.0", "2.0"], true),
+                opt("QUALITY", "1", &["0", "1", "2"], false),
+                opt("LOOSE", "a", &["a", "b"], false),
             ],
-            root: Some(Screen {
-                entries: vec![
-                    Entry::Profile,
-                    Entry::Empty,
-                    Entry::Screen(s("LIGHT")),
-                    Entry::Option(s("QUALITY")),
-                    Entry::Rest,
-                ],
-                columns: 0,
-            }),
-            screens: [(
-                s("LIGHT"),
-                Screen {
-                    entries: vec![Entry::Option(s("SHADOWS")), Entry::Option(s("SUN"))],
-                    columns: 1,
-                },
-            )]
-            .into(),
-            profiles: vec![
+            screens: [
                 (
-                    s("LOW"),
-                    vec![(s("QUALITY"), s("0")), (s("SHADOWS"), s("false"))],
+                    s(""),
+                    Screen {
+                        entries: vec![
+                            Entry::Profile,
+                            Entry::Empty,
+                            Entry::Screen(s("LIGHT")),
+                            Entry::Option(s("QUALITY")),
+                            Entry::Rest,
+                        ],
+                        columns: 0,
+                    },
                 ),
                 (
-                    s("HIGH"),
-                    vec![(s("QUALITY"), s("2")), (s("SHADOWS"), s("true"))],
+                    s("LIGHT"),
+                    Screen {
+                        entries: vec![Entry::Option(s("SHADOWS")), Entry::Option(s("SUN"))],
+                        columns: 1,
+                    },
                 ),
-            ],
-            lang: [
-                (s("option.SUN"), s("Sun")),
-                (s("value.QUALITY.2"), s("§aHigh")),
-                (s("suffix.SUN"), s("x")),
-                (s("screen.LIGHT"), s("Lighting")),
-                (s("profile.LOW"), s("Low")),
-                (s("option.QUALITY.comment"), s("How good. §eSlow.")),
             ]
             .into(),
+            profiles: vec![
+                Profile {
+                    name: s("LOW"),
+                    values: [(s("QUALITY"), s("0")), (s("SHADOWS"), s("false"))].into(),
+                    ..Default::default()
+                },
+                Profile {
+                    name: s("HIGH"),
+                    values: [(s("QUALITY"), s("2")), (s("SHADOWS"), s("true"))].into(),
+                    ..Default::default()
+                },
+            ],
+            lang: Lang(
+                [
+                    (s("option.SUN"), s("Sun")),
+                    (s("value.QUALITY.2"), s("§aHigh")),
+                    (s("suffix.SUN"), s("x")),
+                    (s("screen.LIGHT"), s("Lighting")),
+                    (s("profile.LOW"), s("Low")),
+                    (s("option.QUALITY.comment"), s("How good. §eSlow.")),
+                ]
+                .into(),
+            ),
+            notes: Vec::new(),
         }
     }
     fn view() -> SettingsView {
@@ -628,17 +557,17 @@ mod tests {
             option_label(&m, &m.options[2], "2").plain(),
             "QUALITY: High"
         );
-        assert_eq!(current_profile(&view), Some("HIGH"));
+        assert_eq!(current_profile(&view).as_deref(), Some("HIGH"));
         assert_eq!(next_profile(&view, false).as_deref(), Some("LOW"));
         apply_profile(&mut view, "LOW");
         assert_eq!(profile_label(&view).plain(), "Profile: Low");
-        assert_eq!(value_of(&view, "SHADOWS"), Some("false"));
+        assert_eq!(value_of(&view, "SHADOWS").as_deref(), Some("false"));
     }
 
     #[test]
-    fn a_pack_without_screens_lists_every_option() {
+    fn a_model_without_the_screen_lists_every_option() {
         let mut m = model();
-        m.root = None;
+        m.screens.clear();
         let view = SettingsView {
             model: Arc::new(m),
             ..view()
