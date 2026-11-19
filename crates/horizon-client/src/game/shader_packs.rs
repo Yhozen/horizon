@@ -774,7 +774,13 @@ impl Game<'_> {
                 compiled_ref.plan.programs.remove(&kind);
             }
         }
-        renderer.set_shader_pack(Some((&compiled_ref, files)))?;
+        // The pack's `minecraft:textures/…` textures come from the game's own assets.
+        let root = self.options.resources.clone();
+        let resources = move |name: &str| {
+            let (namespace, path) = name.split_once(':').unwrap_or(("minecraft", name));
+            std::fs::read(root.join("assets").join(namespace).join(path)).ok()
+        };
+        renderer.set_shader_pack(Some((&compiled_ref, files)), &resources)?;
         self.set_shader_pack_tags(Some(compiled));
         Ok(())
     }
@@ -782,7 +788,7 @@ impl Game<'_> {
     /// Back to Horizon's own shaders.
     fn uninstall_shader_pack(&mut self) {
         if let Some(renderer) = self.renderer.as_mut() {
-            let _ = renderer.set_shader_pack(None);
+            let _ = renderer.set_shader_pack(None, &|_| None);
         }
         if self.shader_packs.applied.take().is_some() {
             self.set_shader_pack_tags(None);

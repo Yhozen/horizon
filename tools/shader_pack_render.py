@@ -308,7 +308,10 @@ def run_iris(pack: Path | None, out: Path, timeout: int, extra: list[str]) -> di
     else:
         ctl("wait-ready", "300", limit=320)
         ctl("key", "f1", "tap")
+        poses = os.environ.get("POSES", "noon,dusk,underwater").split(",")
         for name, commands, (x, y, z), yaw, pitch, settle in IRIS_POSES:
+            if name not in poses:
+                continue
             for c in commands:
                 ctl("command", c)
             ctl("tp", str(x), str(y), str(z))

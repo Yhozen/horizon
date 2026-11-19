@@ -60,7 +60,6 @@ mod game_rules_screen;
 mod gamemode_switcher;
 mod ghasts;
 mod glsl_pack;
-mod shader_packs;
 mod golems;
 mod growth;
 mod hand;
