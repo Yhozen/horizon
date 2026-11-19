@@ -10,6 +10,7 @@ on:
       - 'content/open/**'
       - 'crates/**'
       - 'third_party/**'
+      - 'tools/ci/boat/**'
       - 'tools/web/**'
       - 'web/**'
 
@@ -26,7 +27,7 @@ concurrency:
 
 jobs:
   frame-rate:
-    runs-on: boat-large
+    runs-on: ${{ vars.HORIZON_BOAT_RUNNER || 'boat-large/from=horizon-ci-v1' }}
     timeout-minutes: 15
     env:
       CARGO_INCREMENTAL: '0'
@@ -43,17 +44,37 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
           persist-credentials: false
+      - name: Use the snapshot toolchain
+        id: snapshot
+        run: |
+          prefix=/opt/horizon-ci
+          if [[ ! -f "$prefix/rust-version" ]]; then
+            exit 0
+          fi
+          rust_version=$(cat "$prefix/rust-version")
+          test -n "$rust_version"
+          printf '%s\n' "$HOME/.cargo/bin" "$prefix/bin" >> "$GITHUB_PATH"
+          printf 'RUSTUP_TOOLCHAIN=%s\nPLAYWRIGHT_BROWSERS_PATH=%s\n' "$rust_version" "$prefix/browsers" >> "$GITHUB_ENV"
+          printf 'available=true\n' >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@stable
-        id: rust
+        if: steps.snapshot.outputs.available != 'true'
         with:
           targets: wasm32-unknown-unknown
       - uses: actions/setup-node@v4
-        id: node
+        if: steps.snapshot.outputs.available != 'true'
         with:
           node-version: '24'
       - uses: pnpm/action-setup@v4
+        if: steps.snapshot.outputs.available != 'true'
         with:
           package_json_file: pr/web/package.json
+      - name: Identify the build toolchain
+        id: tools
+        run: |
+          rust_commit=$(rustc -vV | awk '/^commit-hash:/ { print $2 }')
+          node_version=$(node --version)
+          test -n "$rust_commit"
+          printf 'key=%s-%s\n' "$rust_commit" "$node_version" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: pr -> target
@@ -63,15 +84,19 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: base/web/.build-open/static
-          key: web-bench-base-v1-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-${{ steps.node.outputs.node-version }}-${{ github.event.pull_request.base.sha }}
-      - name: Set up Chromium and WASM build tools
+          key: web-bench-base-v2-${{ runner.arch }}-${{ steps.tools.outputs.key }}-${{ github.event.pull_request.base.sha }}
+      - name: Set up web dependencies and Chromium
         working-directory: pr/web
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends clang
+          if ! command -v clang >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends clang
+          fi
           pnpm install --frozen-lockfile
-          pnpm exec playwright install --with-deps --no-shell chromium
           chrome=$(node --input-type=module -e 'import { chromium } from "playwright"; console.log(chromium.executablePath());')
+          if [[ ! -x "$chrome" ]]; then
+            pnpm exec playwright install --with-deps --no-shell chromium
+          fi
           test -x "$chrome"
           printf 'CHROME_PATH=%s\n' "$chrome" >> "$GITHUB_ENV"
       - name: Build Horizon Open Creative
@@ -84,15 +109,7 @@ jobs:
 
           build_open() (
             cd "$1"
-            version=$(awk '/^name = "wasm-bindgen"$/ { getline; gsub(/"/, "", $3); print $3; exit }' Cargo.lock)
-            test -n "$version"
-            bindgen_dir="$RUNNER_TEMP/wasm-bindgen/$version"
-            if [[ ! -x "$bindgen_dir/wasm-bindgen" ]]; then
-              mkdir -p "$bindgen_dir"
-              curl --fail --silent --show-error --location --retry 3 \
-                "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$version/wasm-bindgen-$version-x86_64-unknown-linux-musl.tar.gz" \
-                | tar -xz --strip-components=1 -C "$bindgen_dir" --wildcards '*/wasm-bindgen'
-            fi
+            bindgen_dir=$(bash ../pr/tools/web/wasm-bindgen-dir.sh Cargo.lock "$RUNNER_TEMP/wasm-bindgen")
             export PATH="$bindgen_dir:$PATH"
             pnpm --dir web build:open
           )
@@ -105,28 +122,29 @@ jobs:
       - name: Compare fixed dawn and noon scenes on SwiftShader
         id: measure
         env:
-          HORIZON_HOME: ${{ runner.temp }}/horizon-bench/game
-          HORIZON_LAUNCHER_HOME: ${{ runner.temp }}/horizon-bench/launcher
-          XDG_DATA_HOME: ${{ runner.temp }}/horizon-bench/data
-          XDG_CONFIG_HOME: ${{ runner.temp }}/horizon-bench/config
           HORIZON_LAUNCHER_NO_SELF_UPDATE: '1'
           HORIZON_NO_AUDIO: '1'
         run: |
+          bench_home=$(mktemp -d)
+          trap 'rm -rf "$bench_home"' EXIT
+          export HORIZON_HOME="$bench_home/game" HORIZON_LAUNCHER_HOME="$bench_home/launcher"
+          export XDG_DATA_HOME="$bench_home/data" XDG_CONFIG_HOME="$bench_home/config"
           python3 - <<'PY'
           import os
           import re
           import subprocess
+          from decimal import Decimal
           from pathlib import Path
 
           logs = Path("benchmark-logs")
           logs.mkdir()
-          minimum_ratio = 0.85
+          maximum_drop = Decimal("0.08")
 
           def measure(build, scene, ticks, attempt):
               site = Path(build, "web/.build-open/static").resolve()
               args = (
                   "--world Bench --creative --test-terrain --render-distance 4 --in-frame "
-                  "--name Bench --seed 0 --weather clear --spawn-radius 0 --look 30,15 "
+                  "--name Bench --seed 0 --spawn-radius 0 --look 30,15 "
                   f"--time {ticks} --world-frames 18446744073709551615 --timeout-seconds 1000000000"
               )
               path = logs / f"{scene}-{attempt}-{build}.log"
@@ -139,10 +157,10 @@ jobs:
                   )
               output = path.read_text()
               fps = re.search(r"^steady fps \(last 4 intervals\): ([\d.]+)$", output, re.M)
-              if result.returncode or not fps or float(fps[1]) <= 0:
+              if result.returncode or not fps or (measured_fps := Decimal(fps[1])) <= 0:
                   print("\n".join(output.splitlines()[-40:]))
                   raise SystemExit(f"No valid frame-rate result for {scene} on {build} (exit {result.returncode})")
-              return float(fps[1])
+              return measured_fps
 
           failed = False
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", buffering=1) as summary:
@@ -156,10 +174,10 @@ jobs:
                       change = f"{ratio - 1:+.1%}"
                       print(f"| {scene} | {attempt} | {fps['base']:.2f} | {fps['pr']:.2f} | {change} |", file=summary)
                       print(f"{scene} (attempt {attempt}): {fps['base']:.2f} → {fps['pr']:.2f} FPS ({change})", flush=True)
-                      if ratio >= minimum_ratio:
+                      if fps["pr"] >= fps["base"] * (1 - maximum_drop):
                           break
                       if attempt == 2:
-                          print(f"::error::{scene} FPS dropped by more than 15% on both attempts")
+                          print(f"::error::{scene} FPS dropped by more than {maximum_drop:.0%} on both attempts")
                           failed = True
           raise SystemExit(int(failed))
           PY
