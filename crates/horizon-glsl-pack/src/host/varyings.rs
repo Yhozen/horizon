@@ -108,12 +108,17 @@ impl Interface {
         // name → (vertex type, fragment type, flat, array length)
         let mut by_name = BTreeMap::new();
         let mut zeroed = Vec::new();
-        for f in &fragment.varyings {
+        // Struct varyings travel member by member.
+        let bodies = [vertex.body.as_str(), fragment.body.as_str()];
+        let vertex_vars = expand_structs(&vertex.varyings, &bodies);
+        let fragment_vars = expand_structs(&fragment.varyings, &bodies);
+        for f in &fragment_vars {
             // A varying the fragment stage never reads costs no location.
-            if !uses(&fragment.body, &f.name) {
+            let base = f.name.split(['.', '[']).next().unwrap_or(&f.name);
+            if !uses(&fragment.body, base) {
                 continue;
             }
-            let Some(v) = vertex.varyings.iter().find(|v| v.name == f.name) else {
+            let Some(v) = vertex_vars.iter().find(|v| v.name == f.name) else {
                 zeroed.push(f.clone());
                 continue;
             };
@@ -205,7 +210,7 @@ impl Interface {
                     bits: false,
                 });
                 interface.slots.push(Slot {
-                    name: format!("hz_v_{suffix}"),
+                    name: format!("hz_v_{}", suffix.replace(['.', '[', ']'], "_")),
                     ty: vertex_ty,
                     flat,
                 });
@@ -348,6 +353,86 @@ impl Interface {
     }
 }
 
+/// `vars` with each struct-typed varying (`S s;`, `S s[2];`) replaced by
+/// one varying per member (`s.a`, `s[1].b`), nested structs included; the
+/// struct definitions come from `bodies`.
+fn expand_structs(vars: &[Var], bodies: &[&str]) -> Vec<Var> {
+    let mut out = Vec::new();
+    for var in vars {
+        let Some(members) = bodies.iter().find_map(|b| struct_members(b, &var.ty)) else {
+            out.push(var.clone());
+            continue;
+        };
+        let elements: Vec<String> = match var.array_len {
+            None => vec![String::new()],
+            Some(n) => (0..n).map(|k| format!("[{k}]")).collect(),
+        };
+        let mut expanded = Vec::new();
+        for index in &elements {
+            for (ty, name, len) in &members {
+                expanded.push(Var {
+                    name: format!("{}{index}.{name}", var.name),
+                    ty: ty.clone(),
+                    flat: var.flat,
+                    array_len: *len,
+                });
+            }
+        }
+        out.extend(expand_structs(&expanded, bodies));
+    }
+    out
+}
+
+/// The members `(type, name, array length)` of `struct ty { … }` in `body`.
+fn struct_members(body: &str, ty: &str) -> Option<Vec<(String, String, Option<u32>)>> {
+    let words: Vec<&str> = body
+        .split(|c: char| c.is_whitespace())
+        .flat_map(split_punct)
+        .filter(|w| !w.is_empty())
+        .collect();
+    let at = words
+        .windows(3)
+        .position(|w| w[0] == "struct" && w[1] == ty && w[2] == "{")?;
+    let end = at + 3 + words[at + 3..].iter().position(|w| *w == "}")?;
+    let mut members = Vec::new();
+    for decl in words[at + 3..end].split(|w| *w == ";") {
+        // Qualifiers (precision) before the type are skipped.
+        let decl: Vec<&str> = decl
+            .iter()
+            .copied()
+            .skip_while(|w| matches!(*w, "highp" | "mediump" | "lowp" | "flat"))
+            .collect();
+        let Some((&mty, rest)) = decl.split_first() else {
+            continue;
+        };
+        for d in rest.split(|w| *w == ",") {
+            match d {
+                [name] => members.push((mty.to_string(), name.to_string(), None)),
+                [name, "[", n, "]"] => {
+                    members.push((mty.to_string(), name.to_string(), n.parse().ok()))
+                }
+                _ => return None,
+            }
+        }
+    }
+    Some(members)
+}
+
+/// `word` split around the punctuation struct definitions use.
+fn split_punct(word: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, c) in word.char_indices() {
+        if matches!(c, '{' | '}' | ';' | ',' | '[' | ']') {
+            out.push(&word[start..i]);
+            out.push(&word[i..i + 1]);
+            start = i + 1;
+        }
+    }
+    out.push(&word[start..]);
+    out
+}
+
 /// Whether `body` mentions the identifier `name`.
 fn uses(body: &str, name: &str) -> bool {
     let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
@@ -355,7 +440,12 @@ fn uses(body: &str, name: &str) -> bool {
         .any(|(i, _)| !body[..i].ends_with(ident) && !body[i + name.len()..].starts_with(ident))
 }
 
+/// Declares a varying's global; struct-typed ones are declared by the
+/// rewritten body, after their struct.
 pub(super) fn declare(out: &mut String, var: &Var) {
+    if integer_type(&var.ty).is_none() && matrix(&var.ty).is_none() && var.ty != "bool" {
+        return;
+    }
     match var.array_len {
         Some(n) => writeln!(out, "{} {}[{n}];", var.ty, var.name),
         None => writeln!(out, "{} {};", var.ty, var.name),
@@ -660,6 +750,46 @@ mod tests {
 #[cfg(test)]
 mod unread_tests {
     use super::*;
+
+    #[test]
+    fn struct_varyings_travel_by_member() {
+        let defs = "struct Inner { vec2 uv; float w[2]; };\nstruct Fog { vec3 color; float density, start; Inner inner; };\n";
+        let vertex = Rewritten {
+            body: format!("{defs}void hz_pack_main() {{ fog.color = vec3(1.0); }}"),
+            varyings: vec![Var {
+                name: "fog".into(),
+                ty: "Fog".into(),
+                flat: true,
+                array_len: None,
+            }],
+            ..Default::default()
+        };
+        let fragment = Rewritten {
+            body: format!(
+                "{defs}void hz_pack_main() {{ hz_gl_FragData[0] = vec4(fog.color, fog.inner.w[1]); }}"
+            ),
+            ..vertex.clone()
+        };
+        let i = Interface::new(&vertex, &fragment, Geometry::Fullscreen, 16).unwrap();
+        let names: Vec<&str> = i.slots.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "hz_v_fog_color",
+                "hz_v_fog_density",
+                "hz_v_fog_inner_uv",
+                "hz_v_fog_inner_w_0",
+                "hz_v_fog_inner_w_1",
+                "hz_v_fog_start"
+            ]
+        );
+        let mut read = String::new();
+        i.read(&mut read);
+        assert!(
+            read.contains("fog.inner.w[1] = hz_v_fog_inner_w_1;"),
+            "{read}"
+        );
+    }
 
     #[test]
     fn unread_varyings_get_no_location() {

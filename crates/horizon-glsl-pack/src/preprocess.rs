@@ -133,7 +133,9 @@ pub const BIOME_CATEGORIES: [&str; 17] = [
 ];
 
 /// The macros the host defines before a pack's own (the "who Horizon says it
-/// is" contract): Iris at the OpenGL 4.1 level, no vendor or GPU named.
+/// is" contract): Iris 1.11.7's, as measured, except the GL and GLSL versions
+/// (4.1, a host without compute or SSBOs) and no vendor or GPU named.
+/// `IRIS_FEATURE_*` come from the pack's `iris.features.*` (`features.rs`).
 pub fn predefined(mc_version: u32) -> BTreeMap<String, String> {
     let os = if cfg!(target_os = "linux") {
         "MC_OS_LINUX"
@@ -153,6 +155,10 @@ pub fn predefined(mc_version: u32) -> BTreeMap<String, String> {
         ("MC_GL_RENDERER_OTHER", "1".into()),
         ("IS_IRIS", "1".into()),
         ("IRIS_VERSION", "11107".into()),
+        ("IRIS_TAG_SUPPORT", "2".into()),
+        // Iris defines both even for packs without normal or specular settings (measured).
+        ("MC_NORMAL_MAP", "1".into()),
+        ("MC_SPECULAR_MAP", "1".into()),
         ("MC_RENDER_QUALITY", "1.0".into()),
         ("MC_SHADOW_QUALITY", "1.0".into()),
         ("MC_HAND_DEPTH", "0.125".into()),
@@ -299,7 +305,17 @@ impl Pp<'_> {
     }
 
     fn run(&mut self, text: &str, file: &str) -> Result<(), PackError> {
+        // A code line whose macro call continues on the next lines, joined.
+        let mut pending = String::new();
         for (n, line) in strip_comments(text).lines().enumerate() {
+            let joined;
+            let line = if pending.is_empty() || line.trim_start().starts_with('#') {
+                self.flush(&mut pending);
+                line
+            } else {
+                joined = format!("{} {}", std::mem::take(&mut pending), line.trim());
+                joined.as_str()
+            };
             let at = |m: String| PackError::new(file, format!("line {}: {m}", n + 1));
             let trimmed = line.trim();
             if let Some(target) = include_target(trimmed) {
@@ -324,12 +340,40 @@ impl Pp<'_> {
                     .unwrap_or(d.len());
                 self.directive(&d[..split], d[split..].trim()).map_err(at)?;
             } else if self.live() && !trimmed.is_empty() {
+                if self.open_call(line) {
+                    pending = line.to_string();
+                    continue;
+                }
                 let line = self.expand(line, &mut Vec::new());
                 self.out.push_str(line.trim_end());
                 self.out.push('\n');
             }
         }
+        self.flush(&mut pending);
         Ok(())
+    }
+
+    /// Expands and writes a pending joined line as it is.
+    fn flush(&mut self, pending: &mut String) {
+        if !pending.is_empty() {
+            let line = self.expand(&std::mem::take(pending), &mut Vec::new());
+            self.out.push_str(line.trim_end());
+            self.out.push('\n');
+        }
+    }
+
+    /// Whether `line` calls a function-like macro whose `)` is on a later line.
+    fn open_call(&self, line: &str) -> bool {
+        let toks = lex(line);
+        toks.iter().enumerate().any(|(i, &(k, s))| {
+            k == K::Ident && self.macros.get(s).is_some_and(|m| m.params.is_some()) && {
+                let mut j = i + 1;
+                while toks.get(j).is_some_and(|t| t.0 == K::Space) {
+                    j += 1;
+                }
+                toks.get(j).is_some_and(|t| t.1 == "(") && call_args(&toks, i + 1).is_none()
+            }
+        })
     }
 
     fn directive(&mut self, name: &str, args: &str) -> Result<(), String> {
@@ -472,7 +516,7 @@ impl Pp<'_> {
                             Some(p) if k == K::Ident => args[p].clone(),
                             _ => t.to_string(),
                         };
-                        lex(&m.body).into_iter().map(subst).collect()
+                        paste(&lex(&m.body).into_iter().map(subst).collect::<String>())
                     }
                     // Not a call (or a wrong arity): the name stays, as in C.
                     _ => {
@@ -496,6 +540,17 @@ impl Pp<'_> {
         }
         out
     }
+}
+
+/// `a ## b` → `ab` (token pasting in a macro body).
+fn paste(body: &str) -> String {
+    let mut out = body.to_string();
+    while let Some(at) = out.find("##") {
+        let left = out[..at].trim_end().len();
+        let right = at + 2 + (out[at + 2..].len() - out[at + 2..].trim_start().len());
+        out.replace_range(left..right, "");
+    }
+    out
 }
 
 /// A call's arguments on the same line, split at top-level commas, and the
@@ -616,6 +671,17 @@ mod tests {
         pp_with(text, &[])
     }
 
+    fn pp_with_version(text: &str, mc_version: u32) -> String {
+        preprocess_text(
+            text,
+            "shaders/t.fsh",
+            &PackFiles::default(),
+            &predefined(mc_version),
+            &[],
+        )
+        .unwrap()
+    }
+
     fn pp_with(text: &str, overrides: &[(&str, Option<&str>)]) -> String {
         let o: Vec<_> = overrides
             .iter()
@@ -633,13 +699,26 @@ mod tests {
 
     #[test]
     fn horizon_says_it_is_iris_at_gl_410() {
-        let text = "#if defined IS_IRIS && IRIS_VERSION >= 10800 && MC_GL_VERSION == 410\nI\n#endif\n\
+        let text = "#if defined IS_IRIS && IRIS_VERSION >= 10800 && MC_GL_VERSION == 410 && defined MC_NORMAL_MAP\nI\n#endif\n\
                     #ifdef MC_GL_VENDOR_NVIDIA\nN\n#endif\n\
                     MC_RENDER_STAGE_NONE MC_RENDER_STAGE_SUN BIOME_BADLANDS BIOME_PLAINS CAT_NETHER PPT_SNOW";
         let out = pp(text);
         let words: Vec<&str> = out.split_whitespace().collect();
         assert_eq!(words, ["I", "0", "4", "0", "40", "16", "2"]);
+        let text =
+            "#if defined IS_IRIS && MC_VERSION >= 260300 && IRIS_TAG_SUPPORT == 2\nV\n#endif\n";
+        assert_eq!(pp_with_version(text, 260300).trim(), "V");
         assert_eq!(BIOMES[40], "plains");
+    }
+
+    #[test]
+    fn macro_calls_across_lines_and_pasting() {
+        let text = "#define max0(x) max(x, 0.0)\n#define CAT(a, b) a ## b\n#define F(i) v ## i\n\
+                    float y = max0(\n    a\n    + b\n);\nfloat CAT(fo, o) = F(2);\nfloat z = max0(c);\n";
+        let out = pp(text);
+        assert!(out.contains("float y = max(a + b, 0.0);"), "{out}");
+        assert!(out.contains("float foo = v2;"), "{out}");
+        assert!(out.contains("float z = max(c, 0.0);"), "{out}");
     }
 
     #[test]
