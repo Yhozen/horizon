@@ -6,7 +6,7 @@ use crate::{
     environment::Sky,
     graphics::GraphicsApi,
     hud::{HudBatch, HudRenderer},
-    mesher::{SectionMesh, TerrainVertex, Vertex},
+    mesher::{PackVertex, SectionMesh, TerrainVertex, Vertex},
     sprites::SpriteAnimation,
 };
 use glam::{DVec3, Mat4, Vec3, Vec4};
@@ -2894,6 +2894,36 @@ impl Renderer {
                 );
             }
         }
+        // The pack stream, at the same vertex indices in the page's second buffer.
+        if let Some(extra) = self.arena.extra_buffer(page) {
+            let stride = std::mem::size_of::<PackVertex>() as u64;
+            let parts = [
+                (0, &mesh.solid_pack, mesh.solid.len()),
+                (mesh.solid.len(), &mesh.translucent_pack, mesh.translucent.len()),
+            ];
+            for (offset, part, len) in parts {
+                if len == 0 {
+                    continue;
+                }
+                // A mesh made without the pack's tags draws as unlisted blocks.
+                let fallback;
+                let part = if part.len() == len {
+                    &part[..]
+                } else {
+                    fallback = vec![PackVertex::UNTAGGED; len];
+                    &fallback[..]
+                };
+                let bytes: &[u8] = bytemuck::cast_slice(part);
+                self.uploaded_bytes += bytes.len() as u64;
+                self.section_copy_bytes += bytes.len() as u64;
+                self.section_uploads.buffer(
+                    encoder,
+                    extra,
+                    (start + offset as u64) * stride,
+                    bytes,
+                );
+            }
+        }
         if self.section_copy_bytes >= SECTION_COPY_LIMIT
             && let Some(copies) = self.take_section_copies()
         {
@@ -2974,6 +3004,10 @@ impl Renderer {
                 .take_while(|&&p| p == (page, index_page))
                 .count();
             pass.set_vertex_buffer(0, self.arena.buffer(page).slice(..));
+            // A shader pack's stream: read by its terrain pipelines, ignored by the stock ones.
+            if let Some(extra) = self.arena.extra_buffer(page) {
+                pass.set_vertex_buffer(2, extra.slice(..));
+            }
             let indices = index_page.map_or(&self.indices, |p| self.sorted_indices.buffer(p));
             pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
             if self.multi_draw {
@@ -3010,6 +3044,23 @@ impl Renderer {
     /// A value that changes whenever `block_entities` gives something else.
     pub fn block_entity_revision(&self) -> u64 {
         self.block_entity_revision
+    }
+    /// Switches the section arena's `PackVertex` stream on (while a shader
+    /// pack draws terrain: its pipelines read vertex slot 2) or off. Every
+    /// section and distant tile is dropped (`clear_sections`), so the meshes
+    /// uploaded next, made with `Streaming::set_pack_tags`'s context, all
+    /// match. Nothing happens when the stream already is `on`.
+    pub fn set_pack_vertex_stream(&mut self, on: bool) {
+        if self.pack_vertex_stream() == on {
+            return;
+        }
+        self.clear_sections();
+        let stride = std::mem::size_of::<PackVertex>() as u64;
+        self.arena.set_extra_stride(on.then_some(stride));
+    }
+    /// Whether sections carry the `PackVertex` stream.
+    pub fn pack_vertex_stream(&self) -> bool {
+        self.arena.extra_stride().is_some()
     }
     pub fn clear_sections(&mut self) {
         self.block_entities.clear();

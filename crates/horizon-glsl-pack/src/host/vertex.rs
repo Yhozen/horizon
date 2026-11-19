@@ -30,20 +30,7 @@ pub(super) fn vertex_source(
         )
         .unwrap();
         out += "vec4 hz_ft;\n";
-        writeln!(out, "{NORMALS}").unwrap();
-        // Material → mc_Entity.xy (`BlockIds::entity`; 31 = unlisted).
-        let ids: Vec<String> = (0..32)
-            .map(|i| {
-                let (id, fluid) = spec.blocks.entity(i);
-                format!("vec2({id}.0, {}.0)", u8::from(fluid))
-            })
-            .collect();
-        writeln!(
-            out,
-            "const vec2 hz_mc_entity[32] = vec2[]({});",
-            ids.join(", ")
-        )
-        .unwrap();
+        out += TERRAIN_TANGENT;
     } else if entity {
         out += "vec4 hz_ft;\n";
         if extras.entity_color {
@@ -90,7 +77,6 @@ pub(super) fn vertex_source(
     out += "\nvoid main() {\n";
     if terrain {
         out += "    hz_ft = hz_viewProj * vec4(hz_in_position + hz_in_origin.xyz, 1.0);\n";
-        out += "    uint hz_tag = uint(round(hz_in_color.a * 255.0));\n";
     } else if entity {
         out += "    hz_ft = hz_viewProj * vec4(hz_in_position, 1.0);\n";
         if extras.entity_color {
@@ -107,24 +93,17 @@ pub(super) fn vertex_source(
         }
         let float = !matches!(a.ty.chars().next(), Some('i' | 'u'));
         let zero = if float { "0.0" } else { "0" };
-        let value = match a.name.as_str() {
-            // (id, fluid, 0, 1) on terrain; GL's default attribute elsewhere.
-            "mc_Entity" => {
-                let entity = if terrain {
-                    "vec4(hz_mc_entity[int(hz_tag & 31u)], 0.0, 1.0)"
-                } else {
-                    "vec4(0.0, 0.0, 0.0, 1.0)"
-                };
-                let swizzle = match a.ty.as_bytes().last() {
-                    Some(b'2') => ".xy",
-                    Some(b'3') => ".xyz",
-                    Some(b'4') => "",
-                    _ => ".x",
-                };
-                format!("{}({entity}{swizzle})", a.ty)
+        let value = match (a.name.as_str(), terrain) {
+            ("mc_Entity", true) => fit(&terrain_entity(spec.blocks.unlisted), &a.ty),
+            ("mc_midTexCoord", true) => {
+                fit("vec4(vec2(hz_in_mid_uv) * hz_in_origin.w, 0.0, 1.0)", &a.ty)
             }
+            ("at_midBlock", true) => fit(&terrain_mid_block(), &a.ty),
+            ("at_tangent", true) => fit(&format!("hz_terrain_tangent({TERRAIN_NORMAL})"), &a.ty),
+            // GL's default attribute elsewhere.
+            ("mc_Entity" | "mc_midTexCoord", false) => fit("vec4(0.0, 0.0, 0.0, 1.0)", &a.ty),
             // Entity models carry no tangent: a unit vector across the normal.
-            "at_tangent" if entity && a.ty == "vec4" => ENTITY_TANGENT.to_string(),
+            ("at_tangent", false) if entity && a.ty == "vec4" => ENTITY_TANGENT.to_string(),
             _ => format!("{}({zero})", a.ty),
         };
         writeln!(out, "    {} = {value};", a.name).unwrap();
@@ -161,4 +140,35 @@ pub(super) fn vertex_source(
     }
     out += "}\n";
     Ok((out, sampled.textures))
+}
+
+/// `mc_Entity` on terrain: `(id, fluid, 0, 1)` from `PackVertex::block` and
+/// `cell` (`unlisted` for a block without an id).
+fn terrain_entity(unlisted: i32) -> String {
+    format!(
+        "vec4(hz_in_block.x == {BLOCK_UNLISTED}u ? {unlisted}.0 : float(hz_in_block.x), \
+         (hz_in_block.y & {CELL_FLUID}u) != 0u ? 1.0 : 0.0, 0.0, 1.0)"
+    )
+}
+
+/// `at_midBlock` on terrain: from the vertex to its block's centre in 1/64
+/// block (zero without a cell), the block's light emission in `w`.
+fn terrain_mid_block() -> String {
+    format!(
+        "vec4((hz_in_block.y & {CELL_NONE}u) != 0u ? vec3(0.0) \
+         : (vec3(uvec3(hz_in_block.y, hz_in_block.y >> 4u, hz_in_block.y >> 8u) & 15u) + 0.5 - hz_in_position) * 64.0, \
+         round(hz_in_normal.w * 127.0))"
+    )
+}
+
+/// A `vec4` expression as an attribute of GLSL type `ty` (`float`, `vec2`,
+/// `ivec3`...): its leading components, converted.
+fn fit(value: &str, ty: &str) -> String {
+    let swizzle = match ty.as_bytes().last() {
+        Some(b'2') => ".xy",
+        Some(b'3') => ".xyz",
+        Some(b'4') => "",
+        _ => ".x",
+    };
+    format!("{ty}({value}{swizzle})")
 }
