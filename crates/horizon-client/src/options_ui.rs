@@ -1256,6 +1256,18 @@ impl OptionsUi {
             + match self.page() {
                 Page::KeyBinds | Page::PadBinds => 178.0,
                 Page::Language => 118.0,
+                // A pack screen of three or more columns is wider than 310.
+                Page::ShaderPackSettings => {
+                    self.shader_packs
+                        .settings
+                        .as_ref()
+                        .map_or(163.0, |settings| {
+                            let page = crate::shader_packs_ui::settings_page(settings);
+                            let (n, w) = crate::shader_packs_ui::columns_fit(page.columns, width);
+                            let half = ((n as f32 * w + (n as f32 - 1.0) * 10.0) / 2.0).floor();
+                            (half + 8.0).max(163.0)
+                        })
+                }
                 _ => 163.0,
             }
     }
@@ -3466,15 +3478,11 @@ mod tests {
             ..Default::default()
         };
         let shown = texts(&mut ui, &s);
-        for want in [
-            "Shaders: ON",
-            "Compiling 3/9",
-            "A",
-            "B",
-            "Add Shader Pack...",
-        ] {
+        for want in ["Compiling 3/9", "A", "B", "Add Shader Pack..."] {
             assert!(shown.contains(&want.to_string()), "{want} in {shown:?}");
         }
+        // Vanilla's own ON/OFF words (the tests run without translations).
+        assert!(shown.iter().any(|t| t.starts_with("Shaders: ")));
         let events = press(
             &mut ui,
             &mut s,
@@ -3546,13 +3554,15 @@ mod tests {
             .into(),
             ..Default::default()
         };
-        let mut ui = OptionsUi::default();
-        ui.shader_packs = ShaderPacksView {
-            selected: Some("A.zip".into()),
-            settings: Some(SettingsView {
-                model: std::sync::Arc::new(model),
+        let mut ui = OptionsUi {
+            shader_packs: ShaderPacksView {
+                selected: Some("A.zip".into()),
+                settings: Some(SettingsView {
+                    model: std::sync::Arc::new(model),
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
+            },
             ..Default::default()
         };
         ui.show(Page::ShaderPacks);
@@ -3621,16 +3631,70 @@ mod tests {
     }
 
     #[test]
+    fn shader_packs_ui_scrollbar_clears_a_three_column_screen() {
+        use crate::shader_packs_ui::{
+            Entry, OptionInfo, OptionModel, Screen, SettingsView, ShaderPacksView,
+        };
+        let s = Settings::default();
+        let options: Vec<OptionInfo> = (0..12)
+            .map(|i| OptionInfo {
+                name: format!("O{i}"),
+                kind: horizon_glsl_pack::options::OptionKind::Value,
+                default: "1".into(),
+                values: vec!["1".into(), "2".into()],
+                slider: false,
+                boolean: false,
+            })
+            .collect();
+        let model = OptionModel {
+            screens: [(
+                String::new(),
+                Screen {
+                    entries: options
+                        .iter()
+                        .map(|o| Entry::Option(o.name.clone()))
+                        .collect(),
+                    columns: 3,
+                },
+            )]
+            .into(),
+            options,
+            ..Default::default()
+        };
+        let mut ui = OptionsUi {
+            shader_packs: ShaderPacksView {
+                settings: Some(SettingsView {
+                    model: std::sync::Arc::new(model),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        ui.show(Page::ShaderPackSettings);
+        let (widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+        let right = widgets
+            .iter()
+            .filter(|w| w.list)
+            .map(|w| w.x + w.w)
+            .fold(0.0, f32::max);
+        let bar = ui.scrollbar_x(427.0);
+        assert!(bar >= right && bar + 6.0 <= 427.0, "{right} {bar}");
+    }
+
+    #[test]
     fn shader_packs_ui_report_wraps_lines_and_copies() {
         use crate::shader_packs_ui::{ShaderPackEvent as E, ShaderPacksView};
         let mut s = Settings::default();
-        let mut ui = OptionsUi::default();
-        ui.shader_packs = ShaderPacksView {
+        let mut ui = OptionsUi {
+            shader_packs: ShaderPacksView {
             selected: Some("A.zip".into()),
             report: vec![
                 "Status: Partial".into(),
                 "composite2: skipped, shaders/composite2.fsh:41: no matching overload for textureGather with these arguments".into(),
             ],
+            ..Default::default()
+            },
             ..Default::default()
         };
         ui.show(Page::ShaderPackReport);
