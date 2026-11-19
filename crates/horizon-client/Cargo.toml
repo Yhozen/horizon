@@ -11,6 +11,7 @@ description = "Horizon native development client"
 # std::time on native; the page clock in the browser build (WEB.md), where std's panics.
 web-time = "1.1"
 horizon-assets = { path = "../horizon-assets" }
+horizon-glsl-pack = { path = "../horizon-glsl-pack" }
 horizon-core = { path = "../horizon-core" }
 # The server thread ahead of the workers (MinecraftServer.spin's Thread.setPriority).
 horizon-threads = { path = "../horizon-threads" }

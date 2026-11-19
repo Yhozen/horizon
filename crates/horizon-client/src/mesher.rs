@@ -308,6 +308,87 @@ pub struct MeshTables {
     water_overlay: u16,
     lava_still: u16,
     lava_flow: u16,
+    /// Shader pack (`--shader-pack`): `block.properties` materials for the
+    /// vertex tag. Unset keeps the colour's alpha byte at 0xFF, which the
+    /// stock terrain shaders multiply into the sprite's alpha. Set once, after
+    /// the pack compiled, before the world meshes.
+    pack: std::sync::OnceLock<PackTags>,
+}
+/// A shader pack's material index per block state, and the fluids', for
+/// `horizon_glsl_pack::vertex_tag`.
+pub struct PackTags {
+    pub states: Vec<u8>,
+    /// The fluid surfaces' materials (`mc_Entity.y` = 1).
+    pub water: u8,
+    pub lava: u8,
+    /// `oldLighting`: keep vanilla's face shade (else every face is 1).
+    pub old_lighting: bool,
+    /// `ambientOcclusionLevel`: brightness b becomes 1 - level × (1 - b).
+    pub ao_level: f32,
+}
+impl PackTags {
+    pub fn new(
+        registry: &horizon_world::registry::BlockRegistry,
+        blocks: &horizon_glsl_pack::BlockIds,
+        plan: &horizon_glsl_pack::PackPlan,
+    ) -> Self {
+        Self {
+            states: (0..registry.len() as u32)
+                .map(|id| {
+                    registry
+                        .state(BlockStateId(id))
+                        .map_or(horizon_glsl_pack::NO_MATERIAL, |s| {
+                            blocks.material(&s.name, false)
+                        })
+                })
+                .collect(),
+            water: blocks.material("water", true),
+            lava: blocks.material("lava", true),
+            old_lighting: plan.properties.old_lighting,
+            ao_level: plan.ambient_occlusion_level.clamp(0.0, 1.0),
+        }
+    }
+}
+/// The pack's normal code of a quad: its axis, or `Other` when it is not
+/// axis-aligned (cross plants), from the winding the mesher's `facing` uses.
+fn quad_normal_code(
+    positions: &[[f32; 3]; 4],
+    facing: horizon_assets::model::Direction,
+) -> horizon_glsl_pack::NormalCode {
+    let [a, b, c] = [positions[0], positions[1], positions[2]];
+    let (u, v) = (
+        [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+        [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+    );
+    let n = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    let max = n.iter().fold(0.0f32, |m, c| m.max(c.abs()));
+    if len > 0.0 && max < 0.99 * len {
+        horizon_glsl_pack::NormalCode::Other
+    } else {
+        normal_code(facing)
+    }
+}
+/// `horizon_glsl_pack::NormalCode` of a model face direction.
+fn normal_code(d: horizon_assets::model::Direction) -> horizon_glsl_pack::NormalCode {
+    use horizon_assets::model::Direction as D;
+    use horizon_glsl_pack::NormalCode as N;
+    match d {
+        D::Down => N::Down,
+        D::Up => N::Up,
+        D::North => N::North,
+        D::South => N::South,
+        D::West => N::West,
+        D::East => N::East,
+    }
+}
+/// `color` with its alpha byte replaced by the pack's vertex tag.
+fn tag_color(color: u32, material: u8, normal: horizon_glsl_pack::NormalCode) -> u32 {
+    color & 0x00FF_FFFF | u32::from(horizon_glsl_pack::vertex_tag(normal, material)) << 24
 }
 fn redstone_color(power: u8) -> u32 {
     // RedstoneWireBlock.COLORS
@@ -456,7 +537,16 @@ impl MeshTables {
             water_overlay: layer("minecraft:block/water_overlay")?,
             lava_still: layer("minecraft:block/lava_still")?,
             lava_flow: layer("minecraft:block/lava_flow")?,
+            pack: std::sync::OnceLock::new(),
         })
+    }
+    /// Installs a shader pack's vertex tags, once. Only for a pack that
+    /// compiled: the stock shaders would read the tags as alpha.
+    pub fn set_pack_tags(&self, tags: PackTags) {
+        let _ = self.pack.set(tags);
+    }
+    pub fn pack_active(&self) -> bool {
+        self.pack.get().is_some()
     }
     pub fn facts(&self, state: BlockStateId) -> Option<MeshFacts> {
         let i = self.info.get(state.0 as usize)?;
@@ -772,6 +862,7 @@ impl Mesher<'_> {
                         ],
                         None => [x as f32, y as f32, z as f32],
                     };
+                    let material = self.tables.pack.get().map(|p| p.states[id as usize]);
                     let mut visible = [false; 6];
                     for d in Direction::ALL {
                         let [dx, dy, dz] = d.normal();
@@ -807,6 +898,7 @@ impl Mesher<'_> {
                                 face,
                                 ao,
                                 state,
+                                material,
                             );
                         }
                     }
@@ -846,16 +938,25 @@ impl Mesher<'_> {
         face: &BakedFace,
         ao: bool,
         state: &Info,
+        material: Option<u8>,
     ) {
         let q = &face.quad;
         let shade_face = q.shade_direction_override.unwrap_or(q.facing);
-        let directional = lighting::cardinal(self.nether_shading, shade_face);
+        let pack = material.and(self.tables.pack.get());
+        let directional = match pack {
+            Some(p) if !p.old_lighting => 1.0,
+            _ => lighting::cardinal(self.nether_shading, shade_face),
+        };
         // Grey level per vertex before tinting, and vanilla light coords.
         let (gray, coords) = if ao {
             let info = &self.tables.info;
             let (brightness, coords) =
                 lighting::ambient_occlusion(pad, info, state, pos, &q.positions, q.facing);
-            let gray = brightness.map(|b| lighting::scale(lighting::gray(b), directional));
+            let gray = brightness.map(|b| {
+                // Only with a pack: in f32, 1 - (1 - b) is not always b.
+                let b = pack.map_or(b, |p| 1.0 - p.ao_level * (1.0 - b));
+                lighting::scale(lighting::gray(b), directional)
+            });
             (gray, coords)
         } else {
             let coords = match q.cull {
@@ -886,7 +987,12 @@ impl Mesher<'_> {
                 } else {
                     face.layer as u16
                 },
-                pack_rgb(rgb),
+                match material {
+                    Some(m) => {
+                        tag_color(pack_rgb(rgb), m, quad_normal_code(&q.positions, q.facing))
+                    }
+                    None => pack_rgb(rgb),
+                },
                 pack_coords(lighting::with_emission(coords[i], q.light_emission)),
             ));
         }

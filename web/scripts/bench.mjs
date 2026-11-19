@@ -1,7 +1,9 @@
-// Frame rate of the browser build (WEB.md, "Frame rate"): serves .build/ (pnpm package), opens the
-// page in Chrome and reads the game's two-second status lines.
-//   node scripts/bench.mjs [--args="GAME ARGS"] [--seconds 60] [--tail 15] [--shot frame.png]
-//     [--profile main.cpuprofile] [--trace trace.json] [--release other/release.json] [--gpu] [--verbose]
+// Frame rate of the browser build (WEB.md, "Frame rate"): serves .build/ (pnpm package), or with
+// --site open .build-open/static (pnpm build:open) on 8081, opens the page in Chrome and reads the
+// game's two-second status lines. --shaderpack serves a local zip to the page as ?shaderpack=.
+//   node scripts/bench.mjs [--site open] [--args="GAME ARGS"] [--shaderpack pack.zip] [--seconds 60]
+//     [--tail 15] [--shot frame.png] [--profile main.cpuprofile] [--trace trace.json]
+//     [--release other/release.json] [--gpu] [--verbose]
 // Without --gpu, WebGPU runs on SwiftShader (a machine without a GPU).
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
@@ -12,11 +14,14 @@ import { fileURLToPath } from "node:url";
 const { values } = parseArgs({ options: {
   args: { type: "string" }, seconds: { type: "string", default: "60" }, tail: { type: "string", default: "15" },
   shot: { type: "string" }, profile: { type: "string" }, trace: { type: "string" }, release: { type: "string" },
+  site: { type: "string", default: "horizon" }, shaderpack: { type: "string" },
   gpu: { type: "boolean", default: false }, verbose: { type: "boolean", default: false },
 } });
 const seconds = Number(values.seconds), tail = Number(values.tail);
 const web = fileURLToPath(new URL("..", import.meta.url));
-const server = spawn(process.execPath, ["scripts/serve.mjs"], { cwd: web, stdio: "ignore" });
+if (values.site !== "horizon" && values.site !== "open") throw new Error("--site is horizon or open");
+const open = values.site === "open", origin = `http://127.0.0.1:${open ? 8081 : 8080}`;
+const server = spawn(process.execPath, [open ? "scripts/serve-open.mjs" : "scripts/serve.mjs"], { cwd: web, stdio: "ignore" });
 await new Promise((done) => setTimeout(done, 700));
 const flags = values.gpu ? [] : ["--enable-features=Vulkan", "--use-webgpu-adapter=swiftshader",
   "--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--use-gl=angle"];
@@ -66,6 +71,10 @@ try {
     const body = await readFile(values.release, "utf8");
     await page.route("**/release.json", (route) => route.fulfill({ contentType: "application/json", body }));
   }
+  if (values.shaderpack) {
+    const body = await readFile(values.shaderpack);
+    await page.route(`${origin}/bench-shaderpack.zip`, (route) => route.fulfill({ contentType: "application/zip", body }));
+  }
   const samples = [], t0 = Date.now();
   page.on("console", (message) => {
     const text = message.text(), s = (Date.now() - t0) / 1000;
@@ -74,7 +83,13 @@ try {
     if (values.verbose || /error|panic|Failed/i.test(text)) console.log(`[${s.toFixed(1)}] ${text.slice(0, 300)}`);
   });
   page.on("pageerror", (error) => console.log("pageerror", error.message));
-  await page.goto(`http://127.0.0.1:8080/${values.args ? `?args=${encodeURIComponent(values.args)}` : ""}`);
+  const query = new URLSearchParams({ name: "Bench" });
+  if (values.args) query.set("args", values.args);
+  if (values.shaderpack) query.set("shaderpack", `${origin}/bench-shaderpack.zip`);
+  await page.goto(`${origin}/?${query}`);
+  // The start page waits for its Play button.
+  const play = page.getByRole("button", { name: /^Play/ });
+  await play.first().waitFor({ timeout: 30000 }).then(() => play.first().click(), () => {});
   await page.waitForFunction(() => window.horizonStarted || window.horizonError, null, { timeout: 300000 });
   const wait = (fraction) => new Promise((done) => setTimeout(done, seconds * 1000 * fraction));
   if (values.profile) {

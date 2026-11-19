@@ -21,7 +21,8 @@
     "serve": "node scripts/serve.mjs",
     "serve:multiplayer": "node scripts/multiplayer-dev.mjs",
     "test:multiplayer": "node scripts/test-multiplayer.mjs",
-    "bench": "node scripts/bench.mjs"
+    "bench": "node scripts/bench.mjs",
+    "check:wgsl": "node scripts/check-wgsl.mjs"
   },
   "dependencies": {
     "@alchemy.run/cloudflare": "2.0.0-beta.87",
