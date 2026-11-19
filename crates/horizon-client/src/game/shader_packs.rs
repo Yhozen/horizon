@@ -623,6 +623,16 @@ impl Game<'_> {
             let installed = match (compiled, files) {
                 (Some(compiled), Some(files)) => {
                     let compiled = Arc::new(compiled);
+                    for program in compiled.programs.values() {
+                        report.notes.extend(
+                            program
+                                .notes
+                                .iter()
+                                .map(|n| format!("{}: {n}", program.source)),
+                        );
+                    }
+                    report.notes.sort();
+                    report.notes.dedup();
                     match self.install_shader_pack(&compiled, &files) {
                         Ok(()) => Some(Applied {
                             target: target.clone(),
@@ -644,6 +654,11 @@ impl Game<'_> {
                 }
                 _ => None,
             };
+            if installed.is_some()
+                && let Some(r) = self.renderer.as_ref()
+            {
+                report.notes.extend(r.shader_pack_notes());
+            }
             log::info!(
                 "Horizon: shader pack {} ({}): {}\n{}",
                 target.file,

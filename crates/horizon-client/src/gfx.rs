@@ -3119,6 +3119,12 @@ impl Renderer {
     pub fn has_shader_pack(&self) -> bool {
         self.glsl_pack.is_some()
     }
+    /// What went wrong loading the installed pack's textures (for its report).
+    pub fn shader_pack_notes(&self) -> Vec<String> {
+        self.glsl_pack
+            .as_ref()
+            .map_or_else(Vec::new, |p| p.texture_notes().to_vec())
+    }
     /// Draws the overworld with a compiled shader pack's programs from now on
     /// (`None`: Horizon's own). Errors leave the renderer without a pack.
     pub fn set_shader_pack(
