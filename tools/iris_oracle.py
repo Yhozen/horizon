@@ -300,6 +300,12 @@ def image_diff(a: Path, b: Path) -> float:
     return sum(abs(ra[i] - rb[i]) for i in range(0, n, step)) / max(n // step, 1)
 
 
+def mean_level(png: Path) -> float:
+    """Mean channel value of a picture (every 4th pixel); about 0 for a black window."""
+    _, _, raw = read_png_rgb(png)
+    return sum(raw[::12]) / max(len(raw) // 12, 1)
+
+
 def hotbar_diff(a: Path, b: Path, w: int, h: int) -> float:
     """Mean absolute difference of two pictures over the hotbar's box (see `mask_hud`)."""
     wa, ha, ra = read_png_rgb(a)
@@ -622,7 +628,12 @@ def run(args) -> int:
                             break
                         path.replace(prev)
                     prev.unlink(missing_ok=True)
-                if path.exists() or grab(path):
+                if (path.exists() or grab(path)) and mean_level(path) < 4:
+                    # A black window (the game hung or is dying) is not a picture of the scene.
+                    path.replace(path.with_suffix(".black.png"))
+                    status = f"scene {scene} came out black"
+                    break
+                if path.exists():
                     if args.mask_hud and not args.hide_gui:
                         mask_hud(path, w, h)
                     shots.append(path)
