@@ -3467,7 +3467,6 @@ mod tests {
         };
         let shown = texts(&mut ui, &s);
         for want in [
-            "Shaders: ON",
             "Compiling 3/9",
             "A",
             "B",
@@ -3475,6 +3474,8 @@ mod tests {
         ] {
             assert!(shown.contains(&want.to_string()), "{want} in {shown:?}");
         }
+        // Vanilla's own ON/OFF words (the tests run without translations).
+        assert!(shown.iter().any(|t| t.starts_with("Shaders: ")));
         let events = press(
             &mut ui,
             &mut s,
