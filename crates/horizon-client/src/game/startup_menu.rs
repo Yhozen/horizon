@@ -396,6 +396,9 @@ impl Loading {
                 }
                 // The startup menu runs before the game opens a control socket.
                 Event::ButtonClick | Event::CopyAgentDetails => {}
+                // No `Game` yet: the pages show an empty library here and their events wait
+                // for the game (the integrator may queue them for `Game::shader_pack_event`).
+                Event::ShaderPacks(_) => {}
             }
         }
     }

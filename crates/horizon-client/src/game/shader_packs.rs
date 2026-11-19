@@ -860,3 +860,17 @@ mod tests {
         assert!(files.0.contains_key("readme.txt"));
     }
 }
+
+// The Shader Packs pages (`horizon_client::shader_packs_ui`): stubs for the integrator.
+impl Game<'_> {
+    /// A Shader Packs page event (`options_ui::Event::ShaderPacks`), handled while the click
+    /// that caused it is (the browser's file picker needs that).
+    pub(crate) fn shader_pack_event(&mut self, ev: horizon_client::shader_packs_ui::ShaderPackEvent) {
+        let _ = ev;
+    }
+    /// What the pages show; set into `ui.options.shader_packs` every frame while one shows
+    /// (`poll_control`, game/control.rs).
+    pub(crate) fn shader_packs_view(&self) -> horizon_client::shader_packs_ui::ShaderPacksView {
+        Default::default()
+    }
+}

@@ -130,6 +130,16 @@ impl Game<'_> {
         {
             self.ui.options.agent_status = self.agent_status_lines();
         }
+        if self.screen == Screen::Options
+            && matches!(
+                self.ui.options.page(),
+                horizon_client::options_ui::Page::ShaderPacks
+                    | horizon_client::options_ui::Page::ShaderPackSettings
+                    | horizon_client::options_ui::Page::ShaderPackReport
+            )
+        {
+            self.ui.options.shader_packs = self.shader_packs_view();
+        }
     }
 
     fn answer(&mut self, request: horizon_client::control::Request, event_loop: &ActiveEventLoop) {
@@ -588,6 +598,9 @@ impl Game<'_> {
                     "credits" => Page::Credits,
                     "horizon" => Page::Horizon,
                     "agent" => Page::Agent,
+                    "shaderpacks" => Page::ShaderPacks,
+                    "shaderpack-settings" => Page::ShaderPackSettings,
+                    "shaderpack-report" => Page::ShaderPackReport,
                     other => return Err(format!("unknown options page {other}").into()),
                 };
                 if self.screen == Screen::Playing && self.title.is_none() {
