@@ -8,6 +8,10 @@ The facts about the OptiFine shader pack format that Horizon's shader pack suppo
 > description prepared in isolation from implementation work. No code was copied from any loader or pack.
 > Facts marked "(medium)" or "unknown" are less certain; unmarked facts are well established. Where the
 > public docs disagree with each other, the entry says so.
+> Sections 15–17 and the `block.properties` entries of section 9 add facts from black-box measurement of
+> Iris (probe packs, pictures only) and from running Horizon on the shader pack corpus
+> ([shader-pack-compat.md](shader-pack-compat.md)). Each says its source; "(unverified)" marks Horizon's
+> own reading where neither the docs nor a measurement settle it.
 
 Terms: *gbuffers* are the programs that draw world geometry; *composite-style* passes (`shadowcomp`,
 `prepare`, `deferred`, `composite`, `final`) draw one full-screen quad.
@@ -248,6 +252,22 @@ block names exactly, for every block state.
   nothing. (medium)
 - `mc_Entity.y` = 1 on fluid surfaces (water and lava, including waterlogged water), otherwise 0. (The docs
   say −1 for non-fluids; the observed value is 0.) (medium)
+**`block.properties` and block states**
+- Each `block.<id>=` entry lists names: `[minecraft:]name`, optionally followed by `:property=v1,v2`
+  filters (`oak_log:axis=y`, `farmland:moisture=7`). A filtered name matches only the states whose
+  properties take one of the listed values. (public docs)
+- Other namespaces (mod blocks) and tags (`#…`, `%…`) never match a vanilla block. Horizon skips them and
+  counts them in its report.
+- When several entries match one state, Horizon picks the entry naming the most properties, and the first
+  in the file on a tie. (Horizon's rule; unverified against Iris)
+- With a `block.properties`, a block it does not list reads 0; with none, the legacy table above applies and
+  unlisted blocks read −1. (unverified)
+- The file goes through the preprocessor. `#if` and `#define` act on physical lines, so a `\` continuation
+  before an `#else` does not pull the directive into the entry. Continuations are joined afterwards, and
+  live `#define`s are expanded: packs list block groups as macros. (observed in packs; unverified against Iris)
+- Horizon's terrain vertices carry the id as 16 bits. Ids outside 0–65534 (negative ones included) reach the
+  shader as unlisted.
+
 - `entityId`, `blockEntityId` and `heldItemId` read −1 with no mapping. The docs give 0 when the properties
   file is absent and 65535 for an unlisted entity. (medium)
 
@@ -381,3 +401,110 @@ block names exactly, for every block state.
 - `MC_RENDER_QUALITY` and `MC_SHADOW_QUALITY` (0.5 to 2.0); `MC_HAND_DEPTH` = 0.125.
 - `MC_NORMAL_MAP`, `MC_SPECULAR_MAP`, `MC_OLD_LIGHTING`, `MC_OLD_HAND_LIGHT`, `MC_ANISOTROPIC_FILTERING` are
   defined when on; `renderStage` is compared against `MC_RENDER_STAGE_*`.
+- The values one Iris build actually defines are in section 15.
+- `program.<name>.enabled` expressions: section 16. Custom uniforms: section 17.
+
+## 15. Macros and feature flags, as measured
+
+**Source: black-box measurement.** Two probe packs (`tools/shader_probe_packs/macros`, `macros-features`)
+encode each macro's presence and value in the colour of `final`. They were run under Iris 1.11.7 with
+Sodium 0.9.2 on Minecraft 26.3 (Mesa llvmpipe, OpenGL 4.5 core, Linux, 854×480), using `tools/iris_oracle.py`.
+"Defined, empty or 0" means `#ifdef` holds and the value reads 0; the probe cannot tell empty from 0.
+
+| Macro | Iris 1.11.7 |
+|---|---|
+| `MC_VERSION` | 260300 for 26.3: major × 10000 + minor × 100 + patch |
+| `IRIS_VERSION` | 11107 (1.11.7) |
+| `MC_GL_VERSION` | 45 on a GL 4.5 context, not 450: `#if MC_GL_VERSION >= 320` is false there |
+| `MC_GLSL_VERSION` | 450 |
+| `IS_IRIS`, `MC_OS_LINUX` | defined, empty or 0 |
+| `IRIS_TAG_SUPPORT` | 2 |
+| `MC_RENDER_QUALITY`, `MC_SHADOW_QUALITY`, `MC_HAND_DEPTH` | 1.0, 1.0, 0.125 |
+| `MC_MIPMAP_LEVEL` | 4 |
+| `MC_NORMAL_MAP`, `MC_SPECULAR_MAP` | defined (empty or 0) even for a pack with no normal or specular settings |
+| `MC_GL_VENDOR_OTHER`, `MC_GL_RENDERER_OTHER` | defined, empty or 0, on Mesa; `MC_GL_VENDOR_MESA` and the `MC_GL_RENDERER_*` for Mesa or Gallium stay undefined |
+| `MC_TEXTURE_FORMAT_LAB_PBR`, `MC_ANISOTROPIC_FILTERING`, `MC_FXAA_LEVEL`, `MC_OLD_LIGHTING`, `MC_OLD_HAND_LIGHT` | undefined |
+| `__VERSION__` | undefined to `#ifdef`: the loader resolves the pack's conditionals itself, before the driver sees the text |
+
+- The GL version, vendor and renderer follow the real driver. On a desktop GPU expect something like
+  `MC_GL_VERSION` 46 and a named vendor. (unverified: only llvmpipe was measured)
+- Horizon defines the measured values, except `MC_GL_VERSION` and `MC_GLSL_VERSION` (410 for both: a host
+  without compute shaders or storage buffers) and the vendor and renderer (always `…_OTHER`). See
+  `preprocess::predefined` in `horizon-glsl-pack`.
+
+**Feature flags**
+- With no `iris.features.*` line, no `IRIS_FEATURE_*` macro is defined. (measured)
+- Iris defines `IRIS_FEATURE_<flag>` (empty or 0) for each flag a pack lists in `iris.features.optional` that it
+  supports. Measured as defined: `CUSTOM_IMAGES`, `SSBO`, `COMPUTE_SHADERS`, `SEPARATE_HARDWARE_SAMPLERS`,
+  `HIGHER_SHADOWCOLOR`, `ENTITY_TRANSLUCENT`, `FADE_VARIABLE`, `BLOCK_EMISSION_ATTRIBUTE`.
+- Listed but still undefined: `CHUNK_OFFSET` and `TEXTURE_SHAPED_SAMPLERS`. The log says nothing about them;
+  they are unknown or unsupported in that build. (measured)
+- `iris.features.required` gets the same macros. A required flag the loader lacks refuses the whole pack.
+  (public docs; the required case was not probed)
+- Horizon defines a flag's macro only for the flags it has: today only `BLOCK_EMISSION_ATTRIBUTE`
+  (`features::SUPPORTED_FLAGS`). A pack that requires any other flag is reported as Not supported.
+
+**Option files** (measured)
+- A folder pack's options are read from `shaderpacks/<folder>.txt`; a zip's from `shaderpacks/<file>.zip.txt`.
+- A value option and a toggle both took effect in either case.
+- Iris rewrites the file with a date comment and keeps the values.
+
+## 16. Preprocessing details
+
+- **A conditional left open at the end of the file closes there**: its lines are kept or dropped by its condition,
+  and no error is raised. A pack in the corpus leaves an `#ifdef` open at the end of an included file and
+  loads in Iris. (inferred from that pack; not probed)
+- The conditional state runs through `#include`s: an `#if` opened in an included file can be closed, or left
+  open, in the file that included it.
+- **A condition that does not parse counts as false**, so its `#else` branch is taken. A pack in the corpus
+  has an unbalanced parenthesis in a live `#if` and loads in Iris. (inferred; not probed)
+
+**`program.<name>.enabled`** (key from the public docs; how expressions evaluate is Horizon's reading,
+unverified against Iris)
+- The value is `true`, `false`, or a boolean expression of option and macro names: `!`, `&&`, `||`,
+  parentheses, `defined`, and comparisons of value options (`SHADOW_QUALITY > 1`).
+- It evaluates like `#if`. An option that is on but has no value counts as 1, one that is off as 0, and an
+  unknown name as 0.
+- An expression that does not evaluate leaves the program enabled.
+- `program.world0/composite3.enabled` applies to that dimension's program; a bare
+  `program.composite3.enabled=false` also turns off the program of that name in a world folder.
+- A disabled program is treated as missing, so its fallback (section 2) draws. Horizon's corpus counts a
+  disabled program as neither found nor failed.
+
+## 17. Custom uniforms
+
+**Source:** the public format documentation. Horizon's implementation, `custom_uniforms.rs` in
+`horizon-glsl-pack`, follows it; parts the docs leave open are marked.
+
+**Declaring**
+- `uniform.<type>.<name>=<expr>` is a uniform the programs can declare and read.
+  `variable.<type>.<name>=<expr>` only feeds other expressions.
+- Types: `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`.
+- Values are computed on the CPU once per frame, in file order.
+- A name defined twice keeps its last definition, evaluated at that line's position. (unverified)
+
+**Expressions**
+- Literals: numbers, `true` / `false`, `pi`, and the `BIOME_*`, `CAT_*` and `PPT_*` constants.
+- Names: other custom values, and standard uniforms one element at a time: `cameraPosition.y`, `skyColor.r`,
+  and `gbufferModelView.3.0` for GLSL's `m[3][0]` (column, then row).
+- Entity-state booleans (`is_sneaking`, `is_in_water`, `is_hurt`…) are standard values too. Horizon reads them
+  as 0 until the client supplies them.
+- Operators: `+ - * / %`, `! && ||`, comparisons.
+
+**Functions**
+- `sin cos tan asin acos atan atan2 exp exp2 exp10 log log2 log10 sqrt pow torad todeg abs signum floor ceil
+  round frac fmod min max clamp mix edge between equals in if ifb random randomInt vec2 vec3 vec4 smooth print`.
+- Angles are in radians. `fmod` is the floored modulus, while `%` is Java's remainder (it keeps the sign of
+  the left side). `round` rounds half up.
+- `log(b, x)` is the logarithm of x in base b. `equals(a, b, eps)` compares within eps.
+- `in(x, a, b, …)` tests x against each of the values. `if(c1, v1, c2, v2, …, else)` takes the first branch
+  whose condition holds.
+- `random()` is in [0, 1) and new every frame; `random(lo, hi)` and `randomInt(lo, hi)` scale it.
+- `smooth([id], value, [up, [down]])` follows `value` exponentially, with half-lives in seconds for rising and
+  falling. Horizon's defaults: up 1 s, down = up; it starts at the first frame's value; state is kept per call
+  (the id is accepted and not needed). (defaults and the first frame unverified)
+
+**Errors**
+- A line that does not parse, or whose value does not fit its type, reads 0.
+- The pack never fails because of a custom uniform; Horizon lists such lines in its report.
+
