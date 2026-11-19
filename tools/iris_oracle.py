@@ -291,6 +291,15 @@ def mask_hud(png: Path, w: int, h: int) -> None:
     tmp.replace(png)
 
 
+def image_diff(a: Path, b: Path) -> float:
+    """Mean absolute difference per channel of two pictures of the same size (every 4th pixel)."""
+    _, _, ra = read_png_rgb(a)
+    _, _, rb = read_png_rgb(b)
+    n = min(len(ra), len(rb))
+    step = 12
+    return sum(abs(ra[i] - rb[i]) for i in range(0, n, step)) / max(n // step, 1)
+
+
 def hotbar_diff(a: Path, b: Path, w: int, h: int) -> float:
     """Mean absolute difference of two pictures over the hotbar's box (see `mask_hud`)."""
     wa, ha, ra = read_png_rgb(a)
@@ -598,7 +607,22 @@ def run(args) -> int:
                     after.unlink(missing_ok=True)
                 time.sleep(SCENE_SETTLE.get(scene, 10) * args.settle)
                 path = out.with_name(f"{out.stem}-{scene}.png")
-                if grab(path):
+                # A heavy pack can show the previous scene for many seconds: grab until two pictures 5 s
+                # apart agree (water and clouds still move a little), at most 150 s.
+                prev = out.with_suffix(".prev.png")
+                path.unlink(missing_ok=True)
+                t0 = time.time()
+                if grab(prev):
+                    while time.time() - t0 < 150 and game_proc.poll() is None:
+                        time.sleep(5)
+                        if not grab(path):
+                            break
+                        d = image_diff(prev, path)
+                        if d < 3.0:
+                            break
+                        path.replace(prev)
+                    prev.unlink(missing_ok=True)
+                if path.exists() or grab(path):
                     if args.mask_hud and not args.hide_gui:
                         mask_hud(path, w, h)
                     shots.append(path)
