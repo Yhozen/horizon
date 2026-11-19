@@ -186,6 +186,7 @@ fn chunks_left_behind_keep_their_decoration() {
         biomes: Arc::new(Biomes::load(&root).unwrap()),
         assets,
         render: render.clone(),
+        pack: None,
     });
     let generator = Arc::new(Recorder::default());
     let mut session = Session::new(generator.clone(), context.clone());

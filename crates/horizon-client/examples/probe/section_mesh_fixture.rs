@@ -138,6 +138,7 @@ fn scene(
         smooth_lighting,
         cutout_leaves,
         cull_leaves: false,
+        pack: None,
     };
     let section_y = int(&row["section_y"])?;
     let started = Instant::now();

@@ -7,8 +7,9 @@ use super::{Dim, Game, PackResources};
 use horizon_client::gfx::{PackFrame, Renderer};
 use horizon_core::fs::{self, PathExt as _};
 use horizon_glsl_pack::{PackFiles, PackOptions, ProgramKind};
+use horizon_client::mesher::PackTags;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// The pack's path, from `--shader-pack`.
 static PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -16,6 +17,9 @@ static PATH: OnceLock<PathBuf> = OnceLock::new();
 static FILES: OnceLock<Result<PackFiles, String>> = OnceLock::new();
 /// `--shader-pack-option NAME=VALUE` (repeatable), in order.
 static OPTIONS: std::sync::Mutex<Vec<(String, Option<String>)>> = std::sync::Mutex::new(Vec::new());
+/// The compiled pack's mesher tags (`install`); meshes carry them only while
+/// the pack draws (`sync_pack_tags`).
+static TAGS: std::sync::Mutex<Option<Arc<PackTags>>> = std::sync::Mutex::new(None);
 
 pub(super) fn set_path(path: PathBuf) {
     let _ = PATH.set(path);
@@ -131,13 +135,8 @@ pub(super) fn install(renderer: &mut Renderer, pack: &PackResources) {
     };
     match compiled {
         Ok(compiled) => {
-            pack.context
-                .tables
-                .set_pack_tags(horizon_client::mesher::PackTags::new(
-                    pack.assets.registry,
-                    &compiled.blocks,
-                    &compiled.plan,
-                ));
+            let tags = PackTags::new(pack.assets.registry, &compiled.blocks, &compiled.plan);
+            *TAGS.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(tags));
             log::info!(
                 "Horizon: shader pack {} ready in {} ms ({} programs)",
                 path.display(),
@@ -196,8 +195,38 @@ impl Game<'_> {
         [held(self.selected), held(super::shield::OFFHAND_SLOT)]
     }
 
-    /// Builds the item light table the pack's held light reads, once.
+    /// Meshes carry the pack's tags (and the renderer their stream) exactly
+    /// while the pack draws terrain: switching remeshes every section.
+    fn sync_pack_tags(&mut self) {
+        let drawing = PATH.get().is_some() && self.title.is_none() && self.dim == Dim::Overworld;
+        let wanted = drawing
+            .then(|| TAGS.lock().unwrap_or_else(|e| e.into_inner()).clone())
+            .flatten();
+        let stream = self
+            .renderer
+            .as_ref()
+            .is_none_or(|r| r.pack_vertex_stream() == wanted.is_some());
+        if stream
+            && self.pack.context.pack.as_deref() == wanted.as_deref()
+            && self.streaming.context().pack.as_deref() == wanted.as_deref()
+        {
+            return;
+        }
+        // New streamers and distant terrain take the pack resources' context.
+        self.pack.context = self.pack.context.with_pack(wanted.clone());
+        self.clear_lod();
+        self.streaming
+            .reload_resources(&mut self.world, self.pack.context.clone());
+        self.pending_uploads.clear();
+        if let Some(renderer) = &mut self.renderer {
+            renderer.set_pack_vertex_stream(wanted.is_some());
+        }
+    }
+
+    /// Builds the item light table the pack's held light reads, once, and
+    /// keeps the meshes' pack tags in step with what draws.
     pub(super) fn prepare_pack_frame(&mut self) {
+        self.sync_pack_tags();
         if PATH.get().is_some() && self.luminance.is_none() {
             self.luminance = Some(horizon_client::dynamic_light::Luminance::new(
                 self.res.facts(),
