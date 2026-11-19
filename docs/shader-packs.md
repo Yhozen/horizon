@@ -46,7 +46,7 @@ horizon-client … --shader-pack pack.zip --shader-pack-option TAA_ENABLED=false
 
 The code is a clean-room rewrite: it is written from the pack format, its public documentation and the packs
 themselves, not from Iris, OptiFine, or the shader-pack code Horizon removed in `4e7c25bb`. What a pack
-observes of its host is written down in [shader-pack-format-notes.md](shader-pack-format-notes.md).
+observes of its host is written down in [shader-pack-format-notes.md](shader-pack-format-notes.md). How each measured pack fares: [shader-pack-compat.md](shader-pack-compat.md).
 
 ## How it works
 
