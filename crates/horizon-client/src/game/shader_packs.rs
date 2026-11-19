@@ -357,6 +357,7 @@ fn programs_named(error: &str, compiled: &CompiledPack) -> Vec<String> {
 }
 
 /// Reads and compiles a pack (a worker thread natively).
+#[cfg(not(target_arch = "wasm32"))]
 fn compile_target(target: &Target, host: &HostParams) -> JobResult {
     let files = match read_files(&target.path) {
         Ok(f) => Arc::new(f),
@@ -537,6 +538,11 @@ impl ShaderPacks {
 
     /// What should be compiled for `dim`, if anything.
     pub fn target(&mut self, dim: Dim) -> Option<Target> {
+        // Packs draw no Nether terrain yet (docs/shader-packs.md, Limits): the
+        // Nether stays Horizon's own until that is found.
+        if dim == Dim::Nether && std::env::var("HORIZON_SHADER_PACK_NETHER").is_err() {
+            return None;
+        }
         let pack = self.chosen()?;
         let mut values = match (&self.active_values, &self.cli) {
             (Some(v), None) => v.clone(),
@@ -731,10 +737,10 @@ impl Game<'_> {
                 let current = self.shader_packs.applied.as_ref().map(|a| &a.target);
                 if current == Some(&target) {
                     self.keep_shader_pack_installed();
-                } else if self.shader_packs.failed.as_ref() != Some(&target) {
-                    if let Some(host) = self.renderer.as_ref().map(|r| r.shader_pack_host()) {
-                        self.shader_packs.job = Some(Job::start(target, host));
-                    }
+                } else if self.shader_packs.failed.as_ref() != Some(&target)
+                    && let Some(host) = self.renderer.as_ref().map(|r| r.shader_pack_host())
+                {
+                    self.shader_packs.job = Some(Job::start(target, host));
                 }
             }
         }
