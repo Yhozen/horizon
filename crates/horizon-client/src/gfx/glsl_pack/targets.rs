@@ -21,10 +21,16 @@ pub(super) fn wgpu_format(
     use wgpu::TextureFormat as T;
     let float32 =
         features.contains(wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE);
+    let norm16 = features.contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM);
     match format {
         BufferFormat::R8 => T::R8Unorm,
         BufferFormat::Rg8 => T::Rg8Unorm,
         BufferFormat::Rgb8 | BufferFormat::Rgba8 => world.unwrap_or(T::Rgba8Unorm),
+        // 16-bit normalized buffers often carry bit-packed data (normals, material
+        // ids): stored exactly where the device can, else as half floats (lossy).
+        BufferFormat::R16 if norm16 => T::R16Unorm,
+        BufferFormat::Rg16 if norm16 => T::Rg16Unorm,
+        BufferFormat::Rgb16 | BufferFormat::Rgba16 if norm16 => T::Rgba16Unorm,
         BufferFormat::R16 | BufferFormat::R16F => T::R16Float,
         BufferFormat::Rg16 | BufferFormat::Rg16F => T::Rg16Float,
         BufferFormat::Rgb16
