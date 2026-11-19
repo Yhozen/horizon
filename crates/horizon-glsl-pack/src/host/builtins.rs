@@ -34,9 +34,11 @@ pub(super) const TERRAIN_TANGENT: &str = "vec4 hz_terrain_tangent(vec3 n) {
     return vec4(normalize(t), 1.0);
 }
 ";
-/// GL's clip space from wgpu's: y flipped, reversed 0..1 depth to -1..1 (the matrix `M`).
+/// GL's clip space from wgpu's: reversed 0..1 depth to -1..1 (the matrix `M`).
+/// y stays: packs see GL's own projection; the host flips y on output, so
+/// targets are stored bottom row first, as GL stores them.
 pub(super) const TO_GL: &str =
-    "vec4 hz_to_gl(vec4 c) { return vec4(c.x, -c.y, c.w - 2.0 * c.z, c.w); }";
+    "vec4 hz_to_gl(vec4 c) { return vec4(c.x, c.y, c.w - 2.0 * c.z, c.w); }";
 /// The full-screen pass's fixed-function matrices: `gl_Vertex` is 0..1, the projection maps it to -1..1.
 pub(super) const ORTHO: &str = "mat4(vec4(2.0, 0.0, 0.0, 0.0), vec4(0.0, 2.0, 0.0, 0.0), vec4(0.0, 0.0, 1.0, 0.0), vec4(-1.0, -1.0, 0.0, 1.0))";
 pub(super) const ORTHO_INVERSE: &str = "mat4(vec4(0.5, 0.0, 0.0, 0.0), vec4(0.0, 0.5, 0.0, 0.0), vec4(0.0, 0.0, 1.0, 0.0), vec4(0.5, 0.5, 0.0, 1.0))";
@@ -247,7 +249,8 @@ pub(super) fn builtin(
                 init.into(),
             ));
         }
-        // GL window coordinates: depth from Horizon's reversed Z; x, y as wgpu has them (no flips).
+        // GL window coordinates: depth from Horizon's reversed Z; x, y as wgpu has them: targets
+        // are stored bottom row first, so the row is GL's y (`final` flips it back, fragment.rs).
         "hz_FragCoord" if !vertex => (
             "vec4",
             set("vec4(gl_FragCoord.xy, 1.0 - gl_FragCoord.z, gl_FragCoord.w)".into()),

@@ -264,6 +264,13 @@ impl Renderer {
                             let y = (scale.offset[1].clamp(0.0, 1.0) * h).min(h - 1.0);
                             let vw = (s * w).min(w - x).max(1.0);
                             let vh = (s * h).min(h - y).max(1.0);
+                            // GL's offset counts from the bottom: so do the rows of pack
+                            // targets (stored bottom row first), not the upright screen.
+                            let y = if p.kind == ProgramKind::Final {
+                                (h - y - vh).max(0.0)
+                            } else {
+                                y
+                            };
                             pass.set_viewport(x, y, vw, vh, 0.0, 1.0);
                         }
                     }
@@ -305,6 +312,11 @@ impl Renderer {
             if let Some(source) = source {
                 debug.draw(&self.device, &self.queue, encoder, source, final_view, size);
             }
+        }
+        {
+            let t = pack.targets();
+            pack.depth_flip
+                .run(&self.device, encoder, &t.depth.view, &t.overlay_depth.view);
         }
         self.pack_overlays(&pack, encoder, frame, counts, final_view);
         self.glsl_pack = Some(pack);
@@ -556,36 +568,8 @@ impl Renderer {
         counts: &WorldCounts,
         sides: &[Side; 16],
     ) {
-        // BoatRenderer's water patch: depth only, before translucent terrain.
-        if counts.water_mask_quads > 0 && pack.draws_horizon_pipelines() {
-            let t = pack.targets();
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Shader pack water mask"),
-                color_attachments: &[attachment(
-                    &t.buffers[0].as_ref().expect("colortex0").sides[0].target,
-                    wgpu::LoadOp::Load,
-                )],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &t.depth.view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.water_mask_pipeline);
-            self.bind_geometry(&mut pass, Geometry::Entity, false);
-            pass.draw_indexed(
-                0..counts.water_mask_quads * 6,
-                ((counts.entity_quads
-                    + counts.crumbling_quads
-                    + counts.translucent_crumbling_quads)
-                    * 4) as i32,
-                0..1,
-            );
-        }
+        // BoatRenderer's water patch (Horizon's depth-only pipeline) is not drawn: it draws
+        // upright, and pack targets are stored bottom row first.
         if counts.translucent_draws > 0
             && let Some(water) = pack.programs.get(&ProgramKind::Water)
         {

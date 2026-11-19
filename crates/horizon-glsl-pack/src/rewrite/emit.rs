@@ -80,12 +80,13 @@ impl Ctx<'_> {
                     "sampler `{name}` used other than as the first argument of a sampling call"
                 ));
             } else if name == "dFdy" && self.stage == Stage::Fragment {
-                // The y flip lives in the projection, so window y runs against view-space
-                // y: negated, view-space derivatives keep GL's handedness (packs rebuild
-                // normals with `cross(dFdx(p), dFdy(p))`).
+                // dFdy along GL's window y: the host declares `hz_dFdy_sign` (rows run
+                // up in pack targets, down on the screen `final` draws), so view-space
+                // derivatives keep GL's handedness (`cross(dFdx(p), dFdy(p))` normals).
                 for ty in ["float", "vec2", "vec3", "vec4"] {
-                    self.prelude
-                        .insert(format!("{ty} hz_dFdy({ty} v) {{ return -dFdy(v); }}"));
+                    self.prelude.insert(format!(
+                        "{ty} hz_dFdy({ty} v) {{ return hz_dFdy_sign * dFdy(v); }}"
+                    ));
                 }
                 out.push_str("hz_dFdy");
             } else if name == "gl_FragCoord" {
