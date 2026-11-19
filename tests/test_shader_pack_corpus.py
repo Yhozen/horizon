@@ -96,6 +96,10 @@ class StatusTest(unittest.TestCase):
     def test_fails_without_programs(self):
         self.assertEqual(corpus.pack_row(result("a", []), DIM, False)["status"], "Fails")
 
+    def test_not_a_pack_without_program_sources(self):
+        r = {**result("a", []), "shader_sources": 0}
+        self.assertEqual(corpus.pack_row(r, DIM, False)["status"], "Not a pack")
+
 
 class BucketTest(unittest.TestCase):
     def test_groups_and_sorts_by_packs_blocked(self):
