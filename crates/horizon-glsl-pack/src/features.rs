@@ -20,13 +20,13 @@ use crate::shaders_properties::ShadersProperties;
 pub const SUPPORTED_FLAGS: &[&str] = &["BLOCK_EMISSION_ATTRIBUTE"];
 
 /// `uniform.*` / `variable.*` in shaders.properties (custom uniforms).
-pub const CUSTOM_UNIFORMS: bool = false;
+pub const CUSTOM_UNIFORMS: bool = true;
 /// `customTexture.*` (Iris's extra samplers).
 pub const CUSTOM_TEXTURES: bool = true;
 /// Raw (`.dat`) textures in `texture.*` / `customTexture.*`.
-pub const RAW_TEXTURES: bool = false;
+pub const RAW_TEXTURES: bool = true;
 /// 3D textures (`TEXTURE_3D` raw textures).
-pub const TEXTURES_3D: bool = false;
+pub const TEXTURES_3D: bool = true;
 /// `prepare*` full-screen passes (vertex and fragment stages).
 pub const PREPARE_PASSES: bool = true;
 
@@ -383,9 +383,9 @@ mod tests {
                 ),
                 ("custom images", false, false),
                 ("storage buffers (SSBO)", false, false),
-                ("custom uniforms", false, false),
-                ("raw textures", false, false),
-                ("3D textures", false, false),
+                ("custom uniforms", true, false),
+                ("raw textures", true, false),
+                ("3D textures", true, false),
                 ("per-program blending", true, false),
                 ("buffer sizes", true, false),
                 ("the block emission attribute", true, false),

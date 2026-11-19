@@ -234,6 +234,8 @@ pub(super) fn build(
         ..Default::default()
     });
     let instance_attributes = wgpu::vertex_attr_array![5=>Float32x4];
+    // mid_uv, (block, cell), normal with emission: the host's `TERRAIN_INPUTS`.
+    let pack_attributes = wgpu::vertex_attr_array![6=>Uint16x2,7=>Uint16x2,8=>Snorm8x4];
     let entity_attributes = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Uint32,3=>Unorm8x4,4=>Uint8x4,5=>Snorm8x4];
     let buffers: Vec<Option<wgpu::VertexBufferLayout>> = match geometry {
         Geometry::Terrain => vec![
@@ -246,6 +248,12 @@ pub(super) fn build(
                 array_stride: 16,
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: &instance_attributes,
+            }),
+            // The arena's `PackVertex` stream (`Renderer::set_pack_vertex_stream`).
+            Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<crate::mesher::PackVertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &pack_attributes,
             }),
         ],
         Geometry::Entity => vec![Some(wgpu::VertexBufferLayout {

@@ -807,6 +807,53 @@ fn sprite_grad_and_bias() {
     }
 }
 
+/// A terrain vertex stage reading every attribute of the pack stream.
+fn pack_stream_program() -> (Rewritten, Rewritten) {
+    let (mut vertex, fragment) = terrain_program();
+    vertex.attributes = vec![
+        var("mc_Entity", "vec2", false),
+        var("mc_midTexCoord", "vec2", false),
+        var("at_midBlock", "vec4", false),
+        var("at_tangent", "vec4", false),
+    ];
+    vertex.body = vertex.body.replace(
+        "    level = int(at_midBlock.w);",
+        "    level = int(at_midBlock.w + at_midBlock.x + mc_Entity.y);
+    normal += at_tangent.xyz + vec3(mc_midTexCoord, 0.0);",
+    );
+    (vertex, fragment)
+}
+
+#[test]
+fn terrain_reads_the_pack_vertex_stream() {
+    for kind in [ProgramKind::Terrain, ProgramKind::Shadow] {
+        let (out, vs, _) = run(kind, &PackPlan::default(), &[0], &pack_stream_program());
+        // Slot 2's attributes, as the client's pipelines lay them out.
+        for input in [
+            "@location(6) hz_in_mid_uv: vec2<u32>",
+            "@location(7) hz_in_block: vec2<u32>",
+            "@location(8) hz_in_normal: vec4<f32>",
+        ] {
+            assert!(vs.contains(input), "{kind:?} {input}\n{vs}");
+        }
+        for line in [
+            // block.properties' unlisted id is 0; the fluid bit is mc_Entity.y.
+            "mc_Entity = vec2(vec4(hz_in_block.x == 65535u ? 0.0 : float(hz_in_block.x), \
+             (hz_in_block.y & 4096u) != 0u ? 1.0 : 0.0, 0.0, 1.0).xy);",
+            // The same transform as gl_MultiTexCoord0's.
+            "mc_midTexCoord = vec2(vec4(vec2(hz_in_mid_uv) * hz_in_origin.w, 0.0, 1.0).xy);",
+            "round(hz_in_normal.w * 127.0)",
+            "(hz_in_block.y & 8192u) != 0u ? vec3(0.0)",
+            "at_tangent = vec4(hz_terrain_tangent(",
+            "hz_gl_Normal = dot(hz_in_normal.xyz, hz_in_normal.xyz) > 0.01 ? normalize(hz_in_normal.xyz)",
+        ] {
+            assert!(out.vertex.contains(line), "{kind:?} {line}\n{}", out.vertex);
+        }
+        // No alpha tag is read any more.
+        assert!(!out.vertex.contains("hz_in_color.a"), "{}", out.vertex);
+    }
+}
+
 #[test]
 fn converted_and_custom_uniforms() {
     let blocks = BlockIds::default();

@@ -313,7 +313,7 @@ impl Renderer {
     fn bind_geometry(&self, pass: &mut wgpu::RenderPass<'_>, geometry: Geometry, hand: bool) {
         match geometry {
             Geometry::Terrain => {
-                pass.set_bind_group(0, &self.group, &[]);
+                pass.set_bind_group(0, &self.pack_group, &[]);
                 pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.set_vertex_buffer(1, self.instances.slice(..));
             }

@@ -680,3 +680,38 @@ fn struct_varyings_are_declared_after_their_struct() {
         rw.body
     );
 }
+
+#[test]
+fn functions_returning_arrays() {
+    let src = "vec3[2] f(vec3[2] a, vec3 k) { vec3 m = k; return vec3[2](a[0] * m, a[1]); }\n\
+               void main() { if (true) { } { } vec3[2] q = f(vec3[2](vec3(0.0), vec3(1.0)), vec3(1.0)); \
+               gl_FragData[0] = vec4(q[0], 1.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(
+        rw.body.contains("vec3[2] f(vec3[2] a, vec3 k)"),
+        "{}",
+        rw.body
+    );
+    naga(&rw, Stage::Fragment);
+}
+
+#[test]
+fn vertex_id_is_an_int() {
+    let src = "int f(int i) { return i % 2; }\nvoid main() { gl_Position = vec4(float(f(gl_VertexID)), 0.0, 0.0, 1.0); }\n";
+    let rw = rewrite(src, Stage::Vertex).unwrap();
+    assert!(rw.body.contains("f(int(gl_VertexIndex))"), "{}", rw.body);
+}
+
+#[test]
+fn a_sampler_declared_below_its_first_use() {
+    let src = "vec3 sky(sampler2D s) { return texture2D(s, vec2(0.5)).rgb; }\n\
+               vec3 g() { return sky(colortex4); }\n\
+               uniform sampler2D colortex4;\n\
+               void main() { gl_FragData[0] = vec4(g(), 1.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(
+        rw.sample_calls.contains("hz_sample_colortex4"),
+        "{}",
+        rw.body
+    );
+}

@@ -6,7 +6,7 @@ use crate::{
     environment::Sky,
     graphics::GraphicsApi,
     hud::{HudBatch, HudRenderer},
-    mesher::{SectionMesh, TerrainVertex, Vertex},
+    mesher::{PackVertex, SectionMesh, TerrainVertex, Vertex},
     sprites::SpriteAnimation,
 };
 use glam::{DVec3, Mat4, Vec3, Vec4};
@@ -480,6 +480,9 @@ pub struct Renderer {
     /// The mipmap levels sampled (the Mipmap Levels option), at most `mip_levels - 1`.
     mipmaps: u32,
     terrain_layout: wgpu::BindGroupLayout,
+    /// The terrain group of shader-pack terrain programs (`pack_terrain_layout`).
+    pack_terrain_layout: wgpu::BindGroupLayout,
+    pack_group: wgpu::BindGroup,
     sprite_sampler: wgpu::Sampler,
     lightmap_view: wgpu::TextureView,
     lightmap_sampler: wgpu::Sampler,
@@ -720,6 +723,94 @@ fn terrain_group(
             view(10, &sprites[6]),
             view(11, &sprites[7]),
         ],
+    })
+}
+/// The terrain group a shader pack's terrain programs read: Horizon's, with
+/// only the sprite arrays in use, so a pack keeps WebGPU's 16 textures a
+/// stage for its own (`HostParams::terrain_textures`).
+fn pack_terrain_layout(device: &wgpu::Device, sprite_arrays: u32) -> wgpu::BindGroupLayout {
+    let vf = wgpu::ShaderStages::VERTEX_FRAGMENT;
+    let texture = |dim| wgpu::BindingType::Texture {
+        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+        view_dimension: dim,
+        multisampled: false,
+    };
+    let sampler = wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering);
+    let mut entries = vec![
+        (
+            0,
+            wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+        ),
+        (1, texture(wgpu::TextureViewDimension::D2Array)),
+        (2, sampler),
+        (3, texture(wgpu::TextureViewDimension::D2)),
+        (4, sampler),
+    ];
+    entries.extend(
+        (1..sprite_arrays.clamp(1, 8)).map(|i| (4 + i, texture(wgpu::TextureViewDimension::D2Array))),
+    );
+    let entries: Vec<wgpu::BindGroupLayoutEntry> = entries
+        .into_iter()
+        .map(|(binding, ty)| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: vf,
+            ty,
+            count: None,
+        })
+        .collect();
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Shader pack terrain bindings"),
+        entries: &entries,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pack_terrain_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    sprite_arrays: u32,
+    globals: &wgpu::Buffer,
+    sprites: &[wgpu::TextureView],
+    sprite_sampler: &wgpu::Sampler,
+    lightmap: &wgpu::TextureView,
+    lightmap_sampler: &wgpu::Sampler,
+) -> wgpu::BindGroup {
+    let mut entries = vec![
+        wgpu::BindGroupEntry {
+            binding: 0,
+            resource: globals.as_entire_binding(),
+        },
+        wgpu::BindGroupEntry {
+            binding: 1,
+            resource: wgpu::BindingResource::TextureView(&sprites[0]),
+        },
+        wgpu::BindGroupEntry {
+            binding: 2,
+            resource: wgpu::BindingResource::Sampler(sprite_sampler),
+        },
+        wgpu::BindGroupEntry {
+            binding: 3,
+            resource: wgpu::BindingResource::TextureView(lightmap),
+        },
+        wgpu::BindGroupEntry {
+            binding: 4,
+            resource: wgpu::BindingResource::Sampler(lightmap_sampler),
+        },
+    ];
+    for i in 1..sprite_arrays.clamp(1, 8) {
+        entries.push(wgpu::BindGroupEntry {
+            binding: 4 + i,
+            resource: wgpu::BindingResource::TextureView(&sprites[i as usize]),
+        });
+    }
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Shader pack terrain resources"),
+        layout,
+        entries: &entries,
     })
 }
 /// CPU texture uploads prepared by the resource worker. Consumed by renderer
@@ -1662,6 +1753,17 @@ impl Renderer {
             &lightmap_view,
             &lightmap_sampler,
         );
+        let pack_terrain_layout = pack_terrain_layout(&device, sprite_arrays);
+        let pack_group = pack_terrain_group(
+            &device,
+            &pack_terrain_layout,
+            sprite_arrays,
+            &globals,
+            &sprite_views,
+            &sprite_sampler,
+            &lightmap_view,
+            &lightmap_sampler,
+        );
         let crosshair_group = terrain_group(
             &device,
             "Debug crosshair resources",
@@ -2571,6 +2673,8 @@ impl Renderer {
             mip_levels,
             mipmaps: mip_levels - 1,
             terrain_layout: bindings,
+            pack_terrain_layout,
+            pack_group,
             sprite_sampler,
             lightmap_view,
             lightmap_sampler,
@@ -2894,6 +2998,36 @@ impl Renderer {
                 );
             }
         }
+        // The pack stream, at the same vertex indices in the page's second buffer.
+        if let Some(extra) = self.arena.extra_buffer(page) {
+            let stride = std::mem::size_of::<PackVertex>() as u64;
+            let parts = [
+                (0, &mesh.solid_pack, mesh.solid.len()),
+                (mesh.solid.len(), &mesh.translucent_pack, mesh.translucent.len()),
+            ];
+            for (offset, part, len) in parts {
+                if len == 0 {
+                    continue;
+                }
+                // A mesh made without the pack's tags draws as unlisted blocks.
+                let fallback;
+                let part = if part.len() == len {
+                    &part[..]
+                } else {
+                    fallback = vec![PackVertex::UNTAGGED; len];
+                    &fallback[..]
+                };
+                let bytes: &[u8] = bytemuck::cast_slice(part);
+                self.uploaded_bytes += bytes.len() as u64;
+                self.section_copy_bytes += bytes.len() as u64;
+                self.section_uploads.buffer(
+                    encoder,
+                    extra,
+                    (start + offset as u64) * stride,
+                    bytes,
+                );
+            }
+        }
         if self.section_copy_bytes >= SECTION_COPY_LIMIT
             && let Some(copies) = self.take_section_copies()
         {
@@ -2974,6 +3108,10 @@ impl Renderer {
                 .take_while(|&&p| p == (page, index_page))
                 .count();
             pass.set_vertex_buffer(0, self.arena.buffer(page).slice(..));
+            // A shader pack's stream: read by its terrain pipelines, ignored by the stock ones.
+            if let Some(extra) = self.arena.extra_buffer(page) {
+                pass.set_vertex_buffer(2, extra.slice(..));
+            }
             let indices = index_page.map_or(&self.indices, |p| self.sorted_indices.buffer(p));
             pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
             if self.multi_draw {
@@ -3010,6 +3148,23 @@ impl Renderer {
     /// A value that changes whenever `block_entities` gives something else.
     pub fn block_entity_revision(&self) -> u64 {
         self.block_entity_revision
+    }
+    /// Switches the section arena's `PackVertex` stream on (while a shader
+    /// pack draws terrain: its pipelines read vertex slot 2) or off. Every
+    /// section and distant tile is dropped (`clear_sections`), so the meshes
+    /// uploaded next, made with `Streaming::set_pack_tags`'s context, all
+    /// match. Nothing happens when the stream already is `on`.
+    pub fn set_pack_vertex_stream(&mut self, on: bool) {
+        if self.pack_vertex_stream() == on {
+            return;
+        }
+        self.clear_sections();
+        let stride = std::mem::size_of::<PackVertex>() as u64;
+        self.arena.set_extra_stride(on.then_some(stride));
+    }
+    /// Whether sections carry the `PackVertex` stream.
+    pub fn pack_vertex_stream(&self) -> bool {
+        self.arena.extra_stride().is_some()
     }
     pub fn clear_sections(&mut self) {
         self.block_entities.clear();
@@ -3098,6 +3253,16 @@ impl Renderer {
             &self.lightmap_view,
             &self.lightmap_sampler,
         );
+        self.pack_group = pack_terrain_group(
+            &self.device,
+            &self.pack_terrain_layout,
+            self.sprite_host.sprite_arrays,
+            &self.globals,
+            &views,
+            &self.sprite_sampler,
+            &self.lightmap_view,
+            &self.lightmap_sampler,
+        );
     }
     /// The device's inter-stage variable limit, for packing a pack's varyings.
     pub fn max_varyings(&self) -> u32 {
@@ -3112,6 +3277,7 @@ impl Renderer {
             max_textures: limits.max_sampled_textures_per_shader_stage,
             max_draw_buffers: limits.max_color_attachments,
             max_attachment_bytes: limits.max_color_attachment_bytes_per_sample,
+            terrain_textures: self.sprite_host.sprite_arrays.clamp(1, 8) + 1,
             ..self.sprite_host
         }
     }
@@ -3127,12 +3293,15 @@ impl Renderer {
     }
     /// Draws the overworld with a compiled shader pack's programs from now on
     /// (`None`: Horizon's own). Errors leave the renderer without a pack.
+    /// `resources` reads a namespaced resource-pack file (`minecraft:textures/x.png`)
+    /// from the game's own assets, for the pack's resource textures.
     pub fn set_shader_pack(
         &mut self,
         pack: Option<(
             &horizon_glsl_pack::CompiledPack,
             &horizon_glsl_pack::PackFiles,
         )>,
+        resources: &dyn Fn(&str) -> Option<Vec<u8>>,
     ) -> std::result::Result<(), String> {
         self.glsl_pack = None;
         let Some((pack, files)) = pack else {
@@ -3143,12 +3312,13 @@ impl Renderer {
             &self.device,
             &self.queue,
             glsl_pack::Group0Layouts {
-                terrain: &self.terrain_layout,
+                terrain: &self.pack_terrain_layout,
                 entity: &self.entity_bind_layout,
             },
             self.config.format.remove_srgb_suffix(),
             pack,
             files,
+            resources,
         )?;
         // Natively the verdict comes at once; the browser's arrives a few
         // frames later through `shader_pack_error`.

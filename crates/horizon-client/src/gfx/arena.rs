@@ -1,5 +1,7 @@
 //! One vertex buffer for every terrain section: sections own ranges of it, so
 //! a frame binds it once and draws every section with indirect multi-draw.
+//! A page may hold a second, parallel buffer (a shader pack's `PackVertex`
+//! stream): same vertex indices, one free list.
 use std::collections::BTreeMap;
 
 /// Ranges are rounded up to this many vertices to limit fragmentation, and
@@ -56,6 +58,8 @@ impl FreeList {
 /// One vertex buffer of the arena; only the newest page grows.
 struct Page {
     buffer: wgpu::Buffer,
+    /// The parallel stream's buffer, while the arena has one.
+    extra: Option<wgpu::Buffer>,
     /// Capacity in vertices.
     capacity: u64,
     free: FreeList,
@@ -66,6 +70,10 @@ struct Page {
 pub struct Arena {
     pages: Vec<Option<Page>>,
     stride: u64,
+    /// The parallel stream's bytes per vertex, when it is on.
+    extra_stride: Option<u64>,
+    /// The device's largest page in bytes.
+    page_bytes: u64,
     page_limit: u64,
     initial_capacity: u64,
     usage: wgpu::BufferUsages,
@@ -101,6 +109,8 @@ impl Arena {
         Self {
             pages: Vec::new(),
             stride,
+            extra_stride: None,
+            page_bytes: bytes,
             page_limit,
             initial_capacity: capacity,
             usage,
@@ -109,18 +119,45 @@ impl Arena {
             video_memory_full: false,
         }
     }
-    /// A buffer of `capacity` vertices in video memory or, when that is full
+    /// Turns the parallel stream on (`Some(bytes per vertex)`) or off. The
+    /// arena is cleared first: every page then has it or none does. The
+    /// page limit keeps both buffers of a page within the device's limits.
+    pub fn set_extra_stride(&mut self, extra: Option<u64>) {
+        self.clear();
+        self.extra_stride = extra;
+        let widest = self.stride.max(extra.unwrap_or(0));
+        self.page_limit = (self.page_bytes / widest) / GRAIN * GRAIN;
+        self.initial_capacity = self.initial_capacity.min(self.page_limit);
+    }
+    pub fn extra_stride(&self) -> Option<u64> {
+        self.extra_stride
+    }
+    /// A page's buffers of `capacity` vertices: the vertices and, with the
+    /// parallel stream on, its buffer. `None` when either has no room.
+    fn create(
+        &mut self,
+        device: &wgpu::Device,
+        capacity: u64,
+    ) -> Option<(wgpu::Buffer, Option<wgpu::Buffer>)> {
+        let buffer = self.create_one(device, capacity * self.stride)?;
+        let extra = match self.extra_stride {
+            Some(stride) => Some(self.create_one(device, capacity * stride)?),
+            None => None,
+        };
+        Some((buffer, extra))
+    }
+    /// A buffer of `size` bytes in video memory or, when that is full
     /// and the device allows it, in system memory: Vulkan drivers fail an
     /// allocation rather than page like OpenGL ones, and wgpu's default error
     /// handler panics. `None` when neither has room.
-    fn create(&mut self, device: &wgpu::Device, capacity: u64) -> Option<wgpu::Buffer> {
+    fn create_one(&mut self, device: &wgpu::Device, size: u64) -> Option<wgpu::Buffer> {
         let usage = self.usage | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC;
         #[cfg(test)]
         let local = (!self.video_memory_full)
-            .then(|| try_create(device, capacity * self.stride, usage))
+            .then(|| try_create(device, size, usage))
             .flatten();
         #[cfg(not(test))]
-        let local = try_create(device, capacity * self.stride, usage);
+        let local = try_create(device, size, usage);
         local.or_else(|| {
             // Mappable buffers are placed in host-visible memory, which the
             // allocator takes from system memory once video memory is full.
@@ -130,11 +167,7 @@ impl Arena {
             {
                 return None;
             }
-            let buffer = try_create(
-                device,
-                capacity * self.stride,
-                usage | wgpu::BufferUsages::MAP_WRITE,
-            )?;
+            let buffer = try_create(device, size, usage | wgpu::BufferUsages::MAP_WRITE)?;
             if !std::mem::replace(&mut self.spilled, true) {
                 log::warn!(
                     "Horizon: video memory is full; more terrain is kept in system memory \
@@ -148,9 +181,10 @@ impl Arena {
     fn span(vertices: u64) -> u64 {
         vertices.max(1).next_multiple_of(GRAIN)
     }
-    /// Bytes of every page's buffer.
+    /// Bytes of every page's buffers.
     pub fn bytes(&self) -> u64 {
-        self.pages.iter().flatten().map(|p| p.capacity).sum::<u64>() * self.stride
+        self.pages.iter().flatten().map(|p| p.capacity).sum::<u64>()
+            * (self.stride + self.extra_stride.unwrap_or(0))
     }
     /// The most vertices a page holds.
     pub fn page_vertices(&self) -> u64 {
@@ -164,6 +198,14 @@ impl Arena {
             .as_ref()
             .expect("live arena page")
             .buffer
+    }
+    /// The parallel stream's buffer of `page`, while the stream is on.
+    pub fn extra_buffer(&self, page: u32) -> Option<&wgpu::Buffer> {
+        self.pages[page as usize]
+            .as_ref()
+            .expect("live arena page")
+            .extra
+            .as_ref()
     }
     /// A range of `vertices`: (page, first vertex). Grows the newest page
     /// (copying its contents on the GPU, in `encoder`) or starts a new one
@@ -205,8 +247,8 @@ impl Arena {
         .max(len)
         .min(self.page_limit);
         // A page just large enough when memory is short.
-        let (buffer, capacity) = match self.create(device, capacity) {
-            Some(buffer) => (buffer, capacity),
+        let ((buffer, extra), capacity) = match self.create(device, capacity) {
+            Some(buffers) => (buffers, capacity),
             None if capacity > len => (self.create(device, len)?, len),
             None => return None,
         };
@@ -214,6 +256,7 @@ impl Arena {
         let start = free.take(len).expect("a new page fits one section");
         let page = Page {
             buffer,
+            extra,
             capacity,
             free,
         };
@@ -246,14 +289,18 @@ impl Arena {
         capacity: u64,
     ) -> bool {
         let capacity = capacity.next_multiple_of(GRAIN).min(self.page_limit);
-        let Some(buffer) = self.create(device, capacity) else {
+        let Some((buffer, extra)) = self.create(device, capacity) else {
             return false;
         };
         let old = self.pages[page].as_mut().expect("live arena page");
         // Copies recorded for the old buffer run before this one.
         encoder.copy_buffer_to_buffer(&old.buffer, 0, &buffer, 0, old.capacity * self.stride);
+        if let (Some(from), Some(to), Some(stride)) = (&old.extra, &extra, self.extra_stride) {
+            encoder.copy_buffer_to_buffer(from, 0, to, 0, old.capacity * stride);
+        }
         let previous = old.capacity;
         old.buffer = buffer;
+        old.extra = extra;
         old.capacity = capacity;
         old.free.give(previous, capacity - previous);
         true
@@ -423,6 +470,39 @@ mod tests {
             assert_eq!(alloc(&mut arena, &device, &queue, GRAIN), Some((0, 0)));
             assert_eq!(arena.bytes(), arena.stride * GRAIN);
         }
+    }
+
+    #[test]
+    fn the_parallel_stream_follows_allocation_growth_and_release() {
+        let Some((device, queue)) = device() else {
+            eprintln!("no GPU adapter: skipped");
+            return;
+        };
+        let mut arena = Arena::new(&device, 8, GRAIN);
+        alloc(&mut arena, &device, &queue, GRAIN).unwrap();
+        // Switching clears: no page is left without the stream.
+        arena.set_extra_stride(Some(4));
+        assert_eq!(arena.bytes(), 0);
+        let (page, start) = alloc(&mut arena, &device, &queue, GRAIN).unwrap();
+        assert_eq!(arena.bytes(), 12 * GRAIN);
+        queue.write_buffer(arena.buffer(page), start * 8, &5u32.to_le_bytes());
+        let extra = arena.extra_buffer(page).unwrap();
+        queue.write_buffer(extra, start * 4, &7u32.to_le_bytes());
+        // The page is full: it grows, both buffers with their contents.
+        let (grown, next) = alloc(&mut arena, &device, &queue, GRAIN).unwrap();
+        assert_eq!((grown, next), (page, GRAIN));
+        assert_eq!(arena.extra_buffer(page).unwrap().size(), 2 * GRAIN * 4);
+        assert_eq!(read(&device, &queue, arena.buffer(page), start * 8), 5);
+        let extra = arena.extra_buffer(page).unwrap();
+        assert_eq!(read(&device, &queue, extra, start * 4), 7);
+        arena.release(page, start, GRAIN);
+        arena.release(grown, next, GRAIN);
+        arena.trim();
+        assert_eq!(arena.bytes(), 0);
+        arena.set_extra_stride(None);
+        let (page, _) = alloc(&mut arena, &device, &queue, GRAIN).unwrap();
+        assert!(arena.extra_buffer(page).is_none());
+        assert_eq!(arena.bytes(), 8 * GRAIN);
     }
 
     #[test]

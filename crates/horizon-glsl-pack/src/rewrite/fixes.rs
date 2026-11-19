@@ -28,9 +28,20 @@ const NOT_CONSTANT: &str = "mix smoothstep exp2 log2 determinant transpose inver
 
 /// Return types worth coercing to: the built-in scalars, vectors and matrices.
 fn is_value_type(ty: &str) -> bool {
-    let base = ty.trim_start_matches(['i', 'u', 'b', 'd']);
+    let base = ty.strip_prefix(['i', 'u', 'b', 'd']).unwrap_or(ty);
+    let dims = |d: &str| {
+        let b = d.as_bytes();
+        let ok = |c: u8| (b'2'..=b'4').contains(&c);
+        matches!(b, [c] if ok(*c)) || matches!(b, [c, b'x', r] if ok(*c) && ok(*r))
+    };
     matches!(ty, "float" | "int" | "uint" | "bool" | "double")
-        || (["vec", "mat"].iter().any(|p| base.starts_with(p)))
+        || base
+            .strip_prefix("vec")
+            .is_some_and(|d| d.len() == 1 && dims(d))
+        || ty
+            .strip_prefix("mat")
+            .or_else(|| ty.strip_prefix("dmat"))
+            .is_some_and(dims)
 }
 
 fn is_ident(w: &str) -> bool {
@@ -78,6 +89,45 @@ pub(super) fn apply(toks: &[Tok]) -> Result<String, String> {
     Ok(texts.concat())
 }
 
+/// Whether the declaration in `toks` (up to its `;`) is initialised from
+/// numbers and operators only (`const int n = 6;`, `const float k = 1.0 / 3.0;`).
+fn literal_initializer(toks: &[Tok]) -> bool {
+    let decl: Vec<&Tok> = toks
+        .iter()
+        .take_while(|t| t.text != ";")
+        .filter(|t| t.kind != Kind::Space)
+        .collect();
+    let Some(eq) = decl.iter().position(|t| t.text == "=") else {
+        return false;
+    };
+    // Exactly `TYPE NAME = …` (a parameter's `const in float x` is not one).
+    eq == 2
+        && decl[..eq].iter().all(|t| t.kind == Kind::Ident)
+        && !decl[eq + 1..].is_empty()
+        && decl[eq + 1..]
+            .iter()
+            .all(|t| matches!(t.kind, Kind::Number | Kind::Punct) && t.text != "," && t.text != "?")
+}
+
+/// `(name, value)` of an integer declaration initialised from numbers and
+/// operators only (`int n = 6;` after its `const`).
+fn literal_constant<'a>(toks: &[Tok<'a>]) -> Option<(&'a str, String)> {
+    if !literal_initializer(toks) {
+        return None;
+    }
+    let decl: Vec<&Tok<'a>> = toks
+        .iter()
+        .take_while(|t| t.text != ";")
+        .filter(|t| t.kind != Kind::Space)
+        .collect();
+    let eq = decl.iter().position(|t| t.text == "=")?;
+    if eq != 2 || !matches!(decl[0].text, "int" | "uint") {
+        return None;
+    }
+    let value: Vec<&str> = decl[eq + 1..].iter().map(|t| t.text).collect();
+    Some((decl[1].text, value.join(" ")))
+}
+
 /// A float zero that naga cannot fold (a private global, zero-initialised).
 const ZERO: &str = "hz_zero";
 
@@ -108,7 +158,29 @@ fn function(toks: &[Tok]) -> String {
     let mut skip_space = false;
     let mut after_discard = false;
     let mut last = "";
-    for t in toks {
+    // Literal local constants (name → value), written out where they size an
+    // array: naga only takes global constants there.
+    let mut sizes: Vec<(&str, String)> = Vec::new();
+    let mut brackets = 0i32;
+    for (at, t) in toks.iter().enumerate() {
+        match t.text {
+            "[" => brackets += 1,
+            "]" => brackets -= 1,
+            _ => {}
+        }
+        if brackets > 0
+            && t.kind == Kind::Ident
+            && let Some((_, value)) = sizes.iter().rev().find(|(n, _)| *n == t.text)
+        {
+            out.push_str(&format!("({value})"));
+            last = t.text;
+            continue;
+        }
+        if t.text == "const"
+            && let Some(constant) = literal_constant(&toks[at + 1..])
+        {
+            sizes.push(constant);
+        }
         if t.kind != Kind::Space {
             let prev = std::mem::replace(&mut last, t.text);
             // `x / 0.0`: naga folds it to an infinity and refuses it; GL gives the infinity at run time.
@@ -134,6 +206,8 @@ fn function(toks: &[Tok]) -> String {
                 after_discard = true;
                 continue;
             }
+            // Kept on a local whose value is a literal expression: it may size an array.
+            "const" if literal_initializer(&toks[at + 1..]) => {}
             "const" => {
                 skip_space = true;
                 continue;
@@ -288,6 +362,27 @@ mod tests {
     }
 
     #[test]
+    fn struct_returns_are_not_coerced() {
+        let src = "struct materialLAB { float r; };\nmaterialLAB f() { materialLAB m; return m; }\n\
+                   mat2x3 g() { return mat2x3(1.0); }\nvec3 h() { return 1.0; }\nvoid main() { }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        assert!(out.contains("return m;"), "{out}");
+        assert!(out.contains("return mat2x3( mat2x3(1.0));"), "{out}");
+        assert!(out.contains("return vec3( 1.0);"), "{out}");
+    }
+
+    #[test]
+    fn literal_local_constants_stay_constant() {
+        let src = "float g(const in float x) { float y = 1.0; return x + y; }\nfloat f(float x) { const int n = 6; const float k = 1.0 / 3.0; const float y = x * 2.0; \
+                   float a[n]; return k + y + a[0]; }\nvoid main() { }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        assert!(
+            out.contains("const int n = 6; const float k = 1.0 / 3.0; float y = x * 2.0;"),
+            "{out}"
+        );
+    }
+
+    #[test]
     fn division_by_literal_zero_is_left_to_run_time() {
         let src = "void main() { gl_Position = vec4(-1.0 / 0.0, 1.0 / 0., 2.0 / 0.5, 1.0); }\n";
         let out = apply(&tokenize(src)).unwrap();
@@ -341,16 +436,17 @@ pub(super) fn size_arrays(toks: &[Tok]) -> Option<String> {
         .collect();
     let t = |j: usize| s.get(j).map_or("", |&i| toks[i].text);
     // Token index of an empty `[` → the length to write in it.
-    let mut fills: Vec<(usize, usize)> = Vec::new();
+    let mut fills: Vec<(usize, String)> = Vec::new();
     for k in 0..s.len() {
         let ctor = k + 1;
         if t(k) != "=" || !is_ident(t(ctor)) || t(ctor + 1) != "[" {
             continue;
         }
+        // The constructor's length: none, a literal, or a constant's name.
         let (close, given) = if t(ctor + 2) == "]" {
             (ctor + 2, None)
         } else if t(ctor + 3) == "]" {
-            (ctor + 3, t(ctor + 2).parse::<usize>().ok())
+            (ctor + 3, Some(t(ctor + 2).to_string()))
         } else {
             continue;
         };
@@ -386,8 +482,10 @@ pub(super) fn size_arrays(toks: &[Tok]) -> Option<String> {
                 empty = false;
             }
         }
-        let len = given.unwrap_or(if empty { 0 } else { commas + 1 });
-        fills.extend(holes.into_iter().map(|h| (s[h], len)));
+        let len = given
+            .clone()
+            .unwrap_or_else(|| (if empty { 0 } else { commas + 1 }).to_string());
+        fills.extend(holes.into_iter().map(|h| (s[h], len.clone())));
         if given.is_none() {
             fills.push((s[ctor + 1], len));
         }
@@ -399,7 +497,7 @@ pub(super) fn size_arrays(toks: &[Tok]) -> Option<String> {
     for (i, tok) in toks.iter().enumerate() {
         out.push_str(tok.text);
         if let Some((_, len)) = fills.iter().find(|(at, _)| *at == i) {
-            out.push_str(&len.to_string());
+            out.push_str(len);
         }
     }
     Some(out)
@@ -425,5 +523,78 @@ mod array_tests {
         );
         assert!(out.contains("int d[4] = int[4](1, 2, 3, 4)"), "{out}");
         assert_eq!(size_arrays(&tokenize("float x[4]; void main() {}")), None);
+        let named = "const int n = 2; void main() { vec3[] c = vec3[n](vec3(0.0), vec3(1.0)); vec3[n] d = vec3[n](c[0], c[1]); }";
+        let out = size_arrays(&tokenize(named)).unwrap();
+        assert!(out.contains("vec3[n] c = vec3[n]("), "{out}");
+        assert!(out.contains("vec3[n] d = vec3[n](c[0]"), "{out}");
+    }
+}
+
+/// `m[i].x = v` → `m[i][0] = v`: naga's GLSL front end cannot assign to a
+/// one-component swizzle of an indexed matrix column ("Can't lookup field on
+/// this type"); the index form means the same for vectors too. None when
+/// the stage has none.
+pub(super) fn index_swizzle_stores(toks: &[Tok]) -> Option<String> {
+    let s: Vec<usize> = (0..toks.len())
+        .filter(|&i| toks[i].kind != Kind::Space)
+        .collect();
+    let t = |j: usize| s.get(j).map_or("", |&i| toks[i].text);
+    let component = |w: &str| {
+        ["xyzw", "rgba", "stpq"]
+            .iter()
+            .find_map(|set| set.find(w).filter(|_| w.len() == 1))
+    };
+    let mut swaps: Vec<(usize, usize, usize)> = Vec::new();
+    for j in 1..s.len() {
+        if t(j) == "."
+            && t(j - 1) == "]"
+            && matches!(t(j + 2), "=" | "+=" | "-=" | "*=" | "/=")
+            && let Some(k) = component(t(j + 1))
+        {
+            swaps.push((s[j], s[j + 1], k));
+        }
+    }
+    if swaps.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    let mut skip = None;
+    for (i, tok) in toks.iter().enumerate() {
+        if skip == Some(i) {
+            continue;
+        }
+        if let Some(&(_, field, k)) = swaps.iter().find(|(dot, _, _)| *dot == i) {
+            out.push_str(&format!("[{k}]"));
+            skip = Some(field);
+            continue;
+        }
+        if skip.is_some_and(|f| i < f) {
+            // Spaces between the dot and the field.
+            continue;
+        }
+        out.push_str(tok.text);
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod swizzle_tests {
+    use super::super::lex::tokenize;
+    use super::index_swizzle_stores;
+
+    #[test]
+    fn one_component_stores_into_indexed_columns() {
+        let src = "void main() { mat2 m; m[1].x = 1.0; m[0].g += 2.0; float a = m[1].x; m[1].xy = vec2(0.0); }";
+        let out = index_swizzle_stores(&tokenize(src)).unwrap();
+        assert!(
+            out.contains("m[1][0] = 1.0; m[0][1] += 2.0; float a = m[1].x; m[1].xy ="),
+            "{out}"
+        );
+        let rw = crate::rewrite::rewrite(
+            "varying vec2 c;\nvoid main() { mat2 m = mat2(1.0); m[1].y = c.x; gl_FragData[0] = vec4(m[1], 0.0, 1.0); }",
+            crate::Stage::Fragment,
+        )
+        .unwrap();
+        assert!(rw.body.contains("m[1][1] = c.x"), "{}", rw.body);
     }
 }

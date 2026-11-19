@@ -1128,6 +1128,7 @@ impl PackResources {
                 tables,
                 biomes,
                 light,
+                pack: None,
             }),
             assets,
             render,

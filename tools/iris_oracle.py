@@ -291,11 +291,158 @@ def mask_hud(png: Path, w: int, h: int) -> None:
     tmp.replace(png)
 
 
+def image_diff(a: Path, b: Path) -> float:
+    """Mean absolute difference per channel of two pictures of the same size (every 4th pixel)."""
+    _, _, ra = read_png_rgb(a)
+    _, _, rb = read_png_rgb(b)
+    n = min(len(ra), len(rb))
+    step = 12
+    return sum(abs(ra[i] - rb[i]) for i in range(0, n, step)) / max(n // step, 1)
+
+
+def mean_level(png: Path) -> float:
+    """Mean channel value of a picture (every 4th pixel); about 0 for a black window."""
+    _, _, raw = read_png_rgb(png)
+    return sum(raw[::12]) / max(len(raw) // 12, 1)
+
+
+def hotbar_diff(a: Path, b: Path, w: int, h: int) -> float:
+    """Mean absolute difference of two pictures over the hotbar's box (see `mask_hud`)."""
+    wa, ha, ra = read_png_rgb(a)
+    _, _, rb = read_png_rgb(b)
+    s = GUI_SCALE
+    x0, y0, bw = (w - 182 * s) // 2, h - 22 * s, 182 * s
+    total = n = 0
+    for y in range(y0, h, 2):
+        for x in range(x0, x0 + bw, 2):
+            i = (y * wa + x) * 3
+            total += abs(ra[i] - rb[i]) + abs(ra[i + 1] - rb[i + 1]) + abs(ra[i + 2] - rb[i + 2])
+            n += 3
+    return total / max(n, 1)
+
+
 def free_display() -> int:
     for n in range(91, 140):
         if not Path(f"/tmp/.X11-unix/X{n}").exists() and not Path(f"/tmp/.X{n}-lock").exists():
             return n
     raise SystemExit("no free X display")
+
+
+class XInput:
+    """Keyboard input on an X display through XTest (libXtst): opens the chat, types commands, presses F1.
+
+    The game sees ordinary key presses, so no mod or driver is needed."""
+
+    def __init__(self, display: str):
+        import ctypes
+
+        self.ct = ctypes
+        self.x = ctypes.CDLL("libX11.so.6")
+        self.xt = ctypes.CDLL("libXtst.so.6")
+        self.x.XOpenDisplay.restype = ctypes.c_void_p
+        self.x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        self.x.XStringToKeysym.restype = ctypes.c_ulong
+        self.x.XStringToKeysym.argtypes = [ctypes.c_char_p]
+        self.x.XKeysymToKeycode.restype = ctypes.c_ubyte
+        self.x.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        self.x.XKeycodeToKeysym.restype = ctypes.c_ulong
+        self.x.XKeycodeToKeysym.argtypes = [ctypes.c_void_p, ctypes.c_ubyte, ctypes.c_int]
+        self.x.XFlush.argtypes = [ctypes.c_void_p]
+        self.xt.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+        self.xt.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+        self.d = self.x.XOpenDisplay(display.encode())
+        if not self.d:
+            raise RuntimeError(f"cannot open X display {display}")
+
+    NAMES = {" ": "space", "/": "slash", "_": "underscore", ":": "colon", ".": "period", "-": "minus",
+             "@": "at", "~": "asciitilde", "=": "equal", "[": "bracketleft", "]": "bracketright"}
+
+    def _tap(self, keysym_name: str) -> None:
+        sym = self.x.XStringToKeysym(keysym_name.encode())
+        code = self.x.XKeysymToKeycode(self.d, sym)
+        if not code:
+            raise RuntimeError(f"no key for {keysym_name!r}")
+        shift = self.x.XKeycodeToKeysym(self.d, code, 0) != sym
+        shift_code = self.x.XKeysymToKeycode(self.d, self.x.XStringToKeysym(b"Shift_L"))
+        if shift:
+            self.xt.XTestFakeKeyEvent(self.d, shift_code, 1, 0)
+        self.xt.XTestFakeKeyEvent(self.d, code, 1, 0)
+        self.xt.XTestFakeKeyEvent(self.d, code, 0, 0)
+        if shift:
+            self.xt.XTestFakeKeyEvent(self.d, shift_code, 0, 0)
+        self.x.XFlush(self.d)
+        time.sleep(0.04)
+
+    def key(self, name: str) -> None:
+        self._tap(name)
+
+    def hold(self, name: str, down: bool) -> None:
+        code = self.x.XKeysymToKeycode(self.d, self.x.XStringToKeysym(name.encode()))
+        self.xt.XTestFakeKeyEvent(self.d, code, 1 if down else 0, 0)
+        self.x.XFlush(self.d)
+
+    def center_pointer(self, w: int, h: int) -> None:
+        self.xt.XTestFakeMotionEvent(self.d, -1, w // 2, h // 2, 0)
+        self.x.XFlush(self.d)
+
+    def command(self, text: str) -> None:
+        """Types `/text` in the chat and sends it ('/' opens the chat with the slash typed)."""
+        self._tap("slash")
+        time.sleep(1.5)
+        for ch in text.lstrip("/"):
+            self._tap(self.NAMES.get(ch, ch))
+        time.sleep(0.5)
+        self._tap("Return")
+        time.sleep(1.0)
+
+
+def scene_commands(scene: str, pose: dict) -> list[str]:
+    """The commands that set up one named scene; the same lines replay it in Horizon (see `pose_notes`)."""
+    x, y, z = pose["x"], pose["y"], pose["z"]
+    def tp(px, py, pz, pitch=None):
+        return f"/tp Player {px} {py} {pz} {pose['yaw']} {pose['pitch'] if pitch is None else pitch}"
+
+    if scene == "noon":
+        return ["/time set 6000", tp(x, y, z)]
+    if scene == "dusk":
+        return ["/time set 13000", tp(x, y, z)]
+    if scene == "underwater":
+        # Deepen the pool by three blocks (air only) and stand on its sand floor, eyes ~2.4 below the
+        # surface, looking level at the wall.
+        return ["/time set 6000",
+                f"/fill {x - 6} {y} {z - 14} {x + 6} {y + 2} {z - 3} minecraft:water replace minecraft:air",
+                tp(x, y - 1, z - 5, pitch=0)]
+    raise SystemExit(f"unknown scene {scene!r} (noon, dusk, underwater)")
+
+
+SCENE_SETTLE = {"noon": 8, "dusk": 10, "underwater": 25}
+
+
+def write_scene_datapack(save: Path, scenes: list[str], pose: dict) -> None:
+    """A datapack in the copied save (data pack format 121, 26.3): each time the player starts sneaking, the next scene's commands run
+    and `say oracle-scene-N` marks it in the log."""
+    dp = save / "datapacks" / "oracle"
+    fn = dp / "data" / "oracle" / "function"
+    fn.mkdir(parents=True, exist_ok=True)
+    (dp / "pack.mcmeta").write_text(json.dumps({"pack": {"description": "iris oracle scenes", "min_format": 121,
+                                                         "max_format": 121}}))
+    tags = dp / "data" / "minecraft" / "tags" / "function"
+    tags.mkdir(parents=True, exist_ok=True)
+    (tags / "tick.json").write_text(json.dumps({"values": ["oracle:tick"]}))
+    # `sneak_time` counts ticks spent sneaking; it is reset every tick, so 1 means "sneaking now".
+    # (A predicate file would do too, but a malformed registry entry stops the world from loading.)
+    (fn / "tick.mcfunction").write_text(
+        "scoreboard objectives add oracle dummy\n"
+        "scoreboard objectives add oracle_sneak minecraft.custom:minecraft.sneak_time\n"
+        "execute as @a[scores={oracle_sneak=1..}] unless score #held oracle matches 1 run function oracle:next\n"
+        "execute as @a[scores={oracle_sneak=0}] run scoreboard players set #held oracle 0\n"
+        "scoreboard players set @a oracle_sneak 0\n")
+    nxt = ["scoreboard players set #held oracle 1", "scoreboard players add #stage oracle 1"]
+    for i, scene in enumerate(scenes):
+        nxt.append(f"execute if score #stage oracle matches {i + 1} run function oracle:scene_{i + 1}")
+        body = [c.lstrip("/") for c in scene_commands(scene, pose)] + [f"say oracle-scene-{i + 1}"]
+        (fn / f"scene_{i + 1}.mcfunction").write_text("\n".join(body) + "\n")
+    (fn / "next.mcfunction").write_text("\n".join(nxt) + "\n")
 
 
 def run(args) -> int:
@@ -317,7 +464,7 @@ def run(args) -> int:
     (game_dir / "saves").mkdir()
     for jar in (HOME / "mods").glob("*.jar"):
         os.symlink(jar, game_dir / "mods" / jar.name)
-    pack_name = pack.name
+    pack_name = Path(args.pack).absolute().name  # a symlinked folder keeps its link's name
     if pack.is_dir():
         shutil.copytree(pack, game_dir / "shaderpacks" / pack_name)
     else:
@@ -328,6 +475,9 @@ def run(args) -> int:
     (game_dir / "config" / "iris.properties").write_text("".join(f"{k}={v}\n" for k, v in iris_props.items()))
     write_options(game_dir, args.option or [])
     shutil.copytree(world, game_dir / "saves" / world.name)
+    if args.scenes:
+        pose = json.loads((world / "oracle-pose.json").read_text())
+        write_scene_datapack(game_dir / "saves" / world.name, args.scenes.split(","), pose)
 
     natives = Path(tempfile.mkdtemp(prefix="iris-natives-"))
     subst = {
@@ -398,6 +548,7 @@ def run(args) -> int:
         return r.returncode == 0 and path.exists()
 
     status = "timeout"
+    shots: list[Path] = []
     try:
         deadline = time.time() + args.timeout
         loaded_at = None
@@ -424,8 +575,75 @@ def run(args) -> int:
                 break
             time.sleep(1)
         probe.unlink(missing_ok=True)
-        if status in ("ok", "timeout") and grab(out) and args.mask_hud:
-            mask_hud(out, w, h)
+        if status == "ok" and args.scenes:
+            # Each scene's commands run from the datapack (see `write_scene_datapack`) when the player starts
+            # sneaking: hold Shift until the log shows the scene's marker. Typing in the chat is not
+            # reliable when a pack draws a frame every few seconds; a held key is.
+            xin = XInput(f":{display}")
+            xin.center_pointer(w, h)
+            for i, scene in enumerate(args.scenes.split(",")):
+                marker = f"oracle-scene-{i + 1}"
+                xin.hold("Shift_L", True)
+                t0 = time.time()
+                while marker not in log_path.read_text(errors="replace") and time.time() - t0 < args.scene_timeout:
+                    if game_proc.poll() is not None:
+                        break
+                    time.sleep(1)
+                xin.hold("Shift_L", False)
+                if marker not in log_path.read_text(errors="replace"):
+                    status = f"scene {scene} never ran (no {marker} in the log)"
+                    break
+                print(f"scene {scene} set")
+                if i == 0 and args.hide_gui:
+                    # F1 applies on the next frame, which can take seconds with a heavy pack: wait until the
+                    # hotbar area changes before trusting it.
+                    before = out.with_suffix(".before.png")
+                    after = out.with_suffix(".after.png")
+                    grab(before)
+                    xin.key("F1")
+                    t0 = time.time()
+                    hidden = False
+                    while time.time() - t0 < 120 and game_proc.poll() is None:
+                        time.sleep(3)
+                        if grab(after) and hotbar_diff(before, after, w, h) > 25:
+                            hidden = True
+                            break
+                    print("HUD hidden" if hidden else "HUD hide not seen (F1)")
+                    before.unlink(missing_ok=True)
+                    after.unlink(missing_ok=True)
+                time.sleep(SCENE_SETTLE.get(scene, 10) * args.settle)
+                path = out.with_name(f"{out.stem}-{scene}.png")
+                # A heavy pack can show the previous scene for many seconds: grab until two pictures 5 s
+                # apart agree (water and clouds still move a little), at most 150 s.
+                prev = out.with_suffix(".prev.png")
+                path.unlink(missing_ok=True)
+                t0 = time.time()
+                if grab(prev):
+                    while time.time() - t0 < 150 and game_proc.poll() is None:
+                        time.sleep(5)
+                        if not grab(path):
+                            break
+                        d = image_diff(prev, path)
+                        if d < 3.0:
+                            break
+                        path.replace(prev)
+                    prev.unlink(missing_ok=True)
+                if (path.exists() or grab(path)) and mean_level(path) < 4:
+                    # A black window (the game hung or is dying) is not a picture of the scene.
+                    path.replace(path.with_suffix(".black.png"))
+                    status = f"scene {scene} came out black"
+                    break
+                if path.exists():
+                    if args.mask_hud and not args.hide_gui:
+                        mask_hud(path, w, h)
+                    shots.append(path)
+                if game_proc.poll() is not None:
+                    status = f"exited {game_proc.returncode}"
+                    break
+        elif status in ("ok", "timeout") and grab(out):
+            if args.mask_hud:
+                mask_hud(out, w, h)
+            shots.append(out)
     finally:
         try:
             os.killpg(game_proc.pid, signal.SIGTERM)
@@ -444,10 +662,10 @@ def run(args) -> int:
             continue
         if "Using shaderpack" in line or "ERROR" in line or "Exception" in line or "compil" in line.lower():
             print(line[:300])
-    print(status, out if out.exists() else "(no screenshot)")
+    print(status, *(shots or ["(no screenshot)"]))
     if not args.keep:
         shutil.rmtree(game_dir / "saves", ignore_errors=True)
-    return 0 if status == "ok" and out.exists() else 1
+    return 0 if status == "ok" and shots else 1
 
 
 # ---------------------------------------------------------------- world
@@ -512,7 +730,7 @@ def build_world(args) -> int:
         ]
         for f in fills:
             c("command", f)
-        c("tp", str(x), str(y + 1), str(z))
+        c("tp", str(x), str(y), str(z))
         c("look", "180", "25")
         time.sleep(4)
         if args.shot:
@@ -529,7 +747,11 @@ def build_world(args) -> int:
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(save, out)
-    print("world", out)
+    (out / "session.lock").unlink(missing_ok=True)
+    # The pose `run --scenes` re-applies (and Horizon replays): feet position, yaw, pitch.
+    pose = {"x": x, "y": y, "z": z, "yaw": 180, "pitch": 25, "time": args.time}
+    (out / "oracle-pose.json").write_text(json.dumps(pose) + "\n")
+    print("world", out, pose)
     return 0
 
 
@@ -578,11 +800,69 @@ def decode(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- index
+
+# Log errors every run has (offline account, no Realms, no narrator), left out of summaries.
+LOG_NOISE = ("Failed to fetch user properties", "Realms", "narrator", "Failed to fetch", "XDG_RUNTIME_DIR",
+             "libflite", "sessionserver", "Couldn't find matching GLX", "Failed to create backend")
+
+
+def summarize_log(log: Path) -> str:
+    """One line: Iris's own errors and shader warnings in a run's log."""
+    import re
+
+    text = log.read_text(errors="replace")
+    errors: list[str] = []
+    warned: set[str] = set()
+    for line in text.splitlines():
+        m = re.search(r"Shader compilation log for (\S+?):", line)
+        if m:
+            warned.add(m[1])
+            continue
+        if re.search(r"/(ERROR|FATAL)\]", line) and not any(n in line for n in LOG_NOISE):
+            msg = re.sub(r"^\[[^]]*\] \[[^]]*\]: ", "", line).strip()
+            if msg not in errors:
+                errors.append(msg[:160])
+    parts = []
+    if "Using shaderpack" not in text:
+        parts.append("pack not loaded")
+    if "FATAL ERROR" in text or "Game crashed" in text or "crash report" in text.lower():
+        parts.append("game crashed")
+    if errors:
+        parts.append(f"{len(errors)} error(s): " + " | ".join(errors[:3]))
+    if warned:
+        parts.append(f"compile warnings in {len(warned)} program(s) ({', '.join(sorted(warned)[:4])}{', ...' if len(warned) > 4 else ''})")
+    return "; ".join(parts) or "clean"
+
+
+def index(args) -> int:
+    d = Path(args.dir)
+    rows = ["# Iris reference screenshots", "",
+            "Iris 1.11.7 + Sodium 0.9.2, Minecraft 26.3, Mesa llvmpipe, 854x480, default pack options, HUD and "
+            "hand hidden (F1). Made by `tools/iris_oracle.py run --scenes noon,dusk,underwater`.", "",
+            "| Pack | Scene | File | Iris log (errors / warnings) |", "|---|---|---|---|"]
+    for log in sorted(d.glob("*.log")):
+        pack = log.stem
+        summary = summarize_log(log).replace("|", "\\|")
+        shots = sorted(d.glob(f"{pack}-*.png"), key=lambda p: ["noon", "dusk", "underwater"].index(p.stem.rsplit("-", 1)[1])
+                       if p.stem.rsplit("-", 1)[1] in ("noon", "dusk", "underwater") else 9)
+        if not shots:
+            rows.append(f"| {pack} | - | (none) | {summary} |")
+        for shot in shots:
+            rows.append(f"| {pack} | {shot.stem.rsplit('-', 1)[1]} | `{shot.name}` | {summary} |")
+    (d / "index.md").write_text("\n".join(rows) + "\n" + (Path(args.notes).read_text() if args.notes else ""))
+    print(d / "index.md")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mcdir", default=str(MCDIR))
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("prepare")
+    ix = sub.add_parser("index", help="write index.md for a folder of run outputs")
+    ix.add_argument("--dir", required=True)
+    ix.add_argument("--notes", help="markdown appended to the index")
     de = sub.add_parser("decode", help="read the value rows a probe pack painted")
     de.add_argument("--png", required=True)
     de.add_argument("--fsh", default=str(ROOT / "tools" / "shader_probe_packs" / "macros" / "shaders" / "final.fsh"), help="the probe pack's final.fsh (its `// row` comments)")
@@ -607,11 +887,18 @@ def main() -> int:
     r.add_argument("--env", action="append", help="extra environment `K=V`")
     r.add_argument("--game-arg", action="append", help="extra game argument")
     r.add_argument("--keep", action="store_true", help="keep the copied save")
+    r.add_argument("--scenes", help="comma list of noon, dusk, underwater: typed as commands in one game, one "
+                   "picture each (OUT-<scene>.png); needs <world>/oracle-pose.json")
+    r.add_argument("--scene-timeout", type=float, default=240, help="seconds to hold Shift for one scene")
+    r.add_argument("--settle", type=float, default=1.0, help="multiply the per-scene settle times")
+    r.add_argument("--no-hide-gui", dest="hide_gui", action="store_false", help="with --scenes: do not press F1")
     r.add_argument("--no-mask-hud", dest="mask_hud", action="store_false", help="leave the hotbar and crosshair visible")
     args = ap.parse_args()
     if args.cmd == "prepare":
         prepare(args)
         return 0
+    if args.cmd == "index":
+        return index(args)
     if args.cmd == "decode":
         return decode(args)
     if args.cmd == "world":

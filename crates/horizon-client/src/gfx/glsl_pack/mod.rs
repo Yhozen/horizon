@@ -107,6 +107,7 @@ impl PackRenderer {
         screen_format: wgpu::TextureFormat,
         pack: &CompiledPack,
         files: &PackFiles,
+        resources: &dyn Fn(&str) -> Option<Vec<u8>>,
     ) -> Result<Self, String> {
         let plan = pack.plan.clone();
         for essential in [ProgramKind::Terrain, ProgramKind::Final] {
@@ -211,7 +212,7 @@ impl PackRenderer {
                 pipelines::build(device, kind, program, &state, &layouts)?,
             );
         }
-        let textures = textures::Textures::new(device, queue, &plan, files);
+        let textures = textures::Textures::new(device, queue, &plan, files, resources);
         for note in &textures.notes {
             log::warn!("shader pack texture: {note}");
         }

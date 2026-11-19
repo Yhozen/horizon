@@ -435,10 +435,10 @@ fn load(
     queue: &wgpu::Queue,
     t: &CustomTexture,
     files: &PackFiles,
+    resources: &dyn Fn(&str) -> Option<Vec<u8>>,
 ) -> Result<wgpu::TextureView, String> {
     let limits = device.limits();
-    let png = |path: &str| -> Result<wgpu::TextureView, String> {
-        let bytes = files.0.get(path).ok_or("no such file")?;
+    let png_bytes = |bytes: &[u8], path: &str| -> Result<wgpu::TextureView, String> {
         let (size, pixels) = decode_png(bytes)?;
         let max = limits.max_texture_dimension_2d;
         if size[0] > max || size[1] > max {
@@ -449,10 +449,15 @@ fn load(
         }
         Ok(rgba(device, queue, path, size, &pixels))
     };
+    let png = |path: &str| png_bytes(files.0.get(path).ok_or("no such file")?, path);
     match &t.kind {
         CustomTextureKind::Png => png(&t.path),
-        CustomTextureKind::Resource(name) => png(&resource_path(name))
-            .map_err(|_| format!("resource-pack texture {name} is not available")),
+        // Bundled in the pack, else the game's own (resource-pack) assets.
+        CustomTextureKind::Resource(name) => png(&resource_path(name)).or_else(|_| {
+            let bytes = resources(name)
+                .ok_or_else(|| format!("resource-pack texture {name} is not available"))?;
+            png_bytes(&bytes, name)
+        }),
         CustomTextureKind::Raw(raw) => {
             let bytes = files.0.get(&t.path).ok_or("no such file")?;
             let max = match raw.dim {
@@ -477,13 +482,14 @@ impl Textures {
         queue: &wgpu::Queue,
         plan: &PackPlan,
         files: &PackFiles,
+        resources: &dyn Fn(&str) -> Option<Vec<u8>>,
     ) -> Self {
         let n = plan.noise_resolution.clamp(1, 2048);
         let noise = horizon_glsl_pack::noise::noise_rgba(n);
         let mut notes = Vec::new();
         let mut custom = Vec::new();
         for t in &plan.custom_textures {
-            match load(device, queue, t, files) {
+            match load(device, queue, t, files, resources) {
                 Ok(view) => custom.push(Some(view)),
                 Err(e) => {
                     notes.push(format!(

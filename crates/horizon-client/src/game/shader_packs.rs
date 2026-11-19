@@ -774,7 +774,13 @@ impl Game<'_> {
                 compiled_ref.plan.programs.remove(&kind);
             }
         }
-        renderer.set_shader_pack(Some((&compiled_ref, files)))?;
+        // The pack's `minecraft:textures/…` textures come from the game's own assets.
+        let root = self.options.resources.clone();
+        let resources = move |name: &str| {
+            let (namespace, path) = name.split_once(':').unwrap_or(("minecraft", name));
+            std::fs::read(root.join("assets").join(namespace).join(path)).ok()
+        };
+        renderer.set_shader_pack(Some((&compiled_ref, files)), &resources)?;
         self.set_shader_pack_tags(Some(compiled));
         Ok(())
     }
@@ -782,7 +788,7 @@ impl Game<'_> {
     /// Back to Horizon's own shaders.
     fn uninstall_shader_pack(&mut self) {
         if let Some(renderer) = self.renderer.as_mut() {
-            let _ = renderer.set_shader_pack(None);
+            let _ = renderer.set_shader_pack(None, &|_| None);
         }
         if self.shader_packs.applied.take().is_some() {
             self.set_shader_pack_tags(None);
@@ -807,18 +813,35 @@ impl Game<'_> {
         }
     }
 
-    /// The mesher's per-block data for the pack (`None`: Horizon's own).
+    /// The mesher's per-block data for the pack (`None`: Horizon's own):
+    /// meshes carry the pack's `PackVertex` stream exactly while this is set,
+    /// so a change remeshes every section (as a resource reload does).
     fn set_shader_pack_tags(&mut self, compiled: Option<&Arc<CompiledPack>>) {
-        // TODO(vertex stream): swappable tags; until then they can only be set once.
-        if let Some(c) = compiled {
-            self.pack
-                .context
-                .tables
-                .set_pack_tags(horizon_client::mesher::PackTags::new(
-                    self.pack.assets.registry,
-                    &c.blocks,
-                    &c.plan,
-                ));
+        let tags = compiled.map(|c| {
+            Arc::new(horizon_client::mesher::PackTags::new(
+                self.pack.assets.registry,
+                &c.blocks,
+                &c.plan,
+            ))
+        });
+        let stream = self
+            .renderer
+            .as_ref()
+            .is_none_or(|r| r.pack_vertex_stream() == tags.is_some());
+        if stream
+            && self.pack.context.pack == tags
+            && self.streaming.context().pack == tags
+        {
+            return;
+        }
+        // New streamers and distant terrain take the pack resources' context.
+        self.pack.context = self.pack.context.with_pack(tags.clone());
+        self.clear_lod();
+        self.streaming
+            .reload_resources(&mut self.world, self.pack.context.clone());
+        self.pending_uploads.clear();
+        if let Some(renderer) = &mut self.renderer {
+            renderer.set_pack_vertex_stream(tags.is_some());
         }
     }
 

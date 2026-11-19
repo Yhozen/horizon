@@ -183,7 +183,8 @@ pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
     // Token passes that need new text: each yields the stage again, tokenized anew.
     let scoped = scope::rename_shadowing(&toks)?;
     let sized = fixes::size_arrays(&tokenize(&scoped)).unwrap_or(scoped);
-    let fixed = fixes::apply(&tokenize(&sized))?;
+    let stores = fixes::index_swizzle_stores(&tokenize(&sized)).unwrap_or(sized);
+    let fixed = fixes::apply(&tokenize(&stores))?;
     let (polyfilled, polyfills) =
         polyfill(&fixed).map_or((None, BTreeSet::new()), |(t, p)| (Some(t), p));
     let toks = tokenize(polyfilled.as_deref().unwrap_or(&fixed));
@@ -214,6 +215,14 @@ pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
         prelude: polyfills,
     };
     let mut body = String::new();
+    // Samplers first: a function cloned per sampler (mono.rs) may sit above
+    // the sampler's own declaration.
+    for (start, end) in top_level_items(&cx.toks)? {
+        let sig: Vec<usize> = (start..end)
+            .filter(|&i| cx.toks[i].kind != Kind::Space)
+            .collect();
+        cx.sampler_declaration(&sig);
+    }
     for (start, end) in top_level_items(&cx.toks)? {
         let sig: Vec<usize> = (start..end)
             .filter(|&i| cx.toks[i].kind != Kind::Space)

@@ -4,17 +4,36 @@ use super::*;
 
 pub(super) const FOG_STRUCT: &str =
     "struct hz_FogParameters { vec4 color; float density; float start; float end; float scale; };";
+/// Horizon's `TerrainVertex` (slot 0), the section origin and UV scale
+/// (slot 1, per instance) and the `PackVertex` stream (slot 2): the
+/// quad's mean UV, `(block id, cell)` and the true normal with the block's
+/// light emission in `w` (client `mesher.rs`).
 pub(super) const TERRAIN_INPUTS: &str = "layout(location = 0) in vec3 hz_in_position;
 layout(location = 1) in uvec2 hz_in_uv;
 layout(location = 2) in uint hz_in_layer;
 layout(location = 3) in vec4 hz_in_color;
 layout(location = 4) in uvec2 hz_in_light;
 layout(location = 5) in vec4 hz_in_origin;
+layout(location = 6) in uvec2 hz_in_mid_uv;
+layout(location = 7) in uvec2 hz_in_block;
+layout(location = 8) in vec4 hz_in_normal;
 ";
-/// `NormalCode` → normal; 6 (not axis-aligned) reads as a diagonal, 7 (untagged) as up.
-pub(super) const NORMALS: &str = "const vec3 hz_normals[8] = vec3[](vec3(0.0, -1.0, 0.0), vec3(0.0, 1.0, 0.0), \
-vec3(0.0, 0.0, -1.0), vec3(0.0, 0.0, 1.0), vec3(-1.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(0.70710677, 0.0, 0.70710677), \
-vec3(0.0, 1.0, 0.0));";
+/// `gl_Normal` on terrain: the vertex's true normal (up if it has none).
+pub(super) const TERRAIN_NORMAL: &str = "dot(hz_in_normal.xyz, hz_in_normal.xyz) > 0.01 ? normalize(hz_in_normal.xyz) : vec3(0.0, 1.0, 0.0)";
+/// `PackVertex::cell` flags: a fluid surface, no block cell (distant tiles).
+pub(super) const CELL_FLUID: u32 = 1 << 12;
+pub(super) const CELL_NONE: u32 = 1 << 13;
+/// `PackVertex::block` of a block without an id.
+pub(super) const BLOCK_UNLISTED: u32 = 0xFFFF;
+/// `at_tangent` on terrain, from the normal `n` (vanilla's face UVs: `u` runs
+/// along +x on up and down faces and on south faces, -x on north, +z on
+/// west and -z on east, so the tangent is `(n.z, 0, -n.x)` across vertical
+/// faces and +x, projected onto the face, across horizontal ones), `w` 1.
+pub(super) const TERRAIN_TANGENT: &str = "vec4 hz_terrain_tangent(vec3 n) {
+    vec3 t = abs(n.y) > 0.70710677 ? vec3(1.0, 0.0, 0.0) - n * n.x : vec3(n.z, 0.0, -n.x);
+    return vec4(normalize(t), 1.0);
+}
+";
 /// GL's clip space from wgpu's: y flipped, reversed 0..1 depth to -1..1 (the matrix `M`).
 pub(super) const TO_GL: &str =
     "vec4 hz_to_gl(vec4 c) { return vec4(c.x, -c.y, c.w - 2.0 * c.z, c.w); }";
@@ -142,7 +161,7 @@ pub(super) fn builtin(
         "hz_gl_Normal" => (
             "vec3",
             vertex_only(pick(
-                "hz_normals[int(hz_tag >> 5u)]",
+                TERRAIN_NORMAL,
                 // Unlit geometry (particles, the sky) may carry no normal: up.
                 "dot(hz_in_normal.xyz, hz_in_normal.xyz) > 0.01 ? normalize(hz_in_normal.xyz) : vec3(0.0, 1.0, 0.0)",
                 "vec3(0.0, 0.0, 1.0)",
