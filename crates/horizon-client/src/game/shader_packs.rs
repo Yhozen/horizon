@@ -538,11 +538,6 @@ impl ShaderPacks {
 
     /// What should be compiled for `dim`, if anything.
     pub fn target(&mut self, dim: Dim) -> Option<Target> {
-        // Packs draw no Nether terrain yet (docs/shader-packs.md, Limits): the
-        // Nether stays Horizon's own until that is found.
-        if dim == Dim::Nether && std::env::var("HORIZON_SHADER_PACK_NETHER").is_err() {
-            return None;
-        }
         let pack = self.chosen()?;
         let mut values = match (&self.active_values, &self.cli) {
             (Some(v), None) => v.clone(),
