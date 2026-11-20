@@ -6,7 +6,13 @@ use wasm_bindgen::prelude::*;
 
 /// Panics and the log go to the browser console.
 pub fn install_hooks() {
-    console_error_panic_hook::set_once();
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    HOOK.call_once(|| {
+        std::panic::set_hook(Box::new(|info| {
+            console_error_panic_hook::hook(info);
+            horizon_client::gfx::web_gpu::report_error(&format!("Horizon stopped: {info}"));
+        }));
+    });
     if log::set_logger(&CONSOLE).is_ok() {
         log::set_max_level(log::LevelFilter::Info);
     }

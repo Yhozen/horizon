@@ -79,6 +79,8 @@ mod stars;
 mod timing;
 pub mod translucency;
 pub(crate) mod upload;
+#[cfg(target_arch = "wasm32")]
+pub mod web_gpu;
 mod world_post;
 
 /// A column whose every section has its mesh (`Renderer::lod_detail_columns`).
@@ -951,6 +953,10 @@ pub async fn open_web_gpu(shader_pack_requested: bool) -> Result<()> {
         })
         .await
         .map_err(|e| format!("no WebGPU device: {e}"))?;
+    web_gpu::monitor_device(&device)
+        .map_err(|e| format!("could not register WebGPU error listener: {e:?}"))?;
+    upload::probe_shared_staging(&device, &queue).await;
+    web_gpu::begin_startup(&device);
     WEB_LAYERS.store(
         device.limits().max_texture_array_layers,
         std::sync::atomic::Ordering::Relaxed,
@@ -1263,10 +1269,11 @@ impl Renderer {
         if sprite_arrays > 1 {
             log::info!("Horizon: {layers} block textures in {sprite_arrays} arrays");
         }
+        let tile_grid = ("SPRITE_GRID", f64::from(grid));
         let sprite_constants = [
+            tile_grid,
             ("SPRITE_ARRAYS", f64::from(sprite_arrays)),
             ("SPRITE_SPLIT", f64::from(split)),
-            ("SPRITE_GRID", f64::from(grid)),
         ];
         let bindings = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Horizon terrain bindings"),
@@ -1365,9 +1372,13 @@ impl Renderer {
                 vertex: wgpu::VertexState {
                     module: &shader,
                     entry_point: Some(vertex),
-                    // terrain_vertex works out the sprite's tile (sprite_tile).
+                    // Older WebKit rejects overrides unused by this entry point
+                    // (WebKit bug 317110). Only terrain vertices call sprite_tile.
                     compilation_options: wgpu::PipelineCompilationOptions {
-                        constants: &sprite_constants,
+                        constants: match vertex {
+                            "vs_terrain" | "vs_terrain_flat" => std::slice::from_ref(&tile_grid),
+                            _ => &[],
+                        },
                         ..Default::default()
                     },
                     buffers,
@@ -1393,7 +1404,10 @@ impl Renderer {
                     module: &shader,
                     entry_point: Some(fragment),
                     compilation_options: wgpu::PipelineCompilationOptions {
-                        constants: &sprite_constants,
+                        constants: match fragment {
+                            "fs_solid" | "fs_translucent" => &sprite_constants,
+                            _ => &[],
+                        },
                         ..Default::default()
                     },
                     targets: &[Some(wgpu::ColorTargetState {
@@ -2329,17 +2343,13 @@ impl Renderer {
                 ("BLUR", on(crate::screen_effects::SAMPLE_BLUR)),
                 ("CLAMP", on(crate::screen_effects::SAMPLE_CLAMP)),
             ];
-            let compilation_options = wgpu::PipelineCompilationOptions {
-                constants: &constants,
-                ..Default::default()
-            };
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("Screen effects"),
                 layout: Some(&entity_layout),
                 vertex: wgpu::VertexState {
                     module: &screen_shader,
                     entry_point: Some("vs_screen"),
-                    compilation_options: compilation_options.clone(),
+                    compilation_options: Default::default(),
                     buffers: &screen_vertex,
                 },
                 primitive: wgpu::PrimitiveState {
@@ -2351,7 +2361,10 @@ impl Renderer {
                 fragment: Some(wgpu::FragmentState {
                     module: &screen_shader,
                     entry_point: Some(entry),
-                    compilation_options,
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &constants,
+                        ..Default::default()
+                    },
                     targets: &[Some(wgpu::ColorTargetState {
                         format: config.format.remove_srgb_suffix(),
                         blend: Some(blend),
@@ -4584,6 +4597,10 @@ impl Renderer {
         self.visible = visible;
         self.shadow_visible = shadow_visible;
         self.visible_lods = visible_lods;
+        #[cfg(target_arch = "wasm32")]
+        if first_frame {
+            web_gpu::first_frame_submitted();
+        }
         Ok(true)
     }
 }
