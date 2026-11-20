@@ -144,7 +144,7 @@ jobs:
               site = Path(build, "web/.build-open/static").resolve()
               args = (
                   "--world Bench --creative --test-terrain --render-distance 4 --in-frame "
-                  "--name Bench --seed 0 --spawn-radius 0 --look 30,15 "
+                  "--name Bench --seed 0 --weather clear --spawn-radius 0 --look 30,15 "
                   f"--time {ticks} --world-frames 18446744073709551615 --timeout-seconds 1000000000"
               )
               path = logs / f"{scene}-{attempt}-{build}.log"

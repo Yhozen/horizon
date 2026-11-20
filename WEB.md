@@ -377,9 +377,9 @@ scene that repeats exactly, fix the spawn, view and time:
 --world-frames 18446744073709551615 --timeout-seconds 1000000000
 ```
 
-The PR benchmark uses Open Creative (`pnpm build:open`, `pnpm bench --site open`), which has no
-weather: omit `--weather clear` for it. CI builds the PR and its base separately and measures both
-with the same Chromium build and SwiftShader settings.
+The PR benchmark uses Open Creative (`pnpm build:open`, `pnpm bench --site open`). CI builds the PR
+and its base separately and measures both with clear weather and the same Chromium build and
+SwiftShader settings.
 
 ### Boat benchmark runners
 
@@ -400,8 +400,8 @@ Before updating the workflow, start a clean `boat new --no-env --type large --fr
 sandbox and smoke-test `pnpm build:open` and `pnpm bench --site open` with the saved tools:
 prepend `/opt/horizon-ci/bin` to `PATH`, set `RUSTUP_TOOLCHAIN` from `/opt/horizon-ci/rust-version`,
 and set `PLAYWRIGHT_BROWSERS_PATH=/opt/horizon-ci/browsers`. From `web/`, use
-`CHROME_PATH` set to Playwright's `chromium.executablePath()` and the scene above without the
-weather flag. Delete the test sandbox afterward.
+`CHROME_PATH` set to Playwright's `chromium.executablePath()` and the scene above. Delete the test
+sandbox afterward.
 Compare setup and total times of passing CI runs on the same revisions before and after the change.
 Set the GitHub Actions repository variable `HORIZON_BOAT_RUNNER` to `boat-large` to roll back or
 use an account without the snapshot. This does not change the `verify` or parity runners.
