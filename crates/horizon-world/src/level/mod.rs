@@ -424,6 +424,13 @@ pub trait LevelAccess {
     fn biome_name(&self, _pos: BlockPos) -> Option<&str> {
         None
     }
+    /// Climate from the level's biome definitions when it has no worldgen registry.
+    fn biome_temperature(
+        &self,
+        _pos: BlockPos,
+    ) -> Option<crate::worldgen::biome_temperature::BiomeTemperatureSettings> {
+        None
+    }
     /// World seed (`WorldGenLevel.getSeed`) for seed-derived feature noise.
     fn world_seed(&self) -> i64 {
         0

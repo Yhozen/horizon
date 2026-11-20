@@ -983,7 +983,7 @@ impl Game<'_> {
     }
     fn set_registries(&mut self, registries: Arc<Dynamic>) {
         // The server's biomes these resources lack keep their own ids, so
-        // their sky and fog are the server's (the open bundle has plains only).
+        // their colours and weather come from the server (Open has plains only).
         let (biomes, missing) = registries
             .registries
             .get("minecraft:worldgen/biome")

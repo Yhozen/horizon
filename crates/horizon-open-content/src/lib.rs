@@ -177,11 +177,11 @@ pub fn build(inputs: &Inputs) -> Result<Bundle> {
             "features": {
                 "available": [
                     "creative", "survival", "single_player", "multiplayer", "overworld",
-                    "first_person", "third_person", "crafting", "tools", "food"
+                    "first_person", "third_person", "crafting", "tools", "food", "weather"
                 ],
                 "unavailable": [
                     "nether", "end", "mobs", "sound", "saving_in_browser", "structures",
-                    "weather", "smelting", "random_ticks"
+                    "smelting", "random_ticks"
                 ],
             },
             "starter_hotbar": [

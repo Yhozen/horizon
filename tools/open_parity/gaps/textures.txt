@@ -648,8 +648,6 @@ entity/zombie/drowned_outer_layer.png
 entity/zombie/drowned_outer_layer_baby.png
 environment/celestial/end_flash.png
 environment/end_sky.png
-environment/rain.png
-environment/snow.png
 font/accented.png
 font/ascii.png
 font/ascii_sga.png

@@ -758,7 +758,7 @@ pub fn environment(bundle: &mut Bundle) -> Result<()> {
         &json!({
             "temperature": 0.8,
             "downfall": 0.4,
-            "has_precipitation": false,
+            "has_precipitation": true,
             "effects": {
                 "dry_foliage_color": 0xFFFFFF,
                 "water_color": 0xFFFFFF,
