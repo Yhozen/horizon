@@ -1018,7 +1018,8 @@ mod tests {
         assert!(on_server.find("give").is_none());
         // Open's own worlds keep the commands the edition runs.
         let open = pick_tree(None, true, || own);
-        assert!(open.find("weather").is_none());
+        assert!(open.find("weather").is_some());
+        assert!(open.find("execute").is_none());
         assert!(open.find("give").is_some());
         // The Minecraft-backed game is unchanged.
         assert!(pick_tree(None, false, || own).find("weather").is_some());

@@ -9,7 +9,13 @@ use serde_json::{Map, Value, json};
 const GENERATOR: &str = "network";
 
 /// Entities an open world can hold beside the mobs (`crate::mobs`).
-pub const ENTITY_TYPES: &[&str] = &["player", "item", "experience_orb", "falling_block"];
+pub const ENTITY_TYPES: &[&str] = &[
+    "player",
+    "item",
+    "experience_orb",
+    "falling_block",
+    "lightning_bolt",
+];
 
 /// A name with its namespace (`minecraft:` when it has none).
 pub fn full(name: &str) -> String {

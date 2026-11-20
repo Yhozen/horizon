@@ -558,6 +558,7 @@ struct GameLevel<'w> {
     /// The other entities that keep blocks from being placed into them.
     blockers: Blockers<'w>,
     biomes: &'w Biomes,
+    open_content: bool,
     seed: i64,
     behaviours: &'w Behaviours,
     items: &'w Items,
@@ -712,6 +713,16 @@ impl LevelAccess for GameLevel<'_> {
     fn biome_name(&self, pos: BlockPos) -> Option<&str> {
         let chunk = self.world.chunks.get(&(pos.x >> 4, pos.z >> 4))?;
         Some(&self.biomes.get(chunk.biome(pos.x, pos.y, pos.z)).name)
+    }
+    fn biome_temperature(
+        &self,
+        pos: BlockPos,
+    ) -> Option<horizon_world::worldgen::biome_temperature::BiomeTemperatureSettings> {
+        if !self.open_content {
+            return None;
+        }
+        let chunk = self.world.chunks.get(&(pos.x >> 4, pos.z >> 4))?;
+        Some(self.biomes.get(chunk.biome(pos.x, pos.y, pos.z)).climate())
     }
     fn world_seed(&self) -> i64 {
         self.seed
@@ -2442,6 +2453,7 @@ impl Game<'_> {
             guest_boxes,
             player_collision,
             biomes: self.res.biomes(),
+            open_content: self.options.profile.is_open(),
             seed: self.level.seed,
             behaviours: self.res.behaviours(),
             items: self.res.items(),
@@ -9302,21 +9314,6 @@ impl Game<'_> {
             }
         }
     }
-    /// Whether precipitation at a column is snow (Biome.coldEnoughToSnow:
-    /// base temperature lowered above y 80) or none (no precipitation).
-    fn precipitation(&self, x: i32, y: i32, z: i32) -> Option<bool> {
-        let chunk = self.world.chunks.get(&(x >> 4, z >> 4))?;
-        let b = self.res.biomes().get(chunk.biome(x, y, z));
-        if !b.precipitation {
-            return None;
-        }
-        let t = if y > 80 {
-            b.temperature - (y - 80) as f32 * 0.05 / 40.0
-        } else {
-            b.temperature
-        };
-        Some(t < 0.15)
-    }
     /// `getHeight(Heightmap.Types.MOTION_BLOCKING, x, z)`: one above the
     /// highest block in `blocks_motion_in_heightmap` or holding a fluid.
     fn rain_height(&self, x: i32, z: i32) -> i32 {
@@ -9327,6 +9324,7 @@ impl Game<'_> {
         })
     }
     fn tick_weather_effects(&mut self) {
+        use horizon_world::worldgen::biome_temperature::Precipitation;
         if self.flash > 0 {
             self.flash -= 1;
         }
@@ -9343,7 +9341,8 @@ impl Game<'_> {
             );
             let (x, z) = (eye[0].floor() as i32 + dx, eye[2].floor() as i32 + dz);
             let top = self.rain_height(x, z);
-            if self.precipitation(x, top, z) == Some(false)
+            if render_tick::precipitation_at(&self.world, self.res.biomes(), &[], x, top, z)
+                == Precipitation::Rain
                 && (top - eye[1] as i32).abs() < 10
                 && self.world.random.next_int_bound(5).unwrap_or(1) == 0
             {
@@ -9369,6 +9368,7 @@ impl Game<'_> {
         alpha: f64,
     ) -> Vec<horizon_client::weather::Vertex> {
         use horizon_client::weather;
+        use horizon_world::worldgen::biome_temperature::Precipitation;
         let (intensity, _) = self.world.weather.levels(alpha as f32);
         if intensity <= 0.0 {
             return Vec::new();
@@ -9388,6 +9388,8 @@ impl Game<'_> {
         // The 32x32 direction table supports at most a 15-block radius.
         let radius = self.settings.weather_radius.clamp(0, 15);
         let eye = camera.to_array();
+        let biomes = self.res.biomes();
+        let server_biomes = self.remote.as_ref().map_or(&[][..], |r| &r.server_biomes);
         let mut rain = Vec::new();
         let mut snow_vertices = Vec::new();
         // Saturation keeps extreme camera coordinates from overflowing the loop.
@@ -9399,8 +9401,17 @@ impl Game<'_> {
                 if y1 == y0 {
                     continue;
                 }
-                let Some(snow) = self.precipitation(x, cy, z) else {
-                    continue;
+                let snow = match render_tick::precipitation_at(
+                    &self.world,
+                    biomes,
+                    server_biomes,
+                    x,
+                    cy,
+                    z,
+                ) {
+                    Precipitation::None => continue,
+                    Precipitation::Rain => false,
+                    Precipitation::Snow => true,
                 };
                 let parameters = self.weather_parameters.get(x, z);
                 let light = self.world.light(x, top.max(cy), z);

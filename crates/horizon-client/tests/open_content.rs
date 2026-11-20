@@ -81,6 +81,7 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
     let _ = behaviours;
     let biomes = Biomes::load(&root).unwrap();
     assert_eq!(biomes.list.len(), 1);
+    assert!(biomes.get(0).precipitation);
     Environment::load(&root).unwrap();
     LightTables::load(&root, assets.registry, &facts).unwrap();
     collisions::load(&root, assets.registry).unwrap();
@@ -161,6 +162,9 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
         "gui/recipe_book",
         "item/stick",
         "item/wooden_pickaxe",
+        "environment/rain",
+        "environment/snow",
+        "particle/open_rain",
     ] {
         assert!(
             atlas.sprites.contains_key(sprite),
