@@ -377,6 +377,40 @@ scene that repeats exactly, fix the spawn, view and time:
 --world-frames 18446744073709551615 --timeout-seconds 1000000000
 ```
 
+The PR benchmark builds Open Creative in separate Cargo target directories for the PR and its base.
+On repeat runs with the same base commit and toolchain, CI can reuse the packaged base site and skip
+its checkout and compilation. It still measures both builds on the same runner; FPS is never cached.
+Both run with clear weather and the same Chromium and SwiftShader settings. `--strict` rejects game
+stops, uncaught page errors and unsettled samples. CI uses `--expect-chunks 81`, which also enables
+strict checks, so both builds must load this scene's 81 chunks at render distance 4 before FPS counts.
+
+### Boat benchmark runners
+
+The benchmark uses `boat-large/from=horizon-ci-v1`. To rebuild the runner, authenticate the Boat CLI
+in the same paid account or organization as the GitHub CI installation, then run from a trusted commit
+with a new versioned name:
+
+```sh
+tools/ci/boat/create-snapshot.sh horizon-ci-v2 HEAD
+```
+
+The script sends only the provisioning recipe and dependency manifests to a temporary `--no-env`
+sandbox. It waits for the snapshot to be ready and deletes the builder. Do not put credentials,
+source builds, or Minecraft data in the snapshot. CI still installs from the checked-out lockfiles
+and downloads Chromium or `wasm-bindgen` if the needed version isn't already present.
+
+Before updating the workflow, start a clean `boat new --no-env --type large --from horizon-ci-v2`
+sandbox and smoke-test `pnpm build:open` and `pnpm bench --site open` with the saved tools:
+prepend `/opt/horizon-ci/bin` to `PATH`, set `RUSTUP_TOOLCHAIN` from `/opt/horizon-ci/rust-version`,
+and set `PLAYWRIGHT_BROWSERS_PATH=/opt/horizon-ci/browsers`. From `web/`, use
+`CHROME_PATH` set to Playwright's `chromium.executablePath()` and the scene above. Delete the test
+sandbox afterward.
+Compare setup and total times of passing CI runs on the same revisions before and after the change.
+Set the GitHub Actions repository variable `HORIZON_BOAT_RUNNER` to `boat-large` to roll back or
+use an account without the snapshot. This does not change the `verify` or parity runners.
+
+### Previous measurements
+
 What limited the frame rate, measured on a 4-vCPU VM with SwiftShader (frames a second over 30 s,
 the original build and this one run alternately):
 
