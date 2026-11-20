@@ -146,6 +146,15 @@ h1 { margin: 0; font-size: clamp(40px, 6vw, 72px); line-height: 1; letter-spacin
   h1 { font-size: 48px; }
 }
 
+.touch-controls { display: none; }
+@media (pointer: coarse) {
+  .touch-controls { display: block; margin: 0; font-size: 14px; color: var(--ink-soft); }
+  .hint-toast { display: none; }
+  .menu { overflow-y: auto; }
+  .content { position: relative; inset: auto; margin: 0 auto; min-height: 100%;
+    padding: 76px 0 24px; justify-content: flex-end; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rise { animation: fade 200ms ease forwards; transform: none; }
   .sheet, .sheet.open { transform: none; transition: opacity 200ms ease, visibility 0s linear 200ms; opacity: 0; }

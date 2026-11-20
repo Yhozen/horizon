@@ -189,6 +189,11 @@ jobs:
                           failed = True
           raise SystemExit(int(failed))
           PY
+      - name: Exercise WebGPU startup and staging fallback
+        working-directory: pr/web
+        env:
+          HORIZON_OPEN_SITE: .build-open/static
+        run: node --test tests/webgpu.test.mjs
       - name: Upload benchmark logs
         if: ${{ !cancelled() && steps.measure.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
