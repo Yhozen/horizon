@@ -3,20 +3,21 @@
 // game's two-second status lines. --shaderpack serves a local zip to the page as ?shaderpack=.
 //   node scripts/bench.mjs [--site open] [--args="GAME ARGS"] [--shaderpack pack.zip] [--seconds 60]
 //     [--tail 15] [--shot frame.png] [--profile main.cpuprofile] [--trace trace.json]
-//     [--release other/release.json] [--gpu] [--verbose] [--strict]
+//     [--release other/release.json] [--gpu] [--verbose] [--strict] [--expect-chunks N]
 // Without --gpu, WebGPU runs on SwiftShader (a machine without a GPU).
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
+import { watchFrameRate } from "./bench-frames.mjs";
 
 const { values } = parseArgs({ options: {
   args: { type: "string" }, seconds: { type: "string", default: "60" }, tail: { type: "string", default: "15" },
   shot: { type: "string" }, profile: { type: "string" }, trace: { type: "string" }, release: { type: "string" },
   site: { type: "string", default: "horizon" }, shaderpack: { type: "string" },
   gpu: { type: "boolean", default: false }, verbose: { type: "boolean", default: false },
-  strict: { type: "boolean", default: false },
+  strict: { type: "boolean", default: false }, "expect-chunks": { type: "string" },
 } });
 const seconds = Number(values.seconds), tail = Number(values.tail);
 const web = fileURLToPath(new URL("..", import.meta.url));
@@ -76,17 +77,9 @@ try {
     const body = await readFile(values.shaderpack);
     await page.route(`${origin}/bench-shaderpack.zip`, (route) => route.fulfill({ contentType: "application/zip", body }));
   }
-  const samples = [], t0 = Date.now();
-  page.on("console", (message) => {
-    const text = message.text(), s = (Date.now() - t0) / 1000;
-    const status = text.match(/Horizon web: frame (\d+).*?chunks (\d+)/);
-    if (status) {
-      const settled = text.match(/screen Playing title false paused false .*?chunks ([1-9]\d*) generated (\d+) meshed ([1-9]\d*) loading false entry false player Some/);
-      samples.push({ s, frame: Number(status[1]), settled: settled?.slice(1).join("/") });
-    }
-    if (values.verbose || /error|panic|Failed/i.test(text)) console.log(`[${s.toFixed(1)}] ${text.slice(0, 300)}`);
+  const reportFrameRate = watchFrameRate(page, {
+    tail, strict: values.strict, expectedChunks: values["expect-chunks"], verbose: values.verbose,
   });
-  page.on("pageerror", (error) => console.log("pageerror", error.message));
   const query = new URLSearchParams({ name: "Bench" });
   if (values.args) query.set("args", values.args);
   if (values.shaderpack) query.set("shaderpack", `${origin}/bench-shaderpack.zip`);
@@ -121,24 +114,7 @@ try {
     const url = await page.evaluate(() => window.horizonShot());
     await writeFile(values.shot, Buffer.from(url.split(",")[1], "base64"));
   }
-  const error = await page.evaluate(() => window.horizonError ?? null);
-  if (error) console.log(`error: ${error}`);
-  const rates = samples.slice(1).map((x, i) => (x.frame - samples[i].frame) / (x.s - samples[i].s));
-  console.log(`fps per status line: ${rates.map((x) => x.toFixed(1)).join(" ")}`);
-  const last = samples.slice(-(tail + 1));
-  if (values.strict) {
-    if (error) throw new Error(error);
-    if (last.length <= 1 || last.length !== tail + 1 || !last[0].settled ||
-        last.some((sample) => sample.settled !== last[0].settled) ||
-        last.slice(1).some((sample, i) => sample.frame <= last[i].frame) ||
-        (Date.now() - t0) / 1000 - last.at(-1).s > 5) {
-      throw new Error("The game did not keep rendering a settled world through the measurement window");
-    }
-  }
-  if (last.length > 1) {
-    const fps = (last.at(-1).frame - last[0].frame) / (last.at(-1).s - last[0].s);
-    console.log(`steady fps (last ${last.length - 1} intervals): ${fps.toFixed(2)}`);
-  }
+  reportFrameRate(await page.evaluate(() => window.horizonError ?? null));
 } finally {
   await browser.close();
   server.kill();

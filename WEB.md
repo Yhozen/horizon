@@ -377,9 +377,12 @@ scene that repeats exactly, fix the spawn, view and time:
 --world-frames 18446744073709551615 --timeout-seconds 1000000000
 ```
 
-The PR benchmark uses Open Creative (`pnpm build:open`, `pnpm bench --site open`). CI builds the PR
-and its base separately and measures both with clear weather and the same Chromium build and
-SwiftShader settings.
+The PR benchmark builds Open Creative in separate Cargo target directories for the PR and its base.
+On repeat runs with the same base commit and toolchain, CI can reuse the packaged base site and skip
+its checkout and compilation. It still measures both builds on the same runner; FPS is never cached.
+Both run with clear weather and the same Chromium and SwiftShader settings. `--strict` rejects game
+stops, uncaught page errors and unsettled samples. CI uses `--expect-chunks 81`, which also enables
+strict checks, so both builds must load this scene's 81 chunks at render distance 4 before FPS counts.
 
 ### Boat benchmark runners
 

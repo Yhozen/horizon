@@ -13,6 +13,7 @@ on:
       - 'tools/ci/boat/**'
       - 'tools/web/**'
       - 'web/**'
+      - 'website/public/fonts/Geist-*.woff2'
 
 permissions:
   contents: read
@@ -38,12 +39,6 @@ jobs:
         with:
           path: pr
           persist-credentials: false
-      - name: Check out the PR base commit
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: base
-          persist-credentials: false
       - name: Use the snapshot toolchain
         id: snapshot
         run: |
@@ -68,6 +63,8 @@ jobs:
         if: steps.snapshot.outputs.available != 'true'
         with:
           package_json_file: pr/web/package.json
+      - name: Test frame sample validation
+        run: node --test pr/web/tests/bench-frames.test.mjs
       - name: Identify the build toolchain
         id: tools
         run: |
@@ -78,13 +75,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: pr -> target
-          shared-key: web-benchmark
+          shared-key: web-benchmark-isolated
       - name: Restore the built base site
         id: base-cache
         uses: actions/cache/restore@v4
         with:
           path: base/web/.build-open/static
-          key: web-bench-base-v2-${{ runner.arch }}-${{ steps.tools.outputs.key }}-${{ github.event.pull_request.base.sha }}
+          key: web-bench-base-v3-${{ runner.arch }}-${{ steps.tools.outputs.key }}-${{ github.event.pull_request.base.sha }}
+      - name: Check out the PR base commit on a cache miss
+        if: steps.base-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
       - name: Set up web dependencies and Chromium
         working-directory: pr/web
         run: |
@@ -103,12 +107,9 @@ jobs:
         env:
           BASE_CACHE_HIT: ${{ steps.base-cache.outputs.cache-hit }}
         run: |
-          # Both build scripts read their checkout's target/ directly.
-          mkdir -p "$GITHUB_WORKSPACE/pr/target"
-          ln -s "$GITHUB_WORKSPACE/pr/target" base/target
-
           build_open() (
             cd "$1"
+            export CARGO_TARGET_DIR="$PWD/target"
             bindgen_dir=$(bash ../pr/tools/web/wasm-bindgen-dir.sh Cargo.lock "$RUNNER_TEMP/wasm-bindgen")
             export PATH="$bindgen_dir:$PATH"
             pnpm --dir web build:open
@@ -119,6 +120,12 @@ jobs:
             pnpm --dir base/web install --frozen-lockfile
             build_open base
           fi
+      - name: Cache the built base site for the next PR update
+        if: steps.base-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: base/web/.build-open/static
+          key: ${{ steps.base-cache.outputs.cache-primary-key }}
       - name: Compare fixed dawn and noon scenes on SwiftShader
         id: measure
         env:
@@ -151,7 +158,8 @@ jobs:
               with path.open("w") as log:
                   result = subprocess.run(
                       ["timeout", "--kill-after=5s", "65s", "pnpm", "bench", "--site", "open",
-                       "--seconds", "20", "--tail", "4", "--strict", "--verbose", f"--args={args}"],
+                       "--seconds", "20", "--tail", "4", "--expect-chunks", "81",
+                       "--verbose", f"--args={args}"],
                       cwd="pr/web", env={**os.environ, "HORIZON_OPEN_SITE": str(site)},
                       stdout=log, stderr=subprocess.STDOUT, check=False,
                   )
@@ -188,9 +196,3 @@ jobs:
           name: web-benchmark-logs
           path: benchmark-logs/
           retention-days: 7
-      - name: Cache the built base site for the next PR update
-        if: ${{ !cancelled() && steps.measure.outcome != 'skipped' && steps.base-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: base/web/.build-open/static
-          key: ${{ steps.base-cache.outputs.cache-primary-key }}
