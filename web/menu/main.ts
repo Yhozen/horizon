@@ -11,6 +11,7 @@ import { defineTaggedUnion } from "foldkit/schema";
 import { modifyFields } from "foldkit/struct";
 import { EDITIONS, EditionId, NAME, WorldId, type Edition, type World } from "./edition.ts";
 import { boot, STEPS, type Progress } from "./game.ts";
+import { padEvents, type PadEvent } from "./pad.ts";
 
 // MODEL
 
@@ -23,6 +24,7 @@ export const Phase = defineTaggedUnion({
 export type Phase = typeof Phase.Type;
 
 const Choice = Schema.Literals(["diagnostics", "recording"]);
+const Pad = Schema.Struct({ name: Schema.String, confirm: Schema.String, back: Schema.String });
 const CreditLine = Schema.Struct({ text: Schema.String, href: Schema.String });
 type CreditLine = typeof CreditLine.Type;
 
@@ -35,6 +37,8 @@ export const Model = Schema.Struct({
   checkedWorlds: Schema.Boolean,
   sheet: Schema.Boolean,
   fullscreen: Schema.Boolean,
+  /** The controller the page sees, once one of its buttons has been pressed. */
+  pad: Schema.NullOr(Pad),
   phase: Phase,
   /** The page's ?args=, for development: start at once with these game arguments. */
   custom: Schema.String,
@@ -54,6 +58,8 @@ export const Message = defineMessageUnion({
   ClickedFullscreen: {},
   ChangedFullscreen: { on: Schema.Boolean },
   SubmittedPlay: {},
+  ChangedPad: { pad: Schema.NullOr(Pad) },
+  PressedPadBack: {},
   ClickedCancel: {},
   AdvancedLoading: { step: Schema.String, index: Schema.Number },
   StartedGame: {},
@@ -230,6 +236,10 @@ export const update = (model: Model, message: Message): Return =>
       if (!nameOk(model.name) || !isAvailable(model, model.world)) return { model };
       return startLoading(model);
     },
+    ChangedPad: ({ pad }) => ({ model: modifyFields(model, { pad: () => pad }) }),
+    // ○ / B closes How to play, or cancels a download that hasn't started the game.
+    PressedPadBack: () => model.sheet ? { model: modifyFields(model, { sheet: () => false }) }
+      : Phase.guards.Loading(model.phase) ? { model: modifyFields(model, { phase: () => Phase.Menu() }) } : { model },
     ClickedCancel: () => ({ model: modifyFields(model, { phase: () => Phase.Menu() }) }),
     AdvancedLoading: ({ step, index }) => Phase.guards.Loading(model.phase)
       ? { model: modifyFields(model, { phase: () => Phase.Loading({ step, index }) }) } : { model },
@@ -263,6 +273,7 @@ export const init: Runtime.ApplicationInit<Model, Message, Flags> = (flags) => {
     checkedWorlds: false,
     sheet: false,
     fullscreen: flags.fullscreen,
+    pad: null,
     phase: Phase.Menu(),
     custom: flags.custom,
     telemetry: flags.telemetry,
@@ -285,6 +296,10 @@ const toMessage = (progress: Progress): Message => {
   }
 };
 
+const padMessage = (event: PadEvent): Message => event._tag === "Changed"
+  ? Message.ChangedPad({ pad: event.pad ?? null })
+  : event.button === "confirm" ? Message.SubmittedPlay() : Message.PressedPadBack();
+
 export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
   // The game loads while the Model says so; Cancel ends the stream before the game starts.
   game: entry(
@@ -304,6 +319,13 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
     dependenciesToStream: () => Stream.fromEventListener(document, "fullscreenchange").pipe(
       Stream.map(() => Message.ChangedFullscreen({ on: Boolean(document.fullscreenElement) }))),
   }),
+  // The menu's controller: shown while the menu is; the game reads pads itself.
+  pad: entry({ menu: Schema.Boolean }, {
+    modelToDependencies: (model) => ({ menu: !Phase.guards.Playing(model.phase) }),
+    dependenciesToStream: ({ menu }) => menu
+      ? Stream.fromAsyncIterable(padEvents(), String).pipe(Stream.map(padMessage), Stream.orElseSucceed(() => Message.CompletedSideEffect()))
+      : Stream.empty,
+  }),
   escape: entry({ sheet: Schema.Boolean }, {
     modelToDependencies: (model) => ({ sheet: model.sheet }),
     dependenciesToStream: ({ sheet }) => sheet
@@ -322,7 +344,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
   const ed = edition(model);
   return {
     title: Phase.guards.Playing(model.phase) ? ed.name : ed.title,
-    body: Phase.guards.Playing(model.phase) ? playing(h) : menu(model, h),
+    body: Phase.guards.Playing(model.phase) ? playing(model, h) : menu(model, h),
   };
 };
 
@@ -330,8 +352,11 @@ const icon = (h: HtmlBuilder<Message>, name: string) => h.span([h.Class(`icon ic
 const kbd = (h: HtmlBuilder<Message>, key: string) => h.kbd([], [key]);
 
 /** The game owns the page; a short hint fades out over it. */
-const playing = (h: HtmlBuilder<Message>): Html =>
-  h.div([h.Class("hint-toast"), h.Role("status")], [
+const playing = (model: Model, h: HtmlBuilder<Message>): Html =>
+  h.div([h.Class("hint-toast"), h.Role("status")], model.pad ? [
+    h.span([], [`${model.pad.name} is ready`]),
+    h.span([h.Class("muted")], ["Click the game to use the mouse too"]),
+  ] : [
     h.span([], ["Click the game to play"]),
     h.span([h.Class("muted")], [kbd(h, "Esc"), " frees the mouse"]),
   ]);
@@ -344,6 +369,7 @@ function menu(model: Model, h: HtmlBuilder<Message>): Html {
       [...new Set(ed.worlds.map((w) => w.art))].map((art) =>
         h.div([h.Class(`art art-${art}${art === world.art ? " shown" : ""}`)], []))),
     h.header([h.Class("bar")], [
+      ...(model.pad ? [h.span([h.Class("chip glass"), h.Role("status")], [icon(h, "gamepad"), model.pad.name])] : []),
       h.button([h.Class("btn glass"), h.Type("button"), h.AriaExpanded(model.sheet), h.AriaControls("how-to-play"),
         h.OnClick(Message.ToggledSheet())], [icon(h, "info"), "How to play"]),
       h.button([h.Class("btn glass"), h.Type("button"), h.OnClick(Message.ClickedFullscreen())],
@@ -413,6 +439,7 @@ function actions(model: Model, h: HtmlBuilder<Message>): Html {
     h.button([h.Id("play"), h.Class("btn primary big"), h.Type("submit"), h.Disabled(!ready)],
       [icon(h, "play"), world.id === "solo" ? "Play single player" : `Join ${world.title}`]),
     h.span([h.Class("note")], [Phase.guards.Failed(model.phase) ? "Press again to retry."
+      : model.pad && ready ? `Or press ${model.pad.confirm} on your controller.`
       : "The game downloads when you press Play, then stays cached."]),
   ]);
 }
@@ -437,6 +464,7 @@ function sheet(model: Model, h: HtmlBuilder<Message>, loading: boolean): Html {
       h.h3([], [icon(h, "info"), "Keyboard and mouse"]),
       h.dl([h.Class("keys")], keys.flatMap(([key, action]) => [h.dt([], [kbd(h, key)]), h.dd([], [action])])),
     ]),
+    controller(model, h),
     h.section([], [
       h.h3([], [icon(h, "globe"), "The worlds"]),
       ...ed.worlds.map((w) => h.p([], [h.strong([], [`${w.title}. `]), w.about])),
@@ -453,6 +481,21 @@ function sheet(model: Model, h: HtmlBuilder<Message>, loading: boolean): Html {
         [line.href ? h.a([h.Href(line.href), h.Target("_blank"), h.Rel("noopener")], [line.text]) : line.text]))
         : [h.p([h.Class("muted")], [model.credits === "Failed" ? "The credits couldn't load." : "Loading…"])]),
     ])] : []),
+  ]);
+}
+
+/** Connecting a controller: browsers show one to the page only after a button press. */
+function controller(model: Model, h: HtmlBuilder<Message>): Html {
+  const pad = model.pad;
+  return h.section([], [
+    h.h3([], [icon(h, "gamepad"), "Controller"]),
+    h.p([h.Class("pad-status"), h.Role("status")], pad
+      ? [h.span([h.Class("dot")], []), h.span([], [h.strong([], [pad.name]), ` is connected. ${pad.confirm} plays, ${pad.back} goes back.`])]
+      : [h.span([h.Class("dot idle")], []), h.span([], ["None yet. Connect one, then press any button on it."])]),
+    h.p([], [h.strong([], ["USB. "]), "Plug it in."]),
+    h.p([], [h.strong([], ["Bluetooth. "]), "On a PS5 controller, hold PS and Create until the light blinks; on a PS4 controller, PS and Share; on an Xbox controller, the pair button on top. Then pair it in your computer's Bluetooth settings."]),
+    h.p([], ["The layout is Bedrock's: left stick moves, right stick looks, ", kbd(h, pad?.confirm ?? "A"),
+      " jumps, the right trigger breaks, the left trigger uses. Change it in Options › Controls › Controller Settings."]),
   ]);
 }
 

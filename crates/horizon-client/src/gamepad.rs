@@ -176,6 +176,96 @@ impl PadState {
     }
 }
 
+/// The browser's Gamepad API in its "standard" mapping (w3c.github.io/gamepad, "Remapping"):
+/// what button `i` of `Gamepad.buttons` is. Button 16 (Home, the PS button) is not used.
+pub const STANDARD_BUTTONS: [Button; 16] = [
+    Button::South,
+    Button::East,
+    Button::West,
+    Button::North,
+    Button::LeftBumper,
+    Button::RightBumper,
+    Button::LeftTrigger,
+    Button::RightTrigger,
+    Button::Select,
+    Button::Start,
+    Button::LeftStick,
+    Button::RightStick,
+    Button::DPadUp,
+    Button::DPadDown,
+    Button::DPadLeft,
+    Button::DPadRight,
+];
+
+/// A browser pad in the standard mapping: its buttons as `(pressed, value)` and its axes, 0 and 1
+/// the left stick, 2 and 3 the right one, with down positive (up positive here). The triggers are
+/// analog buttons 6 and 7; one that only reports pressed counts as fully pulled.
+pub fn standard_state(buttons: &[(bool, f32)], axes: &[f32]) -> PadState {
+    let mut state = PadState::default();
+    for (&button, &(pressed, value)) in STANDARD_BUTTONS.iter().zip(buttons) {
+        let pull = if pressed && value <= 0.0 {
+            1.0
+        } else if value.is_finite() {
+            value.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        match button {
+            Button::LeftTrigger => state.triggers[0] = pull,
+            Button::RightTrigger => state.triggers[1] = pull,
+            _ => state.set(button, pressed),
+        }
+    }
+    let axis = |i: usize| {
+        axes.get(i)
+            .copied()
+            .filter(|v| v.is_finite())
+            .map_or(0.0, |v| v.clamp(-1.0, 1.0))
+    };
+    state.left = [axis(0), -axis(1)];
+    state.right = [axis(2), -axis(3)];
+    state
+}
+
+/// The USB vendor and product in a browser's `Gamepad.id`: Chrome's
+/// `DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)` or Firefox's
+/// `054c-0ce6-DualSense Wireless Controller`. Safari and XInput pads in Chrome give neither.
+pub fn browser_ids(id: &str) -> (Option<u16>, Option<u16>) {
+    let hex = |s: &str| {
+        let s = s.trim();
+        (s.len() == 4)
+            .then(|| u16::from_str_radix(s, 16).ok())
+            .flatten()
+    };
+    let after = |label: &str| {
+        id.split_once(label)
+            .and_then(|(_, rest)| hex(rest.trim_start().get(..4)?))
+    };
+    if id.contains("Vendor:") {
+        return (after("Vendor:"), after("Product:"));
+    }
+    let mut parts = id.splitn(3, '-');
+    match (parts.next().and_then(hex), parts.next().and_then(hex)) {
+        (Some(vendor), Some(product)) if parts.next().is_some() => (Some(vendor), Some(product)),
+        _ => (None, None),
+    }
+}
+
+/// A browser pad's name without the ids and mapping the browser adds to `Gamepad.id`.
+pub fn browser_name(id: &str) -> &str {
+    if let Some((name, rest)) = id.rsplit_once(" (")
+        && (rest.contains("Vendor:") || rest.contains("GAMEPAD"))
+    {
+        return name.trim();
+    }
+    if let (Some(_), Some(_)) = browser_ids(id)
+        && let Some(name) = id.splitn(3, '-').nth(2)
+    {
+        return name.trim();
+    }
+    id.trim()
+}
+
 /// Button presses and releases between successive states. Triggers count as
 /// buttons past `threshold`, with a little hysteresis so a trigger resting
 /// near the threshold doesn't chatter.
@@ -1539,5 +1629,54 @@ mod tests {
         assert_eq!(GlyphStyle::of_vendor(Some(0x054c)), GlyphStyle::PlayStation);
         assert_eq!(GlyphStyle::of_vendor(Some(0x28de)), GlyphStyle::Xbox);
         assert_eq!(GlyphStyle::of_vendor(None), GlyphStyle::Xbox);
+    }
+
+    #[test]
+    fn browser_standard_mapping() {
+        let mut buttons = vec![(false, 0.0); 17];
+        buttons[0] = (true, 1.0); // ✕ / A
+        buttons[5] = (true, 1.0); // R1 / RB
+        buttons[6] = (true, 0.25); // L2, part pulled
+        buttons[7] = (true, 0.0); // RT that only reports pressed
+        buttons[12] = (true, 1.0); // D-pad up
+        buttons[16] = (true, 1.0); // PS: unused
+        let state = standard_state(&buttons, &[0.5, -1.0, -0.25, 0.75]);
+        assert!(state.held(Button::South));
+        assert!(state.held(Button::RightBumper));
+        assert!(state.held(Button::DPadUp));
+        assert!(!state.held(Button::East));
+        // Triggers are analog, not bits.
+        assert!(!state.held(Button::LeftTrigger));
+        assert_eq!(state.triggers, [0.25, 1.0]);
+        // The page's down-positive axes come out up-positive.
+        assert_eq!(state.left, [0.5, 1.0]);
+        assert_eq!(state.right, [-0.25, -0.75]);
+        // A short pad (fewer buttons and axes) and bad values read as rest.
+        let state = standard_state(&[(false, f32::NAN)], &[f32::NAN, 3.0]);
+        assert_eq!(state.left, [0.0, -1.0]);
+        assert_eq!(state.triggers, [0.0, 0.0]);
+        assert_eq!(standard_state(&[], &[]), PadState::default());
+    }
+
+    #[test]
+    fn browser_gamepad_ids() {
+        let chrome = "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)";
+        assert_eq!(browser_ids(chrome), (Some(0x054c), Some(0x0ce6)));
+        assert_eq!(browser_name(chrome), "DualSense Wireless Controller");
+        let firefox = "054c-0ce6-DualSense Wireless Controller";
+        assert_eq!(browser_ids(firefox), (Some(0x054c), Some(0x0ce6)));
+        assert_eq!(browser_name(firefox), "DualSense Wireless Controller");
+        let xinput = "Xbox 360 Controller (XInput STANDARD GAMEPAD)";
+        assert_eq!(browser_ids(xinput), (None, None));
+        assert_eq!(browser_name(xinput), "Xbox 360 Controller");
+        assert_eq!(browser_ids("Pro-Controller-X"), (None, None));
+        assert_eq!(
+            browser_name("Xbox Wireless Controller"),
+            "Xbox Wireless Controller"
+        );
+        assert_eq!(
+            GlyphStyle::of_vendor(browser_ids(chrome).0),
+            GlyphStyle::PlayStation
+        );
     }
 }
