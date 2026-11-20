@@ -4,7 +4,7 @@ use super::{Dim, Game};
 use horizon_client::fog::{FogData, FogInputs, FogType, fog_type, update_rain_fog};
 use horizon_client::{
     animate_tick::{AnimateContext, animate_tick, campfire_particles, marker_particle_target},
-    biome::Biomes,
+    biome::{Biomes, ServerBiome},
     blocks::{BlockFacts, Fluid},
     chunk::{HEIGHT, MIN_Y},
     particles::{ParticleLevel, ParticleOptions, ParticleType},
@@ -14,7 +14,9 @@ use horizon_client::{
     hud_overlays,
     screen_effects::{ScreenInputs, ScreenQuad, lightmap_brightness},
 };
+use horizon_core::position::BlockPos;
 use horizon_core::random::{LegacyRandom, RandomSource};
+use horizon_world::worldgen::biome_temperature::Precipitation;
 
 /// The first motion-blocking block at or below `from` (Heightmap MOTION_BLOCKING), plus one.
 fn motion_blocking(world: &World, facts: &BlockFacts, x: i32, z: i32, from: i32) -> i32 {
@@ -28,21 +30,21 @@ fn motion_blocking(world: &World, facts: &BlockFacts, x: i32, z: i32, from: i32)
     }
     MIN_Y
 }
-/// `Biome.getPrecipitationAt` is rain (not snow) at this position.
-fn rains_at(world: &World, biomes: &Biomes, x: i32, y: i32, z: i32) -> bool {
+/// `Biome.getPrecipitationAt` in an overworld column.
+pub(super) fn precipitation_at(
+    world: &World,
+    biomes: &Biomes,
+    server_biomes: &[ServerBiome],
+    x: i32,
+    y: i32,
+    z: i32,
+) -> Precipitation {
     let Some(chunk) = world.chunks.get(&(x >> 4, z >> 4)) else {
-        return false;
+        return Precipitation::None;
     };
-    let b = biomes.get(chunk.biome(x, y, z));
-    if !b.precipitation {
-        return false;
-    }
-    let t = if y > 80 {
-        b.temperature - (y - 80) as f32 * 0.05 / 40.0
-    } else {
-        b.temperature
-    };
-    t >= 0.15
+    biomes
+        .climate(chunk.biome(x, y, z), server_biomes)
+        .precipitation_at(BlockPos::new(x, y, z), 63)
 }
 
 impl Game<'_> {
@@ -213,6 +215,10 @@ impl Game<'_> {
             let brightness = self.eye_brightness(e);
             let inside_portal = self.client_portal_effect();
             self.screen_fx.tick(brightness, inside_portal);
+        }
+        let biomes = self.res.biomes();
+        let server_biomes = self.remote.as_ref().map_or(&[][..], |r| &r.server_biomes);
+        if let Some(e) = eye {
             // LocalPlayer water vision and AtmosphericFogEnvironment rain fog.
             let in_water =
                 fog_type(&self.world, self.res.facts(), e, self.forward()) == FogType::Water;
@@ -232,7 +238,7 @@ impl Game<'_> {
                 .chunks
                 .get(&(b[0] >> 4, b[2] >> 4))
                 .map_or(0, |c| c.biome(b[0], b[1], b[2]));
-            let rains = self.res.biomes().get(biome).precipitation;
+            let rains = biomes.climate(biome, server_biomes).has_precipitation;
             update_rain_fog(
                 &mut self.fog,
                 rain,
@@ -240,8 +246,6 @@ impl Game<'_> {
                 rains,
                 1.0,
             );
-        }
-        if let Some(e) = eye {
             self.particles.camera = e;
         }
         let (rain, _) = if self.dim == Dim::Overworld {
@@ -261,12 +265,14 @@ impl Game<'_> {
         };
         let world = &self.world;
         let facts = self.res.facts();
-        let biomes = self.res.biomes();
+        let rains_at = |x, y, z| {
+            precipitation_at(world, biomes, server_biomes, x, y, z) == Precipitation::Rain
+        };
         let raining = rain > 0.2;
         let raining_at = |p: [i32; 3]| {
             raining
                 && motion_blocking(world, facts, p[0], p[2], p[1] + 64) <= p[1]
-                && rains_at(world, biomes, p[0], p[1], p[2])
+                && rains_at(p[0], p[1], p[2])
         };
         let ctx = AnimateContext {
             world,
@@ -297,7 +303,7 @@ impl Game<'_> {
                     if top <= MIN_Y
                         || top > block[1] + 10
                         || top < block[1] - 10
-                        || !rains_at(world, biomes, x, top, z)
+                        || !rains_at(x, top, z)
                     {
                         continue;
                     }

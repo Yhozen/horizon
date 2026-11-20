@@ -323,6 +323,12 @@ pub const LABELS: &[(&str, &str)] = &[
     ("commands.time.query.daytime", "The time of day is %s"),
     ("commands.time.no_default_clock", "This world has no clock"),
     ("commands.time.no_time_marker_found", "No such time of day"),
+    ("commands.weather.set.clear", "The skies are clearing"),
+    ("commands.weather.set.rain", "Rain is moving in"),
+    (
+        "commands.weather.set.thunder",
+        "A thunderstorm is moving in",
+    ),
     (
         "commands.time.pause.already_paused",
         "Time is already paused",

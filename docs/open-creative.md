@@ -10,7 +10,8 @@ creative flight, collision and swimming, a creative palette of 86 blocks and 28 
 and survival play: mining with tools that wear out, drops, hunger and health, crafting in the 2x2
 inventory grid and at the crafting table (56 recipes, all in the recipe book), and death and
 respawning. Browser worlds last for one visit: reloading the page starts a fresh world, and the
-page says so before play. There are no mobs, sound, weather, furnaces or other dimensions.
+page says so before play. Local worlds have a weather cycle. Natural mob spawning, sound,
+smelting and travel to other dimensions are unavailable in those worlds.
 
 ## Content
 
@@ -101,8 +102,8 @@ The checks live at the boundaries, not through the game:
 
 - **Startup** (`crates/horizon-client/src/game/open_profile.rs`, `apply`): the bundle's files are
   checked against its provenance record (a missing or changed file stops the game with the file's
-  name and `horizon-prepare open` as the fix); `--benchmark`, `--dev-mod`, `--weather` and other
-  dimensions are errors; single player runs in the frame (`--in-frame`), and every world,
+  name and `horizon-prepare open` as the fix). Startup rejects `--benchmark`, `--dev-mod` and other
+  dimensions. Single player runs in the frame (`--in-frame`), and every world,
   a dedicated server's too, uses the open terrain preset. Arguments from the browser's `?args=`
   go through the same code.
 - **Servers** (`assets::server_brand`): an open server's `minecraft:brand` is `horizon-open/`
@@ -117,9 +118,13 @@ The checks live at the boundaries, not through the game:
 - **In the game** (`open_allows`): changing dimension is refused with a chat line, and the
   commands are those that only use what the bundle has (`OPEN_COMMANDS`: `/gamemode`, `/give`,
   `/clear`, `/tp`, `/time`, `/setblock`, `/fill`, `/clone`, `/kill`, `/xp`, `/spawnpoint`,
-  `/difficulty`, chat commands and a few more). Game rules keep weather, mob spawning, random
+  `/difficulty`, `/weather`, chat commands and a few more). Game rules keep mob spawning, random
   ticks and fire spread off. Water and lava flow as in Minecraft: the bundle's
   `washed_away_by_fluids` and `blocks_fluid_flow` tags say where they go and where they stop.
+- **Weather**: use `--weather clear`, `--weather rain` or `--weather thunder` to set the starting
+  weather, or `/weather` in worlds where commands are enabled. Open's plains get rain with original
+  textures. On a Java server, the server's biomes determine where rain or snow appears. Rebuild an
+  existing native resource bundle with `horizon-prepare open` to pick up the precipitation textures.
 - **Menus**: the title has Singleplayer, Multiplayer, Options and Quit; the pause menu offers Back
   to the World, Options, Credits, Statistics and Save and Quit to Title (Disconnect on a server);
   the options page offers video, controls, chat, accessibility and credits only.
