@@ -43,7 +43,8 @@ fn quad_normals_follow_the_winding_and_tilt_with_the_quad() {
     let cross = [[0.0, 1.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0]];
     let n = quad_normal(cross, [0.0; 3]);
     let h = std::f32::consts::FRAC_1_SQRT_2;
-    assert!((n[0] - h).abs() < 1e-6 && n[1] == 0.0 && (n[2] + h).abs() < 1e-6, "{n:?}");
+    // (v1 - v0) x (v2 - v0), the winding the up face above follows.
+    assert!((n[0] + h).abs() < 1e-6 && n[1] == 0.0 && (n[2] - h).abs() < 1e-6, "{n:?}");
     // A sloped fluid top leans away from its higher side.
     let slope = [[0.0, 0.9, 0.0], [0.0, 0.9, 1.0], [1.0, 0.5, 1.0], [1.0, 0.5, 0.0]];
     let n = quad_normal(slope, [0.0; 3]);
