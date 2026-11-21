@@ -705,6 +705,54 @@ fn split_punct(word: &str) -> Vec<&str> {
     out
 }
 
+/// What Iris does with a fragment `in` the vertex stage has no `out` for
+/// (its compatibility patch): the vertex stage gets the declaration, zeroed
+/// at the start (WGSL's private globals start zeroed), so a vertex stage that
+/// writes the variable without declaring it (bloop-shaders' `shadow.vsh`)
+/// compiles and hands the value on. Only for variables the vertex stage
+/// mentions and does not declare at file scope itself; the others read zero
+/// in the fragment stage and cost no location. Returns a note per variable.
+pub(super) fn adopt_undeclared(vertex: &mut Rewritten, fragment: &Rewritten) -> Vec<String> {
+    let mut notes = Vec::new();
+    for f in &fragment.varyings {
+        let plain = integer_type(&f.ty).is_some() || matrix(&f.ty).is_some();
+        if !plain
+            || vertex.varyings.iter().any(|v| v.name == f.name)
+            || !uses(&vertex.body, &f.name)
+            || declared_at_file_scope(&vertex.body, &f.name)
+        {
+            continue;
+        }
+        notes.push(format!(
+            "varying {}: the vertex stage writes it without declaring it; declared there, as Iris does",
+            f.name
+        ));
+        vertex.varyings.push(f.clone());
+    }
+    notes
+}
+
+/// Whether `body` declares `name` outside any function (`vec2 name;`,
+/// `uniform float a, name;`): a type or a comma before it outside braces
+/// and parentheses.
+fn declared_at_file_scope(body: &str, name: &str) -> bool {
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    body.match_indices(name).any(|(i, _)| {
+        if body[..i].ends_with(ident) || body[i + name.len()..].starts_with(ident) {
+            return false;
+        }
+        let depth = |open: char, close: char| {
+            body[..i].matches(open).count() as i64 - body[..i].matches(close).count() as i64
+        };
+        // Inside a function, or a parameter list.
+        if depth('{', '}') != 0 || depth('(', ')') != 0 {
+            return false;
+        }
+        let before = body[..i].trim_end();
+        before.ends_with(',') || before.ends_with(ident)
+    })
+}
+
 /// Whether `body` mentions the identifier `name`.
 fn uses(body: &str, name: &str) -> bool {
     let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
@@ -1106,6 +1154,43 @@ mod tests {
         );
         let err = translate(&p, Geometry::Fullscreen, 16).unwrap_err();
         assert!(err.contains("varying x is vec3"), "{err}");
+    }
+
+    #[test]
+    fn undeclared_vertex_outputs_are_declared_as_iris_does() {
+        // The vertex stage writes `lm` without declaring it; the fragment stage reads it.
+        let mut p = program(vec![], vec![var("lm", "vec2", false, None)]);
+        let write = "    lm.xy = hz_gl_MultiTexCoord0.xy;\n";
+        p.0.body = p.0.body.replace("}\n", &format!("{write}}}\n"));
+        let (vs, fs) = translate(&p, Geometry::Fullscreen, 16).unwrap();
+        assert!(
+            vs.contains("@location(0)") && fs.contains("@location(0)"),
+            "{vs}\n{fs}"
+        );
+        let mut notes = p.0.clone();
+        let adopted = adopt_undeclared(&mut notes, &p.1);
+        assert_eq!(adopted.len(), 1);
+        assert!(adopted[0].starts_with("varying lm:"), "{adopted:?}");
+        // Not mentioned by the vertex stage: zero, no location.
+        let p = program(vec![], vec![var("lm", "vec2", false, None)]);
+        let (vs, _) = translate(&p, Geometry::Fullscreen, 16).unwrap();
+        assert!(!vs.contains("@location(0)"), "{vs}");
+        // Declared at file scope as a plain global: left alone (not a varying).
+        let mut p = program(vec![], vec![var("lm", "vec2", false, None)]);
+        p.0.body = format!(
+            "vec2 lm;\n{}",
+            p.0.body.replace("}\n", &format!("{write}}}\n"))
+        );
+        let mut v = p.0.clone();
+        assert!(adopt_undeclared(&mut v, &p.1).is_empty());
+        let (vs, _) = translate(&p, Geometry::Fullscreen, 16).unwrap();
+        assert!(!vs.contains("@location(0)"), "{vs}");
+        // A parameter of the same name inside a function does not count as declared.
+        assert!(!declared_at_file_scope(
+            "void f(vec2 lm) { lm.x; }\nvoid main() { lm = vec2(1); }",
+            "lm"
+        ));
+        assert!(declared_at_file_scope("uniform float a, lm;", "lm"));
     }
 
     #[test]

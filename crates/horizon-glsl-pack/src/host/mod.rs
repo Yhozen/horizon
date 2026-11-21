@@ -296,10 +296,10 @@ pub fn program_sources(
         extras.custom_block = Some(spec.plan.custom_uniforms.block());
         extras.customs = uniforms.customs.clone();
     }
-    let (vertex, fragment) = (
-        &uniforms.unknown_only(vertex),
-        &uniforms.unknown_only(fragment),
-    );
+    let fragment = &uniforms.unknown_only(fragment);
+    let mut vertex = uniforms.unknown_only(vertex);
+    let adopted = varyings::adopt_undeclared(&mut vertex, fragment);
+    let vertex = &vertex;
     // Entity extras ride after the pack's varyings: keep room for them.
     let max = spec.host.max_varyings.saturating_sub(extras.locations());
     let shared = Interface::new(vertex, fragment, spec.geometry, max)?;
@@ -324,6 +324,7 @@ pub fn program_sources(
         }
     }
     let mut notes = sampling_notes(&vertex.sample_calls, spec, extras.watershadow);
+    notes.extend(adopted);
     notes.extend(sampling_notes(
         &fragment.sample_calls,
         spec,
