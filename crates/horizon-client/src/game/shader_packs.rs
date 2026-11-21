@@ -32,6 +32,14 @@ pub(super) struct Selection {
     pub pack: Option<String>,
 }
 
+/// Shaders were left on with a pack chosen, before the device opens.
+pub(super) fn saved_selection_on() -> bool {
+    let path = fs::current_dir().unwrap_or_default().join(SELECTION_FILE);
+    fs::read_to_string(path)
+        .map(|text| Selection::parse(&text))
+        .is_ok_and(|s| s.enabled && s.pack.is_some())
+}
+
 impl Selection {
     pub fn parse(text: &str) -> Self {
         let mut s = Self::default();

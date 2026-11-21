@@ -6,6 +6,8 @@
 use crate::{
     Bundle, Origin, Result,
     blocks::{Block, Form, Layer, Sound, Tier, Tool},
+    connected::{self, Family, Shape},
+    shapes::{self, StateShape},
 };
 use horizon_world::{
     DATA_VERSION,
@@ -79,26 +81,34 @@ fn state_nbt(state: &State) -> Tag {
     }
 }
 
-fn is_water(state: &State) -> bool {
-    state.block.form == Form::Fluid
+/// Whether a state holds a fluid: a fluid block, or a waterlogged one.
+fn has_fluid(state: &State) -> bool {
+    fluid(state).0 != 0
 }
 
-/// Whether a state is a fluid source the fixed water scenery uses.
+/// The state's fluid as `block-behaviours.json` writes it: the fluid's
+/// registry id (1 flowing water, 2 water, 3 flowing lava, 4 lava), its
+/// amount and whether it falls. Level 0 is the source, 1 to 7 flow with
+/// 8 - level, 8 and up fall; a waterlogged state holds a water source.
 fn fluid(state: &State) -> (u8, u8, bool) {
-    if !is_water(state) {
-        return (0, 0, false);
+    if state.properties.contains(&("waterlogged", "true")) {
+        return (2, 8, false);
     }
+    let (flowing, source) = match state.block.fluid() {
+        Some("lava") => (3, 4),
+        Some(_) => (1, 2),
+        None => return (0, 0, false),
+    };
     let level: u8 = state
         .properties
         .iter()
         .find(|(k, _)| *k == "level")
         .and_then(|(_, v)| v.parse().ok())
         .unwrap_or(0);
-    // Registry ids: 1 flowing_water, 2 water. Level 0 is the source.
     match level {
-        0 => (2, 8, false),
-        8.. => (1, 8, true),
-        n => (1, 8 - n, false),
+        0 => (source, 8, false),
+        8.. => (flowing, 8, true),
+        n => (flowing, 8 - n, false),
     }
 }
 
@@ -155,6 +165,11 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
     if states.len() != first {
         return Err("state count mismatch".into());
     }
+    // The shapes of the states whose block is not a plain cube or plant.
+    let shaped: Vec<Option<StateShape>> = states
+        .iter()
+        .map(|s| shapes::of(s.block, &s.properties))
+        .collect();
 
     // facts.json: [name, air, fluid, description, state].
     let rows: Vec<Value> = states
@@ -163,7 +178,7 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             json!([
                 s.block.key(),
                 s.block.is_air(),
-                is_water(s),
+                has_fluid(s) || crate::plants::holds_fluid(s.block, &s.properties),
                 description(s),
                 state_json(s)
             ])
@@ -193,9 +208,9 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
                 "hardness": b.hardness,
                 "requires_tool": b.mining.requires_tool,
                 "replaceable": matches!(b.form, Form::Air | Form::Fluid | Form::Inert) || b.id == "short_grass",
-                "random_ticks": false,
+                "random_ticks": b.id == "lava",
                 "block_entity": b.classes.contains(&"BaseEntityBlock"),
-                "liquid": is_water(s),
+                "liquid": b.form == Form::Fluid,
                 "ignited_by_lava": false,
                 "push": if b.id == "obsidian" || b.id == "bedrock" { "IMMOVEABLE" } else if matches!(b.form, Form::Cross | Form::Fluid | Form::Air | Form::Inert) { "POPPED" } else { "PUSH_PULL" },
                 "render_shape": render_shape(b),
@@ -209,8 +224,23 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
                 "map_color": map_color(b),
                 "outline": b.outline(),
             });
-            let edges = edges(&b.outline());
-            row["outline_edges"] = json!(edges);
+            if let Form::Connected(family) = b.form {
+                connected_facts(&mut row, family, &s.properties);
+            }
+            if let Some(plant) = crate::plants::gameplay(b, &s.properties) {
+                row.as_object_mut().unwrap().extend(plant);
+            }
+            let outline: Vec<[f64; 6]> =
+                serde_json::from_value(row["outline"].clone()).unwrap_or_default();
+            row["outline_edges"] = json!(edges(&outline));
+            let speed = crate::cubes::speed_factor(b.id);
+            if speed != 1.0 {
+                row["speed_factor"] = json!(speed);
+            }
+            if let Some(sh) = &shaped[id] {
+                shaped_facts(&mut row, b, sh);
+                crate::cubes::patch_facts(&mut row, b.id, &s.properties);
+            }
             without_defaults(row)
         })
         .collect();
@@ -236,8 +266,12 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
         .collect();
     let behaviour_states: Vec<Value> = states
         .iter()
-        .map(|s| {
+        .enumerate()
+        .map(|(i, s)| {
             let b = s.block;
+            if let Some(sh) = &shaped[i] {
+                return shaped_behaviour(b, sh);
+            }
             let sturdy: u32 = if b.opaque() || b.form == Form::SeeThroughCube {
                 (1 << 18) - 1
             } else {
@@ -253,8 +287,18 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             if b.opaque() {
                 flags |= 4 | 64; // conductor, suffocating
             }
-            if !b.collides() {
+            let no_collision = match b.form {
+                Form::Connected(family) => {
+                    flags |= 1; // isSolid, as Minecraft's legacy rule finds them
+                    connected::boxes(family, &s.properties, Shape::Collision).is_empty()
+                }
+                _ => !b.collides(),
+            };
+            if no_collision {
                 flags |= 32;
+            }
+            if let Some(row) = crate::plants::behaviour(b, &s.properties) {
+                return row;
             }
             let (kind, amount, falling) = fluid(s);
             json!([sturdy, flags, kind, amount, falling, 0, 0, false, "HARP"])
@@ -290,21 +334,54 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             .map(Block::key)
             .collect()
     };
-    let solid = |b: &Block| b.collides();
+    let solid = |b: &Block| b.collides() || matches!(b.form, Form::Connected(_));
     let mut tags: BTreeMap<String, Vec<String>> = BTreeMap::new();
     tags.insert("blocks_motion_in_heightmap".into(), names(&solid));
     tags.insert(
         "blocks_motion_in_heightmap_no_leaves".into(),
         names(&|b: &Block| solid(b) && !b.id.ends_with("_leaves")),
     );
-    tags.insert("blocks_fluid_flow".into(), Vec::new());
-    for empty in [
-        "fences",
-        "walls",
-        "suppresses_bounce",
-        "climbable",
-        "fall_damage_resetting",
+    // Where fluid flows: into the blocks it washes away (`FlowingFluid.
+    // canHoldAnyFluid`, besides liquid containers), and its flow stops at
+    // the ones that block motion and signs. The rules read each block's own
+    // class chain and shape; over the bundle's blocks they give the members
+    // Minecraft's two tags have.
+    tags.insert(
+        "washed_away_by_fluids".into(),
+        names(&washed_away_by_fluids),
+    );
+    tags.insert(
+        "blocks_fluid_flow".into(),
+        names(&|b: &Block| (solid(b) || stands_in_fluid(b)) && !b.classes.contains(&"ButtonBlock")),
+    );
+    let family = |f: Family| move |b: &Block| b.form == Form::Connected(f);
+    tags.insert(
+        "wooden_fences".into(),
+        names(&|b: &Block| family(Family::Fence)(b) && b.mining.tool == Tool::Axe),
+    );
+    tags.insert("fences".into(), names(&family(Family::Fence)));
+    tags.insert("walls".into(), names(&family(Family::Wall)));
+    tags.insert("fence_gates".into(), names(&family(Family::Gate)));
+    tags.insert("bars".into(), names(&family(Family::Bars)));
+    let doors = |b: &Block| family(Family::Door)(b);
+    let trapdoors =
+        |b: &Block| family(Family::Trapdoor)(b) || family(Family::OrientableTrapdoor)(b);
+    let buttons = |b: &Block| family(Family::Button)(b);
+    let plates = |b: &Block| family(Family::Plate)(b) || family(Family::WeightedPlate)(b);
+    let wooden = |b: &Block| b.mining.tool == Tool::Axe;
+    for (tag, filter) in [
+        ("doors", &doors as &dyn Fn(&Block) -> bool),
+        ("trapdoors", &trapdoors),
+        ("buttons", &buttons),
+        ("pressure_plates", &plates),
     ] {
+        tags.insert(tag.into(), names(filter));
+        tags.insert(
+            format!("wooden_{tag}"),
+            names(&|b: &Block| filter(b) && wooden(b)),
+        );
+    }
+    for empty in ["suppresses_bounce", "climbable", "fall_damage_resetting"] {
         tags.insert(empty.into(), Vec::new());
     }
     tags.insert(
@@ -352,7 +429,10 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
     );
     tags.insert(
         "replaceable".into(),
-        names(&|b: &Block| matches!(b.form, Form::Air | Form::Fluid) || b.id == "short_grass"),
+        names(&|b: &Block| {
+            matches!(b.form, Form::Air | Form::Fluid) && b.id != "bubble_column"
+                || b.id == "short_grass"
+        }),
     );
     tags.insert(
         "impermeable".into(),
@@ -375,30 +455,47 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
             GENERATOR,
         )?;
     }
-    bundle.json(
-        "data/minecraft/tags/fluid/water.json",
-        &json!({"values": ["minecraft:water", "minecraft:flowing_water"]}),
-        GENERATOR,
-    )?;
-    bundle.json(
-        "data/minecraft/tags/fluid/lava.json",
-        &json!({"values": []}),
-        GENERATOR,
-    )?;
+    // Fluid tags: the two fluids, and the water sources mobs, plants, boats
+    // and bubble columns look for.
+    for (name, values) in [
+        ("water", &["minecraft:water", "minecraft:flowing_water"][..]),
+        ("lava", &["minecraft:lava", "minecraft:flowing_lava"]),
+        ("axolotl_tries_to_find", &["minecraft:water"]),
+        ("bubble_column_can_occupy", &["minecraft:water"]),
+        ("dolphin_tries_to_find", &["minecraft:water"]),
+        ("entity_floatable", &["#minecraft:water"]),
+        ("frog_tries_to_find_land_near", &["minecraft:water"]),
+        ("supports_frogspawn", &["minecraft:water"]),
+        ("supports_lily_pad", &["minecraft:water"]),
+        ("supports_sugar_cane_adjacently", &["#minecraft:water"]),
+    ] {
+        bundle.json(
+            format!("data/minecraft/tags/fluid/{name}.json"),
+            &json!({"values": values}),
+            GENERATOR,
+        )?;
+    }
 
     // render-definitions.json: how faces against neighbours are skipped.
     let render: BTreeMap<String, Value> = blocks
         .iter()
         .map(|b| {
             let rule = match (b.form, b.id) {
-                (Form::Fluid, _) => "liquid",
+                (Form::Fluid, id) if id != "bubble_column" => "liquid",
+                (Form::Connected(Family::Pane | Family::Bars), _) => "bars",
                 (_, id) if id.ends_with("_leaves") => "leaves",
-                (_, "glass" | "tinted_glass") => "same_block",
+                _ if b.classes.contains(&"HalfTransparentBlock") => "same_block",
                 _ => "never",
             };
             (
                 b.key(),
-                json!({"rule": rule, "can_occlude": b.opaque(), "bars_tag": false}),
+                json!({
+                    "rule": rule,
+                    "can_occlude": b.opaque()
+                        || b.form == Form::Shaped
+                        || matches!(b.form, Form::Connected(Family::Wall | Family::Fence | Family::Gate)),
+                    "bars_tag": b.form == Form::Connected(Family::Bars),
+                }),
             )
         })
         .collect();
@@ -437,25 +534,56 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
         .collect();
     bundle.json("model-states.json", &json!(model_states), GENERATOR)?;
 
-    // Shapes: empty (canonical 1) and the full block (canonical 2).
+    // Shapes: each state's collision and light occlusion, each shape once.
     let table_states: Vec<Tag> = states.iter().map(state_nbt).collect();
-    let shape_table = |what: &str, occupied: &dyn Fn(&State) -> bool| -> Tag {
-        let cached: Vec<i32> = states
-            .iter()
-            .map(|s| if occupied(s) { 1 } else { 0 })
-            .collect();
-        let _ = what;
-        Tag::compound([
-            ("DataVersion", Tag::Int(DATA_VERSION)),
-            ("states", Tag::List(table_states.clone())),
-            ("shapes", Tag::List(vec![empty_shape(), block_shape()])),
-            ("cached_shapes", Tag::IntArray(cached)),
-        ])
-    };
-    let collision = shape_table("collision", &|s| s.block.collides());
-    nbt_file(bundle, "cached-collision.nbt", collision)?;
-    let occlusion = shape_table("occlusion", &|s| s.block.opaque());
-    nbt_file(bundle, "occlusion.nbt", occlusion)?;
+    let (mut collision, mut occlusion) = (shapes::Table::new(), shapes::Table::new());
+    let (full, none) = (shapes::full(), shapes::empty());
+    for (s, sh) in states.iter().zip(&shaped) {
+        let pick = |yes: bool| if yes { &full } else { &none };
+        if let Form::Connected(family) = s.block.form {
+            // Walls, fences, gates, panes and bars (crate::connected).
+            for (table, kind) in [
+                (&mut collision, Shape::Collision),
+                (&mut occlusion, Shape::Occlusion),
+            ] {
+                table.push(&connected::voxel(&connected::boxes(
+                    family,
+                    &s.properties,
+                    kind,
+                )));
+            }
+            continue;
+        }
+        let plant = |occlusion: bool| {
+            crate::plants::shape(s.block, &s.properties, occlusion)
+                .map(|id| id.map(crate::plants::voxel))
+        };
+        if let (Some(c), Some(o)) = (plant(false), plant(true)) {
+            for (table, shape) in [(&mut collision, c), (&mut occlusion, o)] {
+                match shape {
+                    Some(shape) => table.push(&shape),
+                    None => table.push_dynamic(),
+                }
+            }
+            continue;
+        }
+        match sh {
+            Some(sh) => {
+                collision.push(&sh.collision);
+                occlusion.push(&sh.occlusion);
+            }
+            None => {
+                collision.push(pick(s.block.collides()));
+                occlusion.push(pick(s.block.opaque()));
+            }
+        }
+    }
+    nbt_file(
+        bundle,
+        "cached-collision.nbt",
+        collision.tag(table_states.clone()),
+    )?;
+    nbt_file(bundle, "occlusion.nbt", occlusion.tag(table_states.clone()))?;
 
     // movement-properties.nbt: one entry per block.
     let movement = Tag::compound([
@@ -472,7 +600,10 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
                         ("jumpFactor", Tag::Float(1.0f32.to_bits())),
                         ("bounceRestitution", Tag::Float(0.0f32.to_bits())),
                         ("fallDistanceReduction", Tag::Float(0.0f32.to_bits())),
-                        ("fenceGate", Tag::Byte(0)),
+                        (
+                            "fenceGate",
+                            Tag::Byte(i8::from(b.form == Form::Connected(Family::Gate))),
+                        ),
                     ]),
                 )
             })),
@@ -483,32 +614,65 @@ pub fn write(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
     Ok(())
 }
 
-fn empty_shape() -> Tag {
-    Tag::compound([
-        ("canonical", Tag::Byte(1)),
-        ("x", Tag::LongArray(vec![0])),
-        ("y", Tag::LongArray(vec![0])),
-        ("z", Tag::LongArray(vec![0])),
-        ("occupied", Tag::ByteArray(vec![])),
-        ("cube", Tag::Byte(0)),
-        ("cube_axes", Tag::Byte(0)),
-        ("discrete_min", Tag::IntArray(vec![0; 3])),
-        ("discrete_max", Tag::IntArray(vec![0; 3])),
-    ])
+/// The per-state facts of a wall, fence, gate, pane or bars: its outline,
+/// and the light and occlusion its shape and water give it.
+fn connected_facts(row: &mut Value, family: Family, state: &[(&str, &str)]) {
+    let water = connected::waterlogged(state);
+    row["dampening"] = json!(u8::from(water));
+    row["skylight_down"] = json!(!water);
+    row["can_occlude"] = json!(matches!(
+        family,
+        Family::Wall | Family::Fence | Family::Gate
+    ));
+    row["solid_render"] = json!(false);
+    row["full_collision"] = json!(false);
+    row["outline"] = json!(connected::merged(family, state, Shape::Outline));
 }
 
-fn block_shape() -> Tag {
-    let coords = Tag::LongArray(vec![0, 1.0f64.to_bits() as i64]);
-    Tag::compound([
-        ("canonical", Tag::Byte(2)),
-        ("x", coords.clone()),
-        ("y", coords.clone()),
-        ("z", coords),
-        ("occupied", Tag::ByteArray(vec![1])),
-        ("cube", Tag::Byte(1)),
-        ("cube_axes", Tag::Byte(7)),
-        ("discrete_min", Tag::IntArray(vec![0; 3])),
-        ("discrete_max", Tag::IntArray(vec![1; 3])),
+/// The `gameplay-facts.json` fields that follow from a state's shapes.
+fn shaped_facts(row: &mut Value, b: &Block, sh: &StateShape) {
+    let line = crate::slabs::line(b.id);
+    row["dampening"] = json!(sh.dampening());
+    row["skylight_down"] = json!(sh.skylight_down());
+    row["shape_occlusion"] = json!(sh.shape_occlusion);
+    row["can_occlude"] = json!(sh.can_occlude);
+    row["solid_render"] = json!(sh.solid_render());
+    row["full_collision"] = json!(sh.full_collision());
+    row["ignited_by_lava"] = json!(line.is_some_and(|l| l.ignited_by_lava));
+    // Copper that can still age ticks randomly.
+    row["random_ticks"] = json!(
+        b.classes.iter().any(|c| c.starts_with("Weathering")) && !b.id.starts_with("oxidized")
+    );
+    row["outline"] = json!(shapes::boxes(&sh.outline));
+    row["outline_edges"] = json!(shapes::edges(&sh.outline));
+}
+
+/// A `block-behaviours.json` state row from a state's shapes: sturdy
+/// faces, flags (legacy solid, redstone conductor), its water and its
+/// note block instrument.
+fn shaped_behaviour(b: &Block, sh: &StateShape) -> Value {
+    let mut flags = 0u32;
+    if shapes::legacy_solid(&sh.collision) {
+        flags |= 1;
+    }
+    if sh.full_collision() {
+        flags |= 4;
+    }
+    if sh.collision.is_empty() {
+        flags |= 32;
+    }
+    let (kind, amount) = if sh.waterlogged { (2, 8) } else { (0, 0) };
+    let instrument = crate::slabs::line(b.id).map_or("HARP", |l| l.instrument);
+    json!([
+        shapes::sturdy(&sh.collision),
+        flags,
+        kind,
+        amount,
+        false,
+        0,
+        0,
+        false,
+        instrument
     ])
 }
 
@@ -550,6 +714,39 @@ fn edges(boxes: &[[f64; 6]]) -> Vec<[f64; 6]> {
     out
 }
 
+/// Blocks drawn without collision that fluid still flows around, as around a
+/// solid block: beds, chests, chains, shulker boxes, lanterns, amethyst
+/// buds, sculk veins and dead coral.
+fn stands_in_fluid(b: &Block) -> bool {
+    const STANDS: &[&str] = &[
+        "BedBlock",
+        "AbstractChestBlock",
+        "ChainBlock",
+        "ShulkerBoxBlock",
+        "LanternBlock",
+        "AmethystClusterBlock",
+        "SculkVeinBlock",
+    ];
+    const DEAD_CORAL: &[&str] = &[
+        "BaseCoralPlantBlock",
+        "BaseCoralFanBlock",
+        "BaseCoralWallFanBlock",
+    ];
+    b.classes.iter().any(|c| STANDS.contains(c))
+        || b.classes.first().is_some_and(|c| DEAD_CORAL.contains(c))
+}
+
+/// Blocks a fluid flowing into replaces: air, the fluids, plants and other
+/// crossed planes, and buttons; not sugar cane or the bubble column.
+fn washed_away_by_fluids(b: &Block) -> bool {
+    (matches!(b.form, Form::Air | Form::Cross | Form::Fluid) || b.classes.contains(&"ButtonBlock"))
+        && !stands_in_fluid(b)
+        && !b
+            .classes
+            .iter()
+            .any(|c| matches!(*c, "SugarCaneBlock" | "BubbleColumnBlock"))
+}
+
 /// The single biome, the one dimension and the day cycle, authored here.
 pub fn environment(bundle: &mut Bundle) -> Result<()> {
     const ENV: &str = "environment";
@@ -561,7 +758,7 @@ pub fn environment(bundle: &mut Bundle) -> Result<()> {
         &json!({
             "temperature": 0.8,
             "downfall": 0.4,
-            "has_precipitation": false,
+            "has_precipitation": true,
             "effects": {
                 "dry_foliage_color": 0xFFFFFF,
                 "water_color": 0xFFFFFF,
@@ -836,4 +1033,49 @@ pub fn health(bundle: &mut Bundle, blocks: &[Block]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod fluid_tag_tests {
+    use super::{stands_in_fluid, washed_away_by_fluids};
+    use crate::blocks::{self, Block};
+
+    #[test]
+    fn fluids_wash_away_plants_and_stop_at_solid_blocks() {
+        let all = blocks::all();
+        let block = |id: &str| -> &Block {
+            all.iter()
+                .find(|b| b.id == id)
+                .unwrap_or_else(|| panic!("{id}"))
+        };
+        for id in [
+            "air",
+            "water",
+            "lava",
+            "short_grass",
+            "oak_sapling",
+            "dandelion",
+            "oak_button",
+            "tube_coral",
+        ] {
+            assert!(washed_away_by_fluids(block(id)), "{id} is washed away");
+        }
+        for id in [
+            "stone",
+            "sugar_cane",
+            "bubble_column",
+            "red_bed",
+            "chest",
+            "lantern",
+            "dead_tube_coral",
+            "oak_fence",
+        ] {
+            assert!(!washed_away_by_fluids(block(id)), "{id} holds");
+        }
+        // Drawn without collision, but flow goes around them.
+        for id in ["red_bed", "chest", "lantern", "dead_tube_coral"] {
+            assert!(stands_in_fluid(block(id)), "{id}");
+        }
+        assert!(!stands_in_fluid(block("tube_coral")));
+    }
 }

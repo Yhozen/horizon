@@ -3,7 +3,8 @@
 // game's two-second status lines. --shaderpack serves a local zip to the page as ?shaderpack=.
 //   node scripts/bench.mjs [--site open] [--args="GAME ARGS"] [--shaderpack pack.zip] [--seconds 60]
 //     [--tail 15] [--shot frame.png] [--profile main.cpuprofile] [--trace trace.json]
-//     [--release other/release.json] [--gpu] [--verbose] [--profile-dir DIR] [--reload] [--port N] [--log console.txt]
+//     [--release other/release.json] [--gpu] [--verbose] [--strict] [--expect-chunks N]
+//     [--profile-dir DIR] [--reload] [--port N] [--log console.txt]
 // Without --gpu, WebGPU runs on SwiftShader (a machine without a GPU). --profile-dir keeps the
 // browser profile (OPFS included) in DIR; --reload then opens the page a second time in it
 // without ?shaderpack= (the saved pack and selection must carry over) and saves a second
@@ -13,12 +14,14 @@ import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
+import { watchFrameRate } from "./bench-frames.mjs";
 
 const { values } = parseArgs({ options: {
   args: { type: "string" }, seconds: { type: "string", default: "60" }, tail: { type: "string", default: "15" },
   shot: { type: "string" }, profile: { type: "string" }, trace: { type: "string" }, release: { type: "string" },
   site: { type: "string", default: "horizon" }, shaderpack: { type: "string" },
   gpu: { type: "boolean", default: false }, verbose: { type: "boolean", default: false },
+  strict: { type: "boolean", default: false }, "expect-chunks": { type: "string" },
   "profile-dir": { type: "string" }, log: { type: "string" }, reload: { type: "boolean", default: false }, port: { type: "string" },
 } });
 if (values.reload && !values["profile-dir"]) throw new Error("--reload needs --profile-dir");
@@ -99,27 +102,29 @@ try {
     const body = await readFile(values.shaderpack);
     await page.route(`${origin}/bench-shaderpack.zip`, (route) => route.fulfill({ contentType: "application/zip", body }));
   }
-  const samples = [], t0 = Date.now(), log = values.log ? [] : null;
+  const reportFrameRate = watchFrameRate(page, {
+    tail, strict: values.strict, expectedChunks: values["expect-chunks"], verbose: values.verbose,
+  });
+  // Shader pack lines (always) and the whole console (--log), beside the frame-rate watch.
+  const t0 = Date.now(), log = values.log ? [] : null;
   page.on("console", (message) => {
     const text = message.text(), s = (Date.now() - t0) / 1000;
-    const status = text.match(/Horizon web: frame (\d+).*?chunks (\d+)/);
-    if (status) samples.push({ s, frame: Number(status[1]), chunks: Number(status[2]) });
     if (log) log.push(`[${s.toFixed(1)}] ${text}`);
     const pack = /shader ?pack|probation|horizon-shaders|horizonPersist/i.test(text) && !/Horizon web: (cpu|frame)/.test(text);
-    if (values.verbose || pack || /error|panic|Failed/i.test(text)) {
-      console.log(`[${s.toFixed(1)}] ${text.slice(0, pack ? 2000 : 300)}`);
-    }
+    if (pack && !values.verbose) console.log(`[${s.toFixed(1)}] ${text.slice(0, 2000)}`);
   });
-  page.on("pageerror", (error) => console.log("pageerror", error.message));
   // One visit: open the page, press Play, wait for the game.
   const visit = async (withPack) => {
     const query = new URLSearchParams({ name: "Bench" });
     if (values.args) query.set("args", values.args);
     if (withPack && values.shaderpack) query.set("shaderpack", `${origin}/bench-shaderpack.zip`);
     await page.goto(`${origin}/?${query}`);
-    // The start page waits for its Play button.
-    const play = page.getByRole("button", { name: /^Play/ });
-    await play.first().waitFor({ timeout: 30000 }).then(() => play.first().click(), () => {});
+    // The menu starts automatically with ?args=. Older pages can still need a click.
+    const play = page.getByRole("button", { name: /^Play/ }).first();
+    await Promise.race([
+      play.waitFor({ timeout: 30000 }).then(() => play.click(), () => {}),
+      page.waitForFunction(() => window.horizonStatus, null, { timeout: 30000 }).catch(() => {}),
+    ]);
     await page.waitForFunction(() => window.horizonStarted || window.horizonError, null, { timeout: 300000 });
   };
   await visit(true);
@@ -174,15 +179,7 @@ try {
     if (values.shot) await shot(values.shot.replace(/(\.png)?$/, "-reload.png"));
   }
   if (log) await writeFile(values.log, log.join("\n") + "\n");
-  const error = await page.evaluate(() => window.horizonError ?? null);
-  if (error) console.log(`error: ${error}`);
-  const rates = samples.slice(1).map((x, i) => (x.frame - samples[i].frame) / (x.s - samples[i].s));
-  console.log(`fps per status line: ${rates.map((x) => x.toFixed(1)).join(" ")}`);
-  const last = samples.slice(-(tail + 1));
-  if (last.length > 1) {
-    const fps = (last.at(-1).frame - last[0].frame) / (last.at(-1).s - last[0].s);
-    console.log(`steady fps (last ${last.length - 1} intervals): ${fps.toFixed(2)}`);
-  }
+  reportFrameRate(await page.evaluate(() => window.horizonError ?? null));
 } finally {
   await context.close();
   await browser?.close();

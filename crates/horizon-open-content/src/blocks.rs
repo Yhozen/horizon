@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 pub enum Tier {
     /// In the creative palette: placeable, breakable, with an item.
     Palette,
-    /// Terrain the preset generates but players cannot pick (air, water, grass).
+    /// Terrain and fluids players cannot pick (air, water, lava, grass).
     Terrain,
     /// A Minecraft block without content yet, registered so the numbering is
     /// Minecraft's: never generated or offered, every state inert, with no
@@ -33,8 +33,14 @@ pub enum Form {
     Cross,
     /// A fluid surface drawn by the fluid renderer.
     Fluid,
+    /// Solid but not a full cube in some states: its shapes come from
+    /// [`crate::shapes::of`] per state (slabs, stairs).
+    Shaped,
     /// Present only so loaders resolve its name.
     Inert,
+    /// A wall, fence, gate, pane or bars: its shapes and models follow its
+    /// connections ([`crate::connected`]).
+    Connected(crate::connected::Family),
 }
 
 /// The render layer (`ChunkSectionLayer`).
@@ -81,9 +87,31 @@ pub enum Faces {
         lit_north: &'static str,
     },
     Cross(&'static str),
+    /// A slab: its halves' bottom, top and side, and the six faces of the
+    /// double slab (down, up, north, south, west, east).
+    Slab {
+        bottom: &'static str,
+        top: &'static str,
+        side: &'static str,
+        double: [&'static str; 6],
+    },
+    /// Stairs: the bottom, top and side of its models.
+    Stairs {
+        bottom: &'static str,
+        top: &'static str,
+        side: &'static str,
+    },
+    /// Models drawn by [`crate::plants`] from its facts file.
+    Plant,
     Fluid {
         still: &'static str,
         flow: &'static str,
+    },
+    /// Walls, fences and gates: one texture; panes and bars: the pane and
+    /// its edge.
+    Connected {
+        texture: &'static str,
+        edge: &'static str,
     },
 }
 
@@ -530,6 +558,9 @@ pub fn defined() -> Vec<Block> {
         numbering::blocks().iter().map(|b| (b.name, b)).collect();
     let mut blocks = authored();
     crate::cubes::add(&mut blocks);
+    crate::slabs::add(&mut blocks);
+    crate::connected::add(&mut blocks);
+    crate::plants::add(&mut blocks);
     blocks
         .into_iter()
         .map(|mut block| {
@@ -709,30 +740,22 @@ fn authored() -> Vec<Block> {
         wool("purple_wool", "Purple Wool", 0x7F3FB2),
     ]);
     blocks.extend([
+        fluid("water", "Water", 0x4040FF, Layer::Translucent),
         Block {
-            id: "water",
-            name: "Water",
-            tier: Tier::Terrain,
-            form: Form::Fluid,
-            layer: Layer::Translucent,
-            faces: Faces::Fluid {
-                still: "water_still",
-                flow: "water_flow",
-            },
-            properties: LEVELS,
-            defaults: &[("level", "0")],
-            hardness: 100.0,
-            resistance: 100.0,
-            light: 0,
-            lit_light: 0,
-            opacity: 1,
-            sound: Sound::None,
-            classes: &["LiquidBlock", "Block"],
-            map_color: 0x4040FF,
-            category: None,
-            mining: HAND,
-            drop: Drop::Nothing,
-            friction: 0.6,
+            light: 15,
+            ..fluid("lava", "Lava", 0xFF0000, Layer::Solid)
+        },
+        // Minecraft's bubble column is water to look at and to swim in (its
+        // fluid is a water source); the server pushes players up or down.
+        Block {
+            id: "bubble_column",
+            name: "Bubble Column",
+            hardness: 0.0,
+            resistance: 0.0,
+            classes: &["BubbleColumnBlock", "Block"],
+            properties: NO_PROPERTIES,
+            defaults: &[],
+            ..fluid("water", "Water", 0x4040FF, Layer::Translucent)
         },
         Block {
             tier: Tier::Terrain,
@@ -978,6 +1001,38 @@ fn authored() -> Vec<Block> {
     blocks
 }
 
+/// A fluid block (`LiquidBlock`) named as its fluid, `water` or `lava`: drawn
+/// by the fluid renderer from `<id>_still` and `<id>_flow`, with no collision
+/// or item; level 0 is the source, 1 to 7 flowing, 8 and up falling.
+fn fluid(id: &'static str, name: &'static str, map_color: u32, layer: Layer) -> Block {
+    let (still, flow) = match id {
+        "lava" => ("lava_still", "lava_flow"),
+        _ => ("water_still", "water_flow"),
+    };
+    Block {
+        id,
+        name,
+        tier: Tier::Terrain,
+        form: Form::Fluid,
+        layer,
+        faces: Faces::Fluid { still, flow },
+        properties: LEVELS,
+        defaults: &[("level", "0")],
+        hardness: 100.0,
+        resistance: 100.0,
+        light: 0,
+        lit_light: 0,
+        opacity: 1,
+        sound: Sound::None,
+        classes: &["LiquidBlock", "Block"],
+        map_color,
+        category: None,
+        mining: HAND,
+        drop: Drop::Nothing,
+        friction: 0.6,
+    }
+}
+
 /// The inert stand-in for a Minecraft block without content ([`all`] gives
 /// it Minecraft's properties).
 pub fn support(id: &'static str) -> Block {
@@ -1058,7 +1113,7 @@ impl Block {
         self.tier == Tier::Palette
     }
     pub fn collides(&self) -> bool {
-        matches!(self.form, Form::Cube | Form::SeeThroughCube)
+        matches!(self.form, Form::Cube | Form::SeeThroughCube | Form::Shaped)
     }
     pub fn opaque(&self) -> bool {
         self.form == Form::Cube
@@ -1066,7 +1121,9 @@ impl Block {
     /// Its outline when targeted: a full cube, the grass's smaller box, or none.
     pub fn outline(&self) -> Vec<[f64; 6]> {
         match self.form {
-            Form::Cube | Form::SeeThroughCube => vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]],
+            Form::Cube | Form::SeeThroughCube | Form::Shaped => {
+                vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]
+            }
             Form::Cross if self.id == "short_grass" => {
                 vec![[0.125, 0.0, 0.125, 0.875, 0.8125, 0.875]]
             }
@@ -1080,6 +1137,17 @@ impl Block {
             self.lit_light
         } else {
             self.light
+        }
+    }
+    /// The fluid it is made of (`water` or `lava`), if it is a fluid block.
+    pub fn fluid(&self) -> Option<&'static str> {
+        match self.faces {
+            Faces::Fluid {
+                still: "lava_still",
+                ..
+            } => Some("lava"),
+            Faces::Fluid { .. } => Some("water"),
+            _ => None,
         }
     }
     /// Every texture its model and fluid renderer read.
@@ -1101,7 +1169,20 @@ impl Block {
                 all.push(lit_north);
                 all
             }
+            Faces::Slab {
+                bottom,
+                top,
+                side,
+                double,
+            } => {
+                let mut all = vec![bottom, top, side];
+                all.extend(double);
+                unique(&all)
+            }
+            Faces::Stairs { bottom, top, side } => unique(&[bottom, top, side]),
             Faces::Fluid { still, flow } => vec![still, flow],
+            Faces::Connected { texture, edge } => unique(&[texture, edge]),
+            Faces::Plant => crate::plants::textures(self.id),
         }
     }
 }
@@ -1181,7 +1262,7 @@ mod tests {
     }
 
     /// The number of palette blocks (checked again by the client's test).
-    pub const PALETTE_BLOCKS: usize = 281;
+    pub const PALETTE_BLOCKS: usize = 1009;
 
     #[test]
     fn states_vary_the_last_property_fastest_and_have_a_default() {

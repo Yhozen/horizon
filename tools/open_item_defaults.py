@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write the default components of Minecraft's items that are not blocks (docs/open-creative.md).
+"""Write the default components of Minecraft's items (docs/open-creative.md).
 
 Reads the prepared resources of the pinned Minecraft version (`.local/horizon-client/26.3`, made
 by `horizon-prepare` from the player's own install): `items.json` (each item's default
@@ -11,10 +11,14 @@ uses). Writes `crates/horizon-open-content/data/items/defaults.json`:
        "rotten_flesh": {"components": {the ones that differ from base}},
        "iron_sword": {"handheld": true, "components": {...}},
        "compass": {"texture": "item/compass_16", "components": {...}},
+       ...},
+     "blocks": {
+       "oak_planks": {"components": {"minecraft:cooking_fuel": {...}}},
        ...}}
 
-Items are every name of `data/registries/item.txt` that is not a block name, in registry order,
-one per line. `item_model` and `item_name` are left out: the generator writes its own. Only facts
+`items` are every name of `data/registries/item.txt` that is not a block name, `blocks` every
+block item (the generator uses an entry when it writes that block), in registry order, one per
+line; both are relative to the same base. `item_model` and `item_name` are left out: the generator writes its own. Only facts
 are written (numbers, identifiers, booleans), never translated text.
 
     python3 tools/open_item_defaults.py [--resources DIR] [--check]
@@ -52,8 +56,9 @@ def render(resources):
     items = (DATA / "registries" / "item.txt").read_text().split()
     blocks = set((DATA / "registries" / "block.txt").read_text().split())
     names = [n for n in items if n not in blocks]
+    block_items = [n for n in items if n in blocks]
     components = {}
-    for name in names:
+    for name in names + block_items:
         c = {k: v for k, v in prototypes[f"minecraft:{name}"].items() if k not in OWN}
         for k, v in c.items():
             if has_text(v):
@@ -66,6 +71,13 @@ def render(resources):
         if all(key in components[n] for n in names):
             values = [dumps(components[n][key]) for n in names]
             base[key] = json.loads(max(sorted(set(values)), key=values.count))
+    def diff(name):
+        c = components[name]
+        out = {k: v for k, v in c.items() if k not in base or dumps(base[k]) != dumps(v)}
+        # A base component this item lacks: written as null (removed).
+        out.update({k: None for k in base if k not in c})
+        return out
+
     lines = []
     for name in names:
         entry = {}
@@ -78,13 +90,12 @@ def render(resources):
             layer0 = model.get("textures", {}).get("layer0", "").removeprefix("minecraft:")
             if layer0 and layer0 != f"item/{name}":
                 entry["texture"] = layer0
-        c = components[name]
-        diff = {k: v for k, v in c.items() if k not in base or dumps(base[k]) != dumps(v)}
-        # A base component this item lacks: written as null (removed).
-        diff.update({k: None for k in base if k not in c})
-        entry["components"] = diff
+        entry["components"] = diff(name)
         lines.append(f"{dumps(name)}:{dumps(entry)}")
-    return '{"base":' + dumps(base) + ',\n"items":{\n' + ",\n".join(lines) + "\n}}\n"
+    # Block items: only their components (the block's own model draws them).
+    block_lines = [f"{dumps(name)}:{dumps({'components': diff(name)})}" for name in block_items]
+    return ('{"base":' + dumps(base) + ',\n"items":{\n' + ",\n".join(lines)
+            + '\n},\n"blocks":{\n' + ",\n".join(block_lines) + "\n}}\n")
 
 
 def main():
@@ -101,7 +112,7 @@ def main():
         return 0
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(text)
-    print(f"wrote {OUT.relative_to(ROOT)} ({text.count(chr(10)) - 3} items)")
+    print(f"wrote {OUT.relative_to(ROOT)} ({text.count(chr(10)) - 5} items)")
     return 0
 
 

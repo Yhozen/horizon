@@ -30,18 +30,18 @@ pub enum Face {
 
 /// A face pixel's colour, from the face, the pixel (x from the viewer's left, y from the
 /// top) and the face's size. Alpha 0 leaves the pixel clear.
-type Paint = Box<dyn Fn(Face, u32, u32, u32, u32) -> [u8; 4]>;
+pub(crate) type Paint = Box<dyn Fn(Face, u32, u32, u32, u32) -> [u8; 4]>;
 
 /// One box of a part: at `min` with `size` (model units), its skin at texture origin
 /// `uv` in the standard box layout, grown by `grow` on every side (the texture keeps
 /// the unscaled size), and `mirror`ed left to right as Minecraft's mirrored boxes are.
-struct Box3 {
-    min: [f32; 3],
-    size: [f32; 3],
-    uv: [u32; 2],
-    grow: f32,
-    mirror: bool,
-    paint: Paint,
+pub(crate) struct Box3 {
+    pub(crate) min: [f32; 3],
+    pub(crate) size: [f32; 3],
+    pub(crate) uv: [u32; 2],
+    pub(crate) grow: f32,
+    pub(crate) mirror: bool,
+    pub(crate) paint: Paint,
 }
 
 /// One part: its boxes, posed at `pivot` with `rot` (radians), and optional child
@@ -126,7 +126,7 @@ fn walk<'a>(cubes: &'a [Cube], out: &mut Vec<&'a Cube>) {
 /// the order of the rectangle's (u1, v0) (u0, v0) (u0, v1) (u1, v1), the pixel
 /// rectangle (u0, v0, u1, v1) and its outward normal. A mirrored box swaps its X
 /// extent, so its sides and every face read the other way round.
-fn faces(b: &Box3) -> [(Face, [[f32; 3]; 4], [u32; 4], [f32; 3]); 6] {
+pub(crate) fn faces(b: &Box3) -> [(Face, [[f32; 3]; 4], [u32; 4], [f32; 3]); 6] {
     let [mut x0, y0, z0] = b.min.map(|v| v - b.grow);
     let [mut x1, y1, z1] = [
         b.min[0] + b.size[0] + b.grow,
@@ -1349,14 +1349,26 @@ fn leak_attrs(health: f64) -> &'static [(&'static str, f64)] {
     Box::leak(vec![("max_health", health), ("movement_speed", 0.25)].into_boxed_slice())
 }
 
-/// The entity types' names, for the network registry.
+/// The entity types' names, for the network registry: these mobs', then
+/// [`crate::creatures`]'.
 pub fn names() -> Vec<&'static str> {
+    own_names()
+        .into_iter()
+        .chain(crate::creatures::names().into_iter().map(leak))
+        .collect()
+}
+
+/// The names of the mobs built here.
+pub fn own_names() -> Vec<&'static str> {
     mobs().into_iter().map(|m| m.name).collect()
 }
 
 /// Writes every mob's skins and returns its models and types, for `entity-models.json`
-/// and `entity-types.json`.
-pub fn write(bundle: &mut Bundle) -> Result<(Map<String, Value>, Map<String, Value>)> {
+/// and `entity-types.json`, [`crate::creatures`]' included.
+pub fn write(
+    bundle: &mut Bundle,
+    sources: &crate::sources::Sources,
+) -> Result<(Map<String, Value>, Map<String, Value>)> {
     let mut models = Map::new();
     let mut types = Map::new();
     for mob in mobs() {
@@ -1397,6 +1409,10 @@ pub fn write(bundle: &mut Bundle) -> Result<(Map<String, Value>, Map<String, Val
             }),
         );
     }
+    // The creatures after these mobs: a giant wears the zombie's skin.
+    let (more_models, more_types) = crate::creatures::write(bundle, sources)?;
+    models.extend(more_models);
+    types.extend(more_types);
     Ok((models, types))
 }
 

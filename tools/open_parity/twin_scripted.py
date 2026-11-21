@@ -5,6 +5,7 @@ drives the client with horizon-ctl exactly as it drives the other one, and retur
 by name. Both clients run the same script against the same world; only the replies are compared.
 `client.catch_up(console)` returns once the client has everything the server sent so far.
 """
+import os
 import re
 import time
 
@@ -167,4 +168,35 @@ class SwimRelog:
         return out
 
 
-SCRIPTED = [Furnace(), RottenFlesh(), SwimRelog()]
+class Stairs:
+    """Walk up stairs and a slab into a wall: where the player stands after, and the states set."""
+    name = 'stairs'
+    # Going east from x 2: a stair, a stair on planks, a slab on planks, then a wall of planks.
+    BUILD = [('2 -60 -1 2 -60 1', 'oak_stairs[facing=east]'), ('3 -60 -1 4 -59 1', 'oak_planks'),
+             ('3 -59 -1 3 -59 1', 'stone_brick_stairs[facing=east]'), ('4 -58 -1 4 -58 1', 'oak_slab'),
+             ('5 -60 -1 5 -55 1', 'oak_planks'),
+             ('0 -60 3 0 -60 3', 'cut_copper_slab[type=top,waterlogged=true]'),
+             ('1 -60 3 1 -60 3', 'oak_stairs[facing=north,half=top,shape=outer_left]')]
+
+    def run(self, client, console, relog):
+        out = {}
+        reset(console, [f'clear {PLAYER}', f'effect clear {PLAYER}']
+              + [f'fill {area} minecraft:{block}' for area, block in self.BUILD]
+              + [f'tp {PLAYER} 0.5 -60 0.5 -90 0'])
+        client.catch_up(console)
+        out['states'] = [client.ctl('block', *pos).get('state') for pos in [(2, -60, 0), (3, -59, 0), (4, -58, 0), (0, -60, 3), (1, -60, 3)]]
+        if shots := os.environ.get('HORIZON_TWIN_SHOTS'):
+            # A look at the steps from the start, for people (never compared).
+            client.ctl('look-at', 4, -58.5, 1.5)
+            client.ctl('screenshot', f'{shots}/stairs-{client.label}.png', check=False)
+            client.ctl('look', -90, 0)
+        client.ctl('move', 'forward', 3)
+        time.sleep(1.0)
+        p = client.ctl('state')['player']
+        out['after walking'] = {'x': round(p['position'][0], 2), 'y': round(p['position'][1], 3),
+                                'on_ground': p.get('on_ground')}
+        reset(console, [f'fill {area} minecraft:air' for area, _ in self.BUILD])
+        return out
+
+
+SCRIPTED = [Furnace(), RottenFlesh(), SwimRelog(), Stairs()]

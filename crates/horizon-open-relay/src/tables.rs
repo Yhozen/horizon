@@ -73,6 +73,8 @@ pub struct Open {
     pub brand: String,
     /// Which registered names have content (`horizon-open-coverage.json`).
     pub coverage: Coverage,
+    /// The recipes the open recipe book can show (`data/minecraft/recipe`).
+    pub book: crate::recipes::OpenBook,
 }
 
 /// `horizon-open-coverage.json` (docs/open-creative.md, "Coverage"): per
@@ -199,6 +201,7 @@ impl Open {
             visible,
             brand: brand(&read("horizon-open-provenance.json")?),
             coverage,
+            book: crate::recipes::OpenBook::load(root)?,
         })
     }
 }
@@ -272,6 +275,10 @@ pub struct Tables {
     pub components: Vec<Option<i32>>,
     pub components_back: Vec<Option<i32>>,
     pub open_component_names: HashMap<String, i32>,
+    /// Vanilla item names by id, to match recipe displays by name.
+    pub vanilla_items: Ids,
+    /// The open recipe book's displays (`recipes.rs`).
+    pub book: crate::recipes::OpenBook,
     /// Both sides number command argument types alike, so the command tree
     /// passes unchanged (its parsers are read by those numbers).
     pub commands_compatible: bool,
@@ -475,6 +482,8 @@ impl Tables {
                 .map(|(i, v)| v.filter(|v| *v == i as i32))
                 .collect(),
             open_component_names,
+            vanilla_items: vanilla_items.clone(),
+            book: open.book.clone(),
             commands_compatible: vanilla
                 .get("minecraft:command_argument_type")
                 .zip(open.registries.get("minecraft:command_argument_type"))
@@ -636,7 +645,7 @@ pub(crate) mod fixture {
                 "falling_block",
                 "player",
                 "experience_orb",
-                "wither_skeleton",
+                "parched",
             ]),
         );
         vanilla.registries.insert(
@@ -675,7 +684,7 @@ pub(crate) mod fixture {
                     "falling_block",
                     "skeleton",
                     "zombie",
-                    "wither_skeleton",
+                    "parched",
                 ][..if every_mob { 7 } else { 5 }],
             ),
         );
@@ -740,6 +749,7 @@ pub(crate) mod fixture {
             visible,
             brand: brand(b"{}"),
             coverage,
+            book: Default::default(),
         };
         Tables::build(&vanilla_states, &vanilla, &open).unwrap()
     }

@@ -10,7 +10,8 @@ creative flight, collision and swimming, a creative palette of 86 blocks and 28 
 and survival play: mining with tools that wear out, drops, hunger and health, crafting in the 2x2
 inventory grid and at the crafting table (56 recipes, all in the recipe book), and death and
 respawning. Browser worlds last for one visit: reloading the page starts a fresh world, and the
-page says so before play. There are no mobs, sound, weather, furnaces or other dimensions.
+page says so before play. Local worlds have a weather cycle. Natural mob spawning, sound,
+smelting and travel to other dimensions are unavailable in those worlds.
 
 ## Content
 
@@ -59,7 +60,30 @@ texture origins and mirrored boxes as the Java model, on a skin of the Java text
 skin from a Minecraft-layout resource pack fits it. The skins are painted by the generator,
 Horizon's own: a painter colours each face of each box. The young are the adults' boxes scaled about
 the feet, the head less, on the adult skin layout (Minecraft's young have models and skins of their
-own). Open players see these on any server they reach through the relay; the shared world's own
+own).
+
+The other creatures players meet (`crates/horizon-open-content/src/creatures.rs`): villagers,
+the wandering trader, zombie villagers, iron, snow and copper golems, the witch and every
+illager (pillager, vindicator, evoker, illusioner, ravager, vex), horses, donkeys, mules, zombie
+and skeleton horses, wolves, cats, ocelots, foxes, rabbits, bats, parrots, squid and glow squid,
+cod, salmon, tropical fish, pufferfish, dolphins, turtles, llamas and trader llamas, goats, bees,
+polar bears, pandas, mooshrooms, camels, sniffers, armadillos, allays, frogs, tadpoles, axolotls,
+slimes, magma cubes, piglins, piglin brutes, zombified piglins, hoglins, zoglins, striders, the
+ghast, blaze, wither skeleton, bogged, phantom, silverfish, endermite, both guardians, the giant,
+shulker, breeze, creaking, warden and wither. The same file carries the other entities the
+relay used to hide: every boat, chest boat and raft, the minecarts, arrows and armor stands (`thing`
+lines: no attributes, drawn by the game's own renderers). Their facts are in `data/mobs/creatures.txt`, which
+`tools/open_mob_layouts.py` writes from the prepared vanilla tables (numbers and names only): the
+entity type's hit box, category and default attributes, and every model layer the renderer draws
+(the young's own models too) as Minecraft's parts, poses and boxes, which the tool recovers from
+the baked polygons and checks by rebuilding them. `creatures::tests` compares every rebuilt layer
+with the prepared `entity-models.json`, corner for corner, when it is at hand. Each texture
+the renderer may ask for is the vendored pack's at Minecraft's path when it has one of that layout
+(a whole multiple of Minecraft's size), else painted by the generator on the model's boxes (overlays
+such as professions mostly clear). The relay shows these as themselves; its stand-ins
+(`rules.rs` `STAND_INS`) are left for the types still without content.
+
+Open players see these on any server they reach through the relay; the shared world's own
 server spawns no mobs (the open profile turns spawning off). The private preview lays its own mob
 skins over these when it plays on the open bundle, but for the young (`web.rs`'s overlay skips
 `textures/entity/**/*_baby.png`), whose layouts wouldn't fit.
@@ -78,8 +102,8 @@ The checks live at the boundaries, not through the game:
 
 - **Startup** (`crates/horizon-client/src/game/open_profile.rs`, `apply`): the bundle's files are
   checked against its provenance record (a missing or changed file stops the game with the file's
-  name and `horizon-prepare open` as the fix); `--benchmark`, `--dev-mod`, `--weather` and other
-  dimensions are errors; single player runs in the frame (`--in-frame`), and every world,
+  name and `horizon-prepare open` as the fix). Startup rejects `--benchmark`, `--dev-mod` and other
+  dimensions. Single player runs in the frame (`--in-frame`), and every world,
   a dedicated server's too, uses the open terrain preset. Arguments from the browser's `?args=`
   go through the same code.
 - **Servers** (`assets::server_brand`): an open server's `minecraft:brand` is `horizon-open/`
@@ -94,12 +118,23 @@ The checks live at the boundaries, not through the game:
 - **In the game** (`open_allows`): changing dimension is refused with a chat line, and the
   commands are those that only use what the bundle has (`OPEN_COMMANDS`: `/gamemode`, `/give`,
   `/clear`, `/tp`, `/time`, `/setblock`, `/fill`, `/clone`, `/kill`, `/xp`, `/spawnpoint`,
-  `/difficulty`, chat commands and a few more). Game rules keep weather, mob spawning, random
-  ticks, fire spread and water source creation off, and scheduled fluid ticks are dropped, so
-  water is fixed scenery.
+  `/difficulty`, `/weather`, chat commands and a few more). Game rules keep mob spawning, random
+  ticks and fire spread off. Water and lava flow as in Minecraft: the bundle's
+  `washed_away_by_fluids` and `blocks_fluid_flow` tags say where they go and where they stop.
+- **Weather**: use `--weather clear`, `--weather rain` or `--weather thunder` to set the starting
+  weather, or `/weather` in worlds where commands are enabled. Open's plains get rain with original
+  textures. On a Java server, the server's biomes determine where rain or snow appears. Rebuild an
+  existing native resource bundle with `horizon-prepare open` to pick up the precipitation textures.
 - **Menus**: the title has Singleplayer, Multiplayer, Options and Quit; the pause menu offers Back
   to the World, Options, Credits, Statistics and Save and Quit to Title (Disconnect on a server);
   the options page offers video, controls, chat, accessibility and credits only.
+- **On a server** (a Java server through `horizon-open-relay`) these limits of open's own worlds
+  step aside: the chat parses and completes with the server's command tree (the relay passes it
+  when both sides number argument types alike; without one, `OPEN_COMMANDS`), the Nether and End
+  load with the sky, fog and light of the server's dimension type (the bundle's biomes are the
+  overworld's, so biome colours are left out there), and the pause menu offers Advancements once
+  the server sends ones to display (the relay translates their icons; the bundle draws the screen
+  with its own art, `art_advancements.rs`).
 
 ## Preparing the bundle
 
@@ -118,16 +153,20 @@ The generator is `crates/horizon-open-content`:
 
 | Module | Writes |
 |---|---|
-| `blocks.rs` | the block definitions: the palette, terrain (air, water, short grass) and inert support blocks, with each block's tool, tier and drop |
+| `blocks.rs` | the block definitions: the palette, terrain (air, short grass), the fluids (water, lava, bubble column) and inert support blocks, with each block's tool, tier and drop |
+| `plants.rs` | the plants and small decorations, their per-state facts and models ([Plants](#plants-and-small-decorations)) |
 | `items.rs` | the items that are not blocks (tools, food, materials), their components, the recipes, item tags and loot tables |
 | `tables.rs` | the per-state tables (`facts.json`, `gameplay-facts.json`, `block-behaviours.json`, shapes, movement, tags), the biome, dimension and day cycle, player attributes, damage types, loot |
 | `assets.rs` | textures, block states, models (its own display transforms, `item/generated` and `item/handheld`), items, the creative palette (`creative-inventory.json`) |
 | `art.rs` | original art: bedrock, breaking cracks, the interface, sun, moon, clouds, the player's model and skin |
+| `art_advancements.rs` | original art: the advancements window, its tabs on every side, the task, goal and challenge frames, the title and description boxes, and the five tab backgrounds vanilla's advancements name |
 | `art_survival.rs` | original art: hearts (every kind the HUD draws), food, air, armour, experience and jump bars, the inventory, crafting table, recipe book and game-mode switcher screens, empty equipment slots, toasts, menu icons, world and server list icons, statistics headers, the vignette, the title's wordmark and panorama, the crafting table's faces |
 | `lang.rs` | the English interface text: hand-written labels (menus, survival, death messages, joining and leaving, statistics, the allowed commands' replies and errors), then a line for every key Minecraft's English has: every block, item, entity, effect, attribute and statistic named by its id title-cased (from `data/registries/`, a short table where that reads wrong), and every other key of `data/lang/keys.txt` (written by `tools/open_lang_keys.py`: keys and their placeholders, no text) worded by rules on the key. Each line keeps Minecraft's placeholders in Minecraft's order |
 | `sources.rs` | `content/open/sources.json`: inputs, checksums, credits and notices |
 | `numbering.rs`, `network.rs` | Minecraft's numbering from `data/` ([Numbering](#numbering)) and `registries.json` |
 | `coverage.rs` | `horizon-open-coverage.json` ([Coverage](#coverage)) |
+| `shapes.rs` | the shape library: per-state collision, outline and occlusion shapes, the facts that follow from them, the cached shape tables |
+| `slabs.rs` | slabs and stairs ([Slabs and stairs](#slabs-and-stairs)) |
 
 Building fails on a missing or changed input, a licence whose text is not vendored, a vendored
 file nobody attributed, or an unresolved model, texture, parent or item reference.
@@ -160,16 +199,123 @@ against them.
 ### Full-cube blocks
 
 `data/blocks/cubes.txt` (written by `python3 tools/open_block_facts.py` from the prepared
-vanilla tables; `--check` fails if it is out of date) gives three families their content: the
+vanilla tables; `--check` fails if it is out of date) gives four families their content: the
 182 single-state blocks of class `Block`, the 60 `RotatedPillarBlock`s (logs, stems, basalt,
-hay) and the furnace, blast furnace and smoker. One line per block, numbers and names only:
+hay), the furnace, blast furnace and smoker, and 126 blocks of other classes whose every state
+draws one plain cube model (ores, stained glass, leaves, copper, coral blocks, concrete powder,
+sand, netherrack, magma, pumpkins). Their layout says how: unturned (`cube`; `clear` when light
+shows through, as grates; `leaves` when its faces also carry a tint index; `glass` when its
+sprites are drawn translucent), turned at random among the turns Minecraft picks (`spin_y` for
+sand, `spin_xy` for netherrack), or by a horizontal `facing`; soul sand and mud are `sunken`
+(a full outline over a collision box 14 sixteenths tall, from the shape library), and soul sand
+keeps its speed factor of 0.4. Only their default state's numbers are written: the states of
+such a block differ at most in light, by `lit` (redstone ore).
+
+The `variants` layout covers 50 more blocks whose states draw full-cube models with any UVs and
+turns, or a multipart of single boxes: glazed terracotta (its faces' UVs turn), mycelium and
+podzol (the snowy model), observers, dispensers, droppers, barrels, crafters, copper bulbs,
+redstone lamps, beehives, sculk, sculk catalysts, infested stone and deepslate (mirrored
+models), suspicious sand and gravel, the creaking heart, command blocks and the three mushroom
+blocks (six faces, each a part). `data/blocks/cube_variants.txt` lists each block's variants or
+parts (state key or condition, model, x and y turns, uvlock) and each model's box and faces
+(texture, UV, rotation, tint index, cull face); `cubes.rs` writes them in the bundle's format.
+
+The `shaped` layout covers 42 blocks that are not cubes, drawn by models of any boxes:
+redstone wire, the four rails, end rods and lightning rods, carpets and moss carpet, repeaters,
+comparators, snow layers, farmland, dirt paths, ladders, levers, cakes and anvils. Their models
+are listed as the `variants` blocks' are (any elements, turned ones too, and multipart
+conditions with alternatives). `cubes.rs` gives each state Minecraft's boxes by class
+(`cubes::shape`, through the shape library), and `cubes.txt`'s last columns give the facts the
+tables cannot derive for them: piston reaction, replaceable, random ticks, lava ignition, block
+entity and item. Redstone wire is placed by redstone, so it has no item of its own. Candles,
+candle cakes, cauldrons (empty, water, lava and powder snow) and the pale moss carpet are
+`shaped` too. A candle's lit light is written once per candle count (`3,6,9,12` in the lit light
+column), and filled cauldrons and candle cakes, placed by other items, have no item of their own. One line per block, numbers and names only:
 class chain, destroy time, resistance, light (and lit light), dampening, friction, map colour,
 sound type, mining tool and level, and the texture names of its six faces (the lit front last).
 `cubes.rs` reads it: a block the crate already authors keeps its name, tab and drop and takes
 these numbers and faces; the others join the palette with a model in the bundle's own format, their
 textures from the pack (a placeholder in the map colour when it has none), and an item; each
-drops itself. Logs lying down turn their top half a turn, as Minecraft's horizontal columns do;
-furnaces turn with `facing` and show their lit front when `lit`.
+drops itself (a deepslate ore what its stone ore drops; new leaves nothing yet). Logs lying
+down turn their top half a turn, as Minecraft's horizontal columns do; furnaces turn with
+`facing` and show their lit front when `lit`.
+
+### Fluids
+
+Water and lava are Minecraft's `LiquidBlock`s: all 16 `level` states (0 the source, 1 to 7
+flowing, 8 and up falling), each with Minecraft's fluid and amount in `block-behaviours.json`,
+no collision, and the fluid tags (`minecraft:water`, `minecraft:lava` and the water tags mobs,
+plants and boats look for), so the shared code swims, sinks, slows and fogs the player as in
+Minecraft. Lava gives light 15 and is drawn from the pack's animated `lava_still` and `lava_flow`.
+The bubble column is water to look at and swim in (its fluid is a water source). A waterlogged
+state holds a water source, as Minecraft's do. On a Java server, through the relay, they all
+show as Minecraft's; in the edition's own worlds too they flow, make sources (water), and
+meet as cobblestone, stone and obsidian as Minecraft's do.
+
+### Slabs and stairs
+
+`data/blocks/slabs.txt` (written by `python3 tools/open_slab_facts.py`, `--check` as above) lists
+the 101 slabs and 97 stairs (the copper ones too): class chain, destroy time, resistance,
+friction, map colour, sound type, mining tool and level, note block instrument, whether lava
+ignites it, the bottom, top and side textures of its models, and a slab's double-block faces.
+`slabs.rs` adds them to the palette with all of Minecraft's states. Their shapes come from the
+shape library (`shapes.rs`): boxes joined with the shared engine's `VoxelShape`, as
+`Shapes.box` and `Shapes.or` do, turned and flipped per state. From each state's shapes the
+generator writes its collision and light occlusion (`cached-collision.nbt`, `occlusion.nbt`),
+outline and edges, sturdy faces, light dampening and full-block flags. A waterlogged state
+holds a water source. The models are the bundle's own, with the boxes, UVs and cull faces
+Minecraft's slab and stairs templates have; stairs have a straight, an inner and an outer
+model, turned per state with `uvlock` as Minecraft's block states do. A double slab drops two.
+
+### Walls, fences, gates, panes and bars
+
+`data/blocks/connected.txt` (written by `tools/open_block_facts.py`) lists the 32 walls, 13 fences, 12 fence gates,
+17 glass panes and 9 bars, with the same numbers and the names of their textures (a pane's
+glass and edge). The bamboo fence and gate, drawn with their own templates, are not in it yet.
+`connected.rs` gives each of their states Minecraft's collision, outline and light occlusion
+boxes: fences, walls and closed gates collide 1.5 blocks high, an open gate not at all, and a
+waterlogged state holds water and dims light by one. Their models are templates in the bundle's
+own format (`block/open_fence_post`, `open_wall_side`, `open_glass_pane_noside`...), a child per
+block naming its textures, and a multipart block state that draws a post and an arm for each
+connection, as Minecraft's do. Fences and walls have an inventory model; panes and bars are flat
+items. The `fences`, `wooden_fences`, `walls`, `fence_gates` and `bars` tags list them.
+
+`data/blocks/openings.txt`, in the same format, lists the 22 doors, 22 trapdoors (11 whose
+texture turns with them), 15 buttons and 17 pressure plates; `openings.rs` gives them their
+shapes (a door swings to its hinge side, buttons and plates never collide, a pressed plate is
+half as thick) and their templates and variants. Doors are flat items, trapdoors, buttons and
+plates show their block model. The `doors`, `trapdoors`, `buttons` and `pressure_plates` tags
+list them, and their `wooden_` tags those an axe mines.
+
+### Plants and small decorations
+
+`data/blocks/plants.txt` (written by `python3 tools/open_plant_facts.py` from the prepared
+vanilla tables, block states and model names; `--check` fails if it is out of date) gives content
+to the plants and small decorations: flowers and tall flowers, saplings, grass, ferns and bushes,
+mushrooms, fungi and roots, crops by age, sugar cane, sweet berry bushes, seagrass, kelp, coral,
+coral fans and wall fans (live and dead), sea pickles, the Nether and cave vines, vines, glow
+lichen, sculk veins, hanging roots, cobwebs, amethyst buds, torches, wall torches, redstone
+torches, lanterns, lily pads, chains and leaf litter; the chests, beds and shulker boxes; and the
+standing and wall signs of every wood (their editor boards `gui/signs/<wood>` from the pack).
+Numbers and names only: per state its light, dampening, map colour, flags, outline boxes, collision and occlusion shapes (the cached tables' cells, written
+through the shape library's table), random offset, behaviour row and the models, turns and
+weights its variant uses (or, for vines and lichen, the multipart cases); per model the layout
+its geometry follows (`cross`, `crop`, `coral_fan`, `template_torch`...) and its texture names.
+`plants.rs` reads it and draws each layout itself, with Minecraft's planes, UVs and tint
+indices, so a Minecraft-layout pack's textures fit. A block the crate already authors keeps its
+name and tab. Blocks with their own item join the palette (the item flat, with Minecraft's
+texture, tints and default components); the others (wall torches, crops, kelp's stem, tall
+seagrass) name Minecraft's item (`torch`, `wheat_seeds`) and are never offered. Seagrass, kelp
+and waterlogged states hold water, so the water draws around the plant.
+
+Chests (single and double, trapped, ender and copper) and shulker boxes have no block model of
+their own: the client's block-entity renderer draws them from their block states, with the
+`chest`, `double_chest_left`, `double_chest_right` and `shulker_box` layers of
+`entity-models.json` (`chests.rs`: Minecraft's part names, boxes, pivots and texture origins)
+and the skins under `textures/entity/chest/` and `entity/shulker/` from the pack. Their items
+are Minecraft's special item models. Beds are block models (a mattress and two legs per half),
+their textures placeholders in their wool's colour until a pack draws them. The block entity
+types `chest`, `trapped_chest`, `ender_chest` and `shulker_box` count as content.
 
 ### Support blocks
 
@@ -194,6 +340,10 @@ comes from its identifier ("Rotten Flesh"). Tool rules that name a block tag the
 left out. The edition's own items (`items::all`: tools, apple, stick, ores' materials) keep their
 own definitions.
 
+Block items take Minecraft's default components from the same file (its `blocks` list: stack
+size, furnace fuel, compost chance, container...) when the generator writes their block, so a
+block family added later gets them with no further change.
+
 ### Coverage
 
 `horizon-open-coverage.json` says which registered names have content, so the relay can keep a
@@ -215,7 +365,8 @@ states); an item with a prototype in `items.json`; an entity type the bundle can
 item, experience orb, falling block and the mobs); a menu whose screen background is in the bundle (all
 25 since the container screens). Attributes, command argument types, custom statistics, data components, the recipe
 book's categories, recipe and slot displays and statistic types are complete: the shared code
-handles every name. Block entity types, map decorations, mob effects, particles, sound events
+handles every name. Block entity types have content for the chests and shulker boxes. Map
+decorations, mob effects, particles, sound events
 and villager professions and types have no content yet. A name without content still loads:
 an inert block, an item drawn as the missing model, an entity with no model.
 
@@ -366,7 +517,7 @@ translates every packet:
   registry, counts recomputed), block updates, section updates and break effects. A vanilla block
   the bundle has keeps its properties (log axes); any other becomes the nearest open block by name,
   material and colour (`rules.rs`: dark oak → pine, concrete and terracotta → wool of the same
-  colour, deepslate → stone, lava → orange wool, chests → planks). Thin or non-solid decoration
+  colour, deepslate → stone, chests → planks). Thin or non-solid decoration
   (torches, rails, signs, buttons, carpets, beds, redstone, flower pots, vines) is air, or water
   when waterlogged. `horizon-open-relay mapping` lists what becomes air.
 - **Items**: every stack (inventories, containers, the cursor, equipment, dropped items). A
@@ -382,8 +533,18 @@ translates every packet:
   is never spawned for the open player, and its later packets are dropped.
 - **Attributes**: renumbered by name to the bundle's `attributes.json` order (the open wire ids);
   attributes the bundle lacks are dropped, so none is read as another.
-- **Dropped**: sounds, particles, block entities (sign text, chest lids), mob effects, recipes and
-  the recipe book, advancements, tags, statistics, maps, trades, explosions (no knockback),
+- **Recipe book**: the server numbers its recipe displays in its own recipe order, the open client
+  in the bundle's (`data/minecraft/recipe`, by name). Each display the server sends takes the id
+  of the bundle's recipe that draws the same (shape, ingredients, result: `recipes.rs`); the others
+  are left out, so the book never shows one recipe and places another. Picks from the book go back
+  by the server's id. Crafting itself is the server's: the open client shows the result slot the
+  server sends, so every Java recipe crafts, in the book or not.
+- **Advancements**: `update_advancements` passes with each displayed advancement's icon translated
+  as any stack is (a vanilla item the bundle lacks shows as its stand-in, named as vanilla's);
+  titles, descriptions, backgrounds (`gui/advancements/backgrounds/*`, drawn by the bundle) and
+  progress pass as sent, and so does `select_advancements_tab` (an id, no number).
+- **Dropped**: sounds, particles, block entities (sign text, chest lids), mob effects, the server's
+  recipe list (`update_recipes`: the open client reads none), tags, statistics, maps, trades, explosions (no knockback),
   waypoints, transfers and dialogs. Chat, commands, the tab list, scoreboards, titles, time, health,
   hunger and experience pass unchanged.
 - **Brand**: the server's `minecraft:brand` becomes the bundle's open brand, so open clients stay.
@@ -396,7 +557,8 @@ translates every packet:
 `policy.rs` holds what happens to each packet, in both directions: passed, passed unless its entity
 is hidden, translated, or dropped. Its test walks every packet id of the protocol: the dropped
 packets must equal `src/dropped.txt`, and every built-in registry a forwarded packet still holds in
-vanilla numbers must be listed in `src/gaps.txt` (beacon effects, villager data). Change a packet's
+vanilla numbers must be listed in `src/gaps.txt` (beacon effects, villager data, the recipe
+display kinds and book categories, which the bundle numbers as vanilla does). Change a packet's
 handling and update the list in the same change.
 
 Limits: the world looks approximate (stairs and slabs are full blocks, so the open client predicts

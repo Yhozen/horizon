@@ -364,7 +364,7 @@ fn creatures_the_bundle_lacks_show_as_a_stand_in_with_only_shared_data() {
     use horizon_protocol::entity_data::{Value, serializer as s};
     let t = tables();
     let mut c = playing(&t);
-    // A wither skeleton (vanilla 5) spawns as the bundle's skeleton (open 4).
+    // A parched (vanilla 5) spawns as the bundle's skeleton (open 4).
     let play::Clientbound::AddEntity(p) = decode(send(&mut c, add_entity(9, 5, 0))) else {
         panic!()
     };
@@ -561,4 +561,145 @@ fn clicks_send_component_ids_back() {
     };
     let carried = p.carried.unwrap();
     assert_eq!((carried.added, carried.removed), (vec![(1, 123)], vec![0]));
+}
+
+/// Recipe book displays take the id of the bundle's recipe that draws the
+/// same, the rest are left out, and the player's pick goes back by the
+/// server's id.
+#[test]
+fn recipe_displays_take_the_bundle_ids_and_picks_go_back() {
+    use horizon_protocol::packets::recipes::{
+        PlaceRecipe, RecipeBookAdd, RecipeBookEntry, RecipeBookRemove, RecipeDisplay, SlotDisplay,
+    };
+    let mut t = tables();
+    let recipes = [
+        (
+            "minecraft:a_stone",
+            serde_json::json!({"type": "minecraft:crafting_shapeless",
+                "ingredients": ["minecraft:oak_log"], "result": {"id": "minecraft:stone"}}),
+        ),
+        (
+            "minecraft:b_other",
+            serde_json::json!({"type": "minecraft:crafting_shapeless",
+                "ingredients": ["minecraft:stone"], "result": {"id": "minecraft:oak_log"}}),
+        ),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v))
+    .collect();
+    t.book = crate::recipes::OpenBook::from_recipes(&recipes);
+    let displays = crate::recipes::Displays::default();
+    let mut c = playing(&t).with_displays(displays.clone());
+    let mut s = Serverbound::new(&t).with_displays(displays);
+    assert!(s.translate(3, &[]).is_some(), "finish configuration");
+    // Vanilla items: 1 stone, 3 oak_log, 4 torch; open: 1 stone, 2 oak_log.
+    let entry = |id, ingredient, result| RecipeBookEntry {
+        id,
+        display: RecipeDisplay::Shapeless {
+            ingredients: vec![SlotDisplay::Item(ingredient)],
+            result: SlotDisplay::ItemStack(Stack::new(result, 1)),
+            station: SlotDisplay::Empty,
+        },
+        group: 0,
+        category: 2,
+        requirements: None,
+        flags: 0,
+    };
+    let add = play::Clientbound::RecipeBookAdd(RecipeBookAdd {
+        entries: vec![entry(7, 3, 1), entry(8, 4, 1), entry(9, 1, 3)],
+        replace: true,
+    });
+    let play::Clientbound::RecipeBookAdd(out) = decode(send(&mut c, add)) else {
+        panic!()
+    };
+    assert_eq!(out.entries.len(), 2, "the torch recipe is not the bundle's");
+    assert_eq!((out.entries[0].id, out.entries[1].id), (0, 1));
+    let RecipeDisplay::Shapeless { ingredients, .. } = &out.entries[0].display else {
+        panic!()
+    };
+    assert_eq!(ingredients, &vec![SlotDisplay::Item(2)], "open oak_log");
+    let pick = |s: &mut Serverbound, recipe| {
+        let (id, payload) = split(
+            &play::Serverbound::PlaceRecipe(PlaceRecipe {
+                container: 1,
+                recipe,
+                use_max: false,
+            })
+            .encode(),
+        );
+        s.translate(id, &payload).map(|out| {
+            let (id, payload) = split(&out);
+            match play::Serverbound::decode(id, &payload).unwrap() {
+                play::Serverbound::PlaceRecipe(p) => p.recipe,
+                _ => panic!(),
+            }
+        })
+    };
+    assert_eq!(pick(&mut s, 0), Some(7));
+    assert_eq!(pick(&mut s, 1), Some(9));
+    assert_eq!(pick(&mut s, 5), None, "never sent");
+    let remove = play::Clientbound::RecipeBookRemove(RecipeBookRemove { ids: vec![8, 9] });
+    let play::Clientbound::RecipeBookRemove(out) = decode(send(&mut c, remove)) else {
+        panic!()
+    };
+    assert_eq!(out.ids, vec![1]);
+    assert_eq!(pick(&mut s, 1), None, "removed");
+}
+
+#[test]
+fn advancement_icons_take_the_bundle_items() {
+    let t = tables();
+    let mut c = playing(&t);
+    let text = |s: &str| horizon_world::nbt::Tag::String(s.into());
+    let advancement = |id: &str, icon: Option<Stack>| play::Advancement {
+        id: id.into(),
+        parent: None,
+        display: icon.map(|icon| play::AdvancementDisplay {
+            title: text("Title"),
+            description: text("Description"),
+            icon,
+            frame: 2,
+            show_toast: true,
+            hidden: false,
+            background: Some("minecraft:gui/advancements/backgrounds/stone".into()),
+        }),
+        requirements: vec![vec!["done".into()]],
+        telemetry: false,
+        x: 1.0,
+        y: 0.5,
+    };
+    let packet = play::UpdateAdvancements {
+        reset: true,
+        added: vec![
+            // Vanilla's golden apple (2) is the bundle's apple (4) in the fixture.
+            advancement("minecraft:story/root", Some(Stack::new(2, 1))),
+            advancement("minecraft:recipes/root", None),
+        ],
+        removed: vec!["minecraft:story/gone".into()],
+        progress: vec![(
+            "minecraft:story/root".into(),
+            vec![("done".into(), Some(7))],
+        )],
+        show: true,
+    };
+    let play::Clientbound::UpdateAdvancements(p) = decode(send(
+        &mut c,
+        play::Clientbound::UpdateAdvancements(packet.clone()),
+    )) else {
+        panic!("advancements pass")
+    };
+    let icon = &p.added[0].display.as_ref().unwrap().icon;
+    assert_eq!((icon.item, icon.count), (4, 1));
+    // Everything but the icon is as the server sent it.
+    let mut expected = packet;
+    expected.added[0].display.as_mut().unwrap().icon = icon.clone();
+    assert_eq!(p, expected);
+    // The selected tab carries no number: it passes as it came.
+    let mut w = Writer::new();
+    w.bool(true);
+    w.string("minecraft:story/root");
+    assert_eq!(
+        c.translate(cb::SELECT_ADVANCEMENTS_TAB, &w.data),
+        Some(body(cb::SELECT_ADVANCEMENTS_TAB, &w.data))
+    );
 }

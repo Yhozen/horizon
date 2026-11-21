@@ -678,54 +678,7 @@ mod tests {
 /// Mobs the open bundle has no model for, shown as the open mob nearest in shape, so a
 /// creature that can hurt a player is never invisible. The stand-in keeps only the data
 /// every mob shares (`ENTITY_DATA_SHARED`), not the original's own.
-const STAND_INS: &[(&str, &[&str])] = &[
-    (
-        "minecraft:zombie",
-        &[
-            "zombie_villager",
-            "zombified_piglin",
-            "piglin",
-            "piglin_brute",
-            "vindicator",
-            "pillager",
-            "evoker",
-            "illusioner",
-            "witch",
-            "giant",
-        ],
-    ),
-    (
-        "minecraft:skeleton",
-        &["wither_skeleton", "bogged", "parched"],
-    ),
-    ("minecraft:cave_spider", &["silverfish", "endermite"]),
-    (
-        "minecraft:cow",
-        &[
-            "mooshroom",
-            "horse",
-            "donkey",
-            "mule",
-            "zombie_horse",
-            "skeleton_horse",
-            "llama",
-            "trader_llama",
-            "goat",
-            "camel",
-            "polar_bear",
-            "panda",
-            "hoglin",
-            "zoglin",
-            "ravager",
-            "sniffer",
-        ],
-    ),
-    (
-        "minecraft:pig",
-        &["wolf", "fox", "cat", "ocelot", "rabbit", "armadillo"],
-    ),
-    ("minecraft:chicken", &["parrot", "bat"]),
-];
+const STAND_INS: &[(&str, &[&str])] = &[("minecraft:skeleton", &["parched"])];
 
 /// Entity data entries below this index belong to every mob (Entity, LivingEntity and
 /// Mob: flags, health, effects...); a stand-in gets only those.
@@ -746,16 +699,12 @@ mod stand_in_tests {
 
     #[test]
     fn mobs_the_bundle_lacks_stand_in_by_shape_and_others_stay_hidden() {
-        assert_eq!(stand_in("minecraft:pillager"), Some("minecraft:zombie"));
-        assert_eq!(
-            stand_in("minecraft:wither_skeleton"),
-            Some("minecraft:skeleton")
-        );
-        assert_eq!(stand_in("minecraft:horse"), Some("minecraft:cow"));
-        assert_eq!(stand_in("minecraft:bat"), Some("minecraft:chicken"));
-        // The bundle's own mobs need none; unrelated shapes get none.
+        assert_eq!(stand_in("minecraft:parched"), Some("minecraft:skeleton"));
+        // The bundle's own mobs need none (its creatures too); unrelated shapes get none.
         assert_eq!(stand_in("minecraft:zombie"), None);
-        assert_eq!(stand_in("minecraft:ghast"), None);
+        assert_eq!(stand_in("minecraft:pillager"), None);
+        assert_eq!(stand_in("minecraft:horse"), None);
+        assert_eq!(stand_in("minecraft:ender_dragon"), None);
         assert_eq!(stand_in("zombie_villager"), None);
         // No mob is listed twice.
         let mut seen = std::collections::HashSet::new();

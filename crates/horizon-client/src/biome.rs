@@ -3,6 +3,8 @@
 use crate::Result;
 use horizon_core::fs;
 use horizon_core::{noise::SimplexNoise, random::LegacyRandom};
+use horizon_world::nbt::Tag;
+use horizon_world::worldgen::biome_temperature::{BiomeTemperatureSettings, TemperatureModifier};
 use serde_json::Value;
 use std::{collections::HashMap, path::Path};
 
@@ -42,11 +44,62 @@ pub struct BiomeInfo {
     /// The biome's own fog colour attribute; otherwise the dimension's applies.
     pub fog: Option<u32>,
     pub water_fog: u32,
+    temperature_modifier: TemperatureModifier,
+}
+impl BiomeInfo {
+    pub fn climate(&self) -> BiomeTemperatureSettings {
+        BiomeTemperatureSettings {
+            base_temperature: self.temperature,
+            downfall: self.downfall,
+            has_precipitation: self.precipitation,
+            modifier: self.temperature_modifier,
+        }
+    }
+}
+/// Biome ids the chunk storage holds (`chunk::BIOME_STRATEGY`'s 7 bits).
+const SERVER_ID_LIMIT: usize = 128;
+/// Colours and climate of a server biome these resources lack (`Biomes::server_ids`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ServerBiome {
+    pub sky: Option<u32>,
+    pub fog: Option<u32>,
+    pub water_fog: u32,
+    climate: Option<BiomeTemperatureSettings>,
+}
+impl ServerBiome {
+    /// From a biome's definition (its synchronized data, as JSON).
+    pub fn from_json(v: &Value) -> Self {
+        let attributes = &v["attributes"];
+        let climate = || {
+            let precipitation = &v["has_precipitation"];
+            Some(BiomeTemperatureSettings {
+                base_temperature: v["temperature"].as_f64()? as f32,
+                downfall: v["downfall"].as_f64().unwrap_or(0.5) as f32,
+                // Registry data comes from NBT, where a boolean is a byte.
+                has_precipitation: precipitation
+                    .as_bool()
+                    .or_else(|| precipitation.as_i64().map(|flag| flag != 0))?,
+                modifier: temperature_modifier(v),
+            })
+        };
+        Self {
+            sky: color(&attributes["minecraft:visual/sky_color"]),
+            fog: color(&attributes["minecraft:visual/fog_color"]),
+            water_fog: color(&attributes["minecraft:visual/water_fog_color"]).unwrap_or(0x050533),
+            climate: climate(),
+        }
+    }
 }
 pub struct Biomes {
     pub list: Vec<BiomeInfo>,
     pub index: HashMap<String, u16>,
     info_noise: SimplexNoise,
+}
+fn temperature_modifier(v: &Value) -> TemperatureModifier {
+    match v["temperature_modifier"].as_str() {
+        Some("frozen") => TemperatureModifier::Frozen,
+        _ => TemperatureModifier::None,
+    }
 }
 fn color(v: &Value) -> Option<u32> {
     match v {
@@ -132,6 +185,7 @@ impl Biomes {
                 temperature,
                 downfall,
                 precipitation: v["has_precipitation"].as_bool().unwrap_or(true),
+                temperature_modifier: temperature_modifier(&v),
                 grass: color(&effects["grass_color"])
                     .unwrap_or_else(|| sample(&grass, temperature, downfall, 0xFF00FF)),
                 modifier,
@@ -165,8 +219,60 @@ impl Biomes {
             .copied()
             .unwrap_or(0)
     }
+    /// A biome by id; a server's biome these resources lack (an id past
+    /// `list`, `server_ids`) reads as plains, as its name would.
     pub fn get(&self, id: u16) -> &BiomeInfo {
-        &self.list[usize::from(id).min(self.list.len() - 1)]
+        self.list.get(usize::from(id)).unwrap_or_else(|| {
+            &self.list[usize::from(self.id("minecraft:plains")).min(self.list.len() - 1)]
+        })
+    }
+    /// The local id of each biome of a server's registry (in its order) and
+    /// the server biomes these resources lack, which take the ids after
+    /// `list` in turn, with the colours their synchronized data gives
+    /// (`server_colours`). Ids stop where the chunk storage does
+    /// (`chunk::BIOME_STRATEGY`); past it a missing biome is plains.
+    pub fn server_ids(&self, registry: &[(String, Option<Tag>)]) -> (Vec<u16>, Vec<ServerBiome>) {
+        let mut missing = Vec::new();
+        let mut ids = Vec::with_capacity(registry.len());
+        for (name, data) in registry {
+            let next = self.list.len() + missing.len();
+            ids.push(match self.index.get(name) {
+                Some(&id) => id,
+                None if next < SERVER_ID_LIMIT => {
+                    let json = data.as_ref().map(crate::item_render::tag_json);
+                    missing.push(ServerBiome::from_json(&json.unwrap_or_default()));
+                    next as u16
+                }
+                None => self.id(name),
+            });
+        }
+        (ids, missing)
+    }
+    /// The sky, fog and water fog colours of biome `id`: these resources'
+    /// own, or for a server's biome they lack, the server's (`server`).
+    pub fn server_colours(&self, id: u16, server: &[ServerBiome]) -> ServerBiome {
+        match self.server_biome(id, server) {
+            Some(s) => s,
+            None => {
+                let b = self.get(id);
+                ServerBiome {
+                    sky: b.sky,
+                    fog: b.fog,
+                    water_fog: b.water_fog,
+                    climate: Some(b.climate()),
+                }
+            }
+        }
+    }
+    fn server_biome(&self, id: u16, server: &[ServerBiome]) -> Option<ServerBiome> {
+        usize::from(id)
+            .checked_sub(self.list.len())
+            .and_then(|i| server.get(i).copied())
+    }
+    pub fn climate(&self, id: u16, server: &[ServerBiome]) -> BiomeTemperatureSettings {
+        self.server_biome(id, server)
+            .and_then(|b| b.climate)
+            .unwrap_or_else(|| self.get(id).climate())
     }
     pub fn grass(&self, id: u16, x: f64, z: f64) -> u32 {
         let b = self.get(id);
@@ -280,5 +386,105 @@ mod blend_tests {
             last = v;
         }
         assert!(at(-2.0) > 0.0 && at(-2.0) < 0.5);
+    }
+}
+
+#[cfg(test)]
+mod server_biome_tests {
+    use super::*;
+    use horizon_world::nbt::JavaString;
+
+    fn info(name: &str, sky: u32) -> BiomeInfo {
+        BiomeInfo {
+            spawns: HashMap::new(),
+            spawn_costs: HashMap::new(),
+            creature_probability: 0.1,
+            name: name.into(),
+            temperature: 0.8,
+            downfall: 0.4,
+            precipitation: true,
+            temperature_modifier: TemperatureModifier::None,
+            grass: 0x91BD59,
+            modifier: GrassModifier::None,
+            foliage: 0x77AB2F,
+            dry_foliage: 0x5D4930,
+            water: 0x3F76E4,
+            sky: Some(sky),
+            fog: Some(sky),
+            water_fog: 0x050533,
+        }
+    }
+
+    /// A biome's synchronized climate and attributes.
+    fn data(attributes: &[(&str, &str)], temperature: f32, precipitation: bool) -> Option<Tag> {
+        let compound = |pairs: Vec<(JavaString, Tag)>| Tag::Compound(pairs.into_iter().collect());
+        Some(compound(vec![
+            (
+                JavaString::from("temperature"),
+                Tag::Float(temperature.to_bits()),
+            ),
+            (
+                JavaString::from("has_precipitation"),
+                Tag::Byte(i8::from(precipitation)),
+            ),
+            (
+                JavaString::from("attributes"),
+                compound(
+                    attributes
+                        .iter()
+                        .map(|(k, v)| (JavaString::from(*k), Tag::String(JavaString::from(*v))))
+                        .collect(),
+                ),
+            ),
+        ]))
+    }
+
+    #[test]
+    fn a_servers_biomes_the_resources_lack_keep_their_colours_and_climate() {
+        use horizon_core::position::BlockPos;
+        use horizon_world::worldgen::biome_temperature::Precipitation;
+        // The open bundle: plains only.
+        let biomes = Biomes {
+            list: vec![info("minecraft:plains", 0x7FB0FF)],
+            index: [("minecraft:plains".to_owned(), 0)].into_iter().collect(),
+            info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
+        };
+        let registry = vec![
+            ("minecraft:badlands".to_owned(), data(&[], 2.0, false)),
+            (
+                "minecraft:nether_wastes".to_owned(),
+                data(&[("minecraft:visual/fog_color", "#330808")], 2.0, false),
+            ),
+            ("minecraft:snowy_plains".to_owned(), data(&[], 0.0, true)),
+            ("minecraft:plains".to_owned(), None),
+        ];
+        let (ids, missing) = biomes.server_ids(&registry);
+        assert_eq!(ids, vec![1, 2, 3, 0]);
+        assert_eq!(missing.len(), 3);
+        // The server's Nether fog, not the bundle's plains.
+        let nether = biomes.server_colours(2, &missing);
+        assert_eq!((nether.sky, nether.fog), (None, Some(0x330808)));
+        assert_eq!(biomes.server_colours(0, &missing).sky, Some(0x7FB0FF));
+        let pos = BlockPos::new(0, 64, 0);
+        assert_eq!(
+            biomes.climate(0, &missing).precipitation_at(pos, 63),
+            Precipitation::Rain
+        );
+        assert_eq!(
+            biomes.climate(1, &missing).precipitation_at(pos, 63),
+            Precipitation::None
+        );
+        assert_eq!(
+            biomes.climate(3, &missing).precipitation_at(pos, 63),
+            Precipitation::Snow
+        );
+        // Other biome properties fall back to plains.
+        assert_eq!(biomes.get(2).name, "minecraft:plains");
+        // Past the chunk storage's ids, a missing biome is plains.
+        let many: Vec<_> = (0..200).map(|i| (format!("custom:b{i}"), None)).collect();
+        let (ids, missing) = biomes.server_ids(&many);
+        assert_eq!(missing.len(), SERVER_ID_LIMIT - 1);
+        assert_eq!(ids[199], 0);
+        assert!(ids.iter().all(|&id| usize::from(id) < SERVER_ID_LIMIT));
     }
 }

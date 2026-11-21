@@ -31,17 +31,12 @@ play/clientbound/map_item_data
 play/clientbound/merchant_offers
 play/clientbound/mount_screen_open
 play/clientbound/move_minecart_along_track
-play/clientbound/place_ghost_recipe
 play/clientbound/player_combat_end
 play/clientbound/player_combat_enter
 play/clientbound/player_look_at
 play/clientbound/post_effects
-play/clientbound/recipe_book_add
-play/clientbound/recipe_book_remove
-play/clientbound/recipe_book_settings
 play/clientbound/remove_mob_effect
 play/clientbound/resource_pack_pop
-play/clientbound/select_advancements_tab
 play/clientbound/server_links
 play/clientbound/set_camera
 play/clientbound/show_dialog
@@ -52,7 +47,6 @@ play/clientbound/store_cookie
 play/clientbound/tag_query
 play/clientbound/test_instance_block_status
 play/clientbound/transfer
-play/clientbound/update_advancements
 play/clientbound/update_mob_effect
 play/clientbound/update_recipes
 play/clientbound/update_tags

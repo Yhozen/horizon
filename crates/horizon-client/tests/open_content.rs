@@ -34,9 +34,10 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
     assert_eq!(assets.profile, ContentProfile::OpenCreative);
     let render = assets.reload(&root).unwrap();
     // Every palette block bakes faces, each on a sprite the bundle has:
-    // six for cubes, both sides of two planes for plants.
+    // six for cubes, at least two for plants (a lily pad's two sides), none
+    // for the blocks the block-entity renderer draws.
     let palette = palette_blocks();
-    assert_eq!(palette.len(), 281);
+    assert_eq!(palette.len(), 1009);
     for block in &palette {
         let name = block.id;
         let state = assets
@@ -48,10 +49,18 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
             .collect(state, BlockPos::new(0, 0, 0))
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         let faces: usize = models.iter().map(|(_, m)| m.faces.len()).sum();
-        let least = if block.form == horizon_open_content::blocks::Form::Cross {
-            4
-        } else {
-            6
+        use horizon_open_content::{blocks::Form, connected::Family};
+        let least = match block.form {
+            // Chests and shulker boxes are drawn by the block-entity
+            // renderer, as Minecraft's are: their block models bake nothing.
+            _ if name.ends_with("chest") || name.ends_with("shulker_box") => 0,
+            Form::Cross => 2,
+            // Thin shaped blocks (rails, ladders, carpets...) may bake as
+            // little as one flat plane's two sides.
+            Form::Shaped => 2,
+            // A door's lower half has no top face.
+            Form::Connected(Family::Door) => 5,
+            _ => 6,
         };
         assert!(faces >= least, "{name} bakes {faces} faces");
     }
@@ -72,6 +81,7 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
     let _ = behaviours;
     let biomes = Biomes::load(&root).unwrap();
     assert_eq!(biomes.list.len(), 1);
+    assert!(biomes.get(0).precipitation);
     Environment::load(&root).unwrap();
     LightTables::load(&root, assets.registry, &facts).unwrap();
     collisions::load(&root, assets.registry).unwrap();
@@ -152,6 +162,9 @@ fn the_open_bundle_loads_through_the_shared_loaders() {
         "gui/recipe_book",
         "item/stick",
         "item/wooden_pickaxe",
+        "environment/rain",
+        "environment/snow",
+        "particle/open_rain",
     ] {
         assert!(
             atlas.sprites.contains_key(sprite),
@@ -208,8 +221,11 @@ fn every_open_mob_loads_with_its_models_and_skins() {
     use horizon_client::mobs::{Mob, MobTypes, render};
     let root = bundle("mobs");
     let types = MobTypes::load(&root).unwrap();
-    let names = horizon_open_content::mobs::names();
-    assert_eq!(names.len(), 13);
+    // The boats, minecarts, arrows and armor stands have renderers of their own.
+    let objects = horizon_open_content::creatures::object_names();
+    let mut names = horizon_open_content::mobs::names();
+    names.retain(|n| !objects.iter().any(|o| o == n));
+    assert_eq!((names.len(), objects.len()), (83, 32));
     for name in names {
         let id = format!("minecraft:{name}");
         let kind = std::sync::Arc::new(

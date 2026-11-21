@@ -22,23 +22,11 @@ impl Behaviours {
         level: &L,
         pos: BlockPos,
     ) -> Option<BiomeTemperatureSettings> {
-        let features = self.live_features()?;
-        let biome = features.biome_id(level.biome_name(pos)?)?;
-        features.biome_temperature(biome)
-    }
-    /// `Biome.getPrecipitationAt(pos, seaLevel)`.
-    fn precipitation_kind(
-        settings: BiomeTemperatureSettings,
-        pos: BlockPos,
-        sea: i32,
-    ) -> BiomePrecipitation {
-        if !settings.has_precipitation {
-            BiomePrecipitation::None
-        } else if settings.height_adjusted(pos, sea) < 0.15 {
-            BiomePrecipitation::Snow
-        } else {
-            BiomePrecipitation::Rain
+        if let Some(features) = self.live_features() {
+            let biome = features.biome_id(level.biome_name(pos)?)?;
+            return features.biome_temperature(biome);
         }
+        level.biome_temperature(pos)
     }
     /// `getHeightmapPos(MOTION_BLOCKING, pos)`, scanning down from the
     /// world surface (air neither blocks motion nor holds a fluid).
@@ -59,7 +47,7 @@ impl Behaviours {
         BlockPos::new(pos.x, level.min_y(), pos.z)
     }
     /// Answers for one `ServerLevel.tickPrecipitation` at the column of `pos`;
-    /// None without live features or a biome.
+    /// None without biome climate data.
     pub fn precipitation_info<L: LevelAccess + ?Sized>(
         &self,
         level: &L,
@@ -90,7 +78,7 @@ impl Behaviours {
                 !self.is_water_fluid(self.fluid(level.block_state(n)).kind())
             });
         // Biome.shouldSnow(level, top)
-        let snows_at_top = Self::precipitation_kind(settings, top, sea) == BiomePrecipitation::Snow
+        let snows_at_top = settings.precipitation_at(top, sea) == BiomePrecipitation::Snow
             && inside(top)
             && level.block_light(top) < 10
             && {
@@ -98,7 +86,7 @@ impl Behaviours {
                 (self.is_air(state) || self.block(state) == self.named.snow)
                     && self.snow_survives(level, top)
             };
-        let kind = match Self::precipitation_kind(settings, below, sea) {
+        let kind = match settings.precipitation_at(below, sea) {
             BiomePrecipitation::None => PrecipitationKind::None,
             BiomePrecipitation::Rain => PrecipitationKind::Rain,
             BiomePrecipitation::Snow => PrecipitationKind::Snow,
@@ -131,8 +119,7 @@ impl Behaviours {
         if self.motion_blocking_top(level, pos).y > pos.y {
             return false;
         }
-        self.biome_settings(level, pos).is_some_and(|s| {
-            Self::precipitation_kind(s, pos, sea_level(level)) == BiomePrecipitation::Rain
-        })
+        self.biome_settings(level, pos)
+            .is_some_and(|s| s.precipitation_at(pos, sea_level(level)) == BiomePrecipitation::Rain)
     }
 }

@@ -160,11 +160,7 @@ pub async fn start_overlaid(
         "Horizon: {files} resource files mounted at {}, {replaced} wearing the given art",
         root.display()
     );
-    horizon_client::gfx::open_web_gpu()
-        .await
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    crate::game::set_web_args(args);
-    crate::game::run().map_err(|e| JsValue::from_str(&format!("Horizon: {e}")))
+    crate::game::run_web(args).await
 }
 
 /// Puts one file into the game's file system, before `start` or while the game
@@ -195,9 +191,5 @@ pub async fn start(archive: Vec<u8>, args: Vec<String>) -> Result<(), JsValue> {
         "Horizon: {files} resource files mounted at {}",
         root.display()
     );
-    horizon_client::gfx::open_web_gpu()
-        .await
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    crate::game::set_web_args(args);
-    crate::game::run().map_err(|e| JsValue::from_str(&format!("Horizon: {e}")))
+    crate::game::run_web(args).await
 }
