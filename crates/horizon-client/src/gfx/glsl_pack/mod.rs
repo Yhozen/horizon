@@ -35,9 +35,11 @@ use pipelines::Program;
 use targets::{Need, ShadowTargets, Targets};
 
 /// Features a pack's targets use when the adapter has them (32-bit float
-/// targets that filter and blend, 11/11/10 float targets).
+/// targets that filter and blend, 11/11/10 float targets, exact 16-bit
+/// normalized targets).
 pub(crate) const FEATURES: wgpu::Features = wgpu::Features::FLOAT32_FILTERABLE
     .union(wgpu::Features::FLOAT32_BLENDABLE)
+    .union(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM)
     .union(wgpu::Features::RG11B10UFLOAT_RENDERABLE);
 
 /// The uniform block, once per kind of pass (the camera's, the light's, the hand's).
