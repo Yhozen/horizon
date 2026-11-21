@@ -231,6 +231,16 @@ impl State {
         self.plan
             .outputs
             .insert(kind, directives::fragment_outputs(&p.fsh));
+        // A pass samples the mips it rebuilds itself: they must be in the
+        // plan while it is translated, not only for the passes after it.
+        if kind.is_fullscreen() {
+            let mips = directives::mipmaps(&p.raw_fsh, &p.fsh);
+            if mips.is_empty() {
+                self.plan.mipmaps.remove(&kind);
+            } else {
+                self.plan.mipmaps.insert(kind, mips);
+            }
+        }
         if !compile {
             return Ok((None, draw_buffers));
         }
@@ -639,6 +649,7 @@ impl Session {
             }
             Err(e) => {
                 st.plan.outputs.remove(&kind);
+                st.plan.mipmaps.remove(&kind);
                 if strict {
                     return self.fail(e);
                 }

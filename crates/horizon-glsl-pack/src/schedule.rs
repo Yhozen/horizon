@@ -261,6 +261,37 @@ impl FrameSchedule {
     }
 }
 
+/// For each `colortexN`, whether the full-screen pass `kind` samples it with
+/// mipmaps: only when the side it reads had its mip chain rebuilt earlier in
+/// the frame (or before `kind` itself). A pass that writes a mipmapped buffer
+/// flips it, and the side written has no fresh mips: the next pass reads it
+/// at level 0. (Fantasy's composite6 mipmaps colortex3 and writes it; its
+/// FXAA in composite7 then read stale levels where implicit derivatives
+/// were large, which left black dots.)
+pub fn mipmapped_reads(plan: &PackPlan, kind: ProgramKind) -> [bool; BUFFERS] {
+    let mut kinds: Vec<ProgramKind> = plan
+        .programs
+        .keys()
+        .chain(plan.draw_buffers.keys())
+        .chain(plan.mipmaps.keys())
+        .copied()
+        .filter(|k| k.is_fullscreen() && *k < kind)
+        .collect();
+    kinds.sort();
+    kinds.dedup();
+    let mut sides = [Side::Main; BUFFERS];
+    let mut fresh = BTreeSet::new();
+    for k in kinds {
+        fresh.extend(pass(plan, k, &mut sides).regenerate_mips);
+    }
+    for &b in plan.mipmaps.get(&kind).into_iter().flatten() {
+        if usize::from(b) < BUFFERS {
+            fresh.insert((b, sides[usize::from(b)]));
+        }
+    }
+    std::array::from_fn(|b| fresh.contains(&(b as u8, sides[b])))
+}
+
 /// `kind` run on `sides`, which it then flips.
 fn pass(plan: &PackPlan, kind: ProgramKind, sides: &mut [Side; BUFFERS]) -> Pass {
     let reads = *sides;
