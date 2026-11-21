@@ -43,6 +43,8 @@ pub(super) fn device_features(shader_pack_requested: bool) -> wgpu::Features {
         wgpu::Features::FLOAT32_FILTERABLE
             | wgpu::Features::FLOAT32_BLENDABLE
             | wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
+            // 16-bit normalized formats render and blend only with these.
+            | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
             | wgpu::Features::RG11B10UFLOAT_RENDERABLE
     } else {
         wgpu::Features::empty()

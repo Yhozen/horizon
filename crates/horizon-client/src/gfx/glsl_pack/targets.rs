@@ -21,7 +21,12 @@ pub(super) fn wgpu_format(
     use wgpu::TextureFormat as T;
     let float32 =
         features.contains(wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE);
-    let norm16 = features.contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM);
+    // wgpu only guarantees 16-bit normalized formats as storage: rendering and
+    // blending into them come with the adapter's own format features.
+    let norm16 = features.contains(
+        wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
+            | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+    );
     match format {
         BufferFormat::R8 => T::R8Unorm,
         BufferFormat::Rg8 => T::Rg8Unorm,
