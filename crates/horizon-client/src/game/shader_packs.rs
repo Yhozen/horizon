@@ -290,10 +290,15 @@ impl Job {
             if !self.handle.is_finished() {
                 return None;
             }
-            let handle = std::mem::replace(&mut self.handle, std::thread::spawn(|| (None, PackReport::default(), None)));
-            Some(handle.join().unwrap_or_else(|_| {
-                (None, failed_report("the compiler crashed"), None)
-            }))
+            let handle = std::mem::replace(
+                &mut self.handle,
+                std::thread::spawn(|| (None, PackReport::default(), None)),
+            );
+            Some(
+                handle
+                    .join()
+                    .unwrap_or_else(|_| (None, failed_report("the compiler crashed"), None)),
+            )
         }
         #[cfg(target_arch = "wasm32")]
         match std::mem::replace(&mut self.state, WebJob::Done) {
@@ -535,11 +540,7 @@ impl ShaderPacks {
     /// Makes the pages' choices the running ones.
     pub fn apply(&mut self) {
         self.active = self.selection.clone();
-        self.active_values = self
-            .active
-            .pack
-            .clone()
-            .map(|f| self.values_of(&f).clone());
+        self.active_values = self.active.pack.clone().map(|f| self.values_of(&f).clone());
         self.failed = None;
         self.save_selection();
     }
@@ -553,10 +554,7 @@ impl ShaderPacks {
         };
         values.extend(self.cli_options.iter().cloned());
         Some(Target {
-            overrides: values
-                .into_iter()
-                .map(|(k, v)| (k, Some(v)))
-                .collect(),
+            overrides: values.into_iter().map(|(k, v)| (k, Some(v))).collect(),
             excluded: self.excluded.get(&pack.file).cloned().unwrap_or_default(),
             file: pack.file,
             path: pack.path,
@@ -674,7 +672,9 @@ impl Game<'_> {
                             if self.exclude_rejected(&target.file, &e, &compiled) {
                                 // Compiled again without them on the next frame.
                                 report.gpu_errors.push(("pipelines".into(), e));
-                                self.shader_packs.reports.insert(target.file.clone(), report);
+                                self.shader_packs
+                                    .reports
+                                    .insert(target.file.clone(), report);
                                 return;
                             }
                             report.status = PackStatus::Failed;
@@ -698,7 +698,9 @@ impl Game<'_> {
                 report.text(&target.file)
             );
             self.announce_shader_pack(&target.file, &report);
-            self.shader_packs.reports.insert(target.file.clone(), report);
+            self.shader_packs
+                .reports
+                .insert(target.file.clone(), report);
             match installed {
                 Some(applied) => {
                     self.shader_packs.applied = Some(applied);
@@ -753,7 +755,11 @@ impl Game<'_> {
     /// slots fall back); false when it names none that are not already out.
     fn exclude_rejected(&mut self, file: &str, error: &str, compiled: &CompiledPack) -> bool {
         let named = programs_named(error, compiled);
-        let excluded = self.shader_packs.excluded.entry(file.to_string()).or_default();
+        let excluded = self
+            .shader_packs
+            .excluded
+            .entry(file.to_string())
+            .or_default();
         let before = excluded.len();
         excluded.extend(named);
         let more = excluded.len() > before;
@@ -811,10 +817,7 @@ impl Game<'_> {
         let Some(applied) = &self.shader_packs.applied else {
             return;
         };
-        let missing = self
-            .renderer
-            .as_ref()
-            .is_some_and(|r| !r.has_shader_pack());
+        let missing = self.renderer.as_ref().is_some_and(|r| !r.has_shader_pack());
         if missing {
             let (compiled, files) = (applied.compiled.clone(), applied.files.clone());
             if let Err(e) = self.install_shader_pack(&compiled, &files) {
@@ -839,10 +842,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .is_none_or(|r| r.pack_vertex_stream() == tags.is_some());
-        if stream
-            && self.pack.context.pack == tags
-            && self.streaming.context().pack == tags
-        {
+        if stream && self.pack.context.pack == tags && self.streaming.context().pack == tags {
             return;
         }
         // New streamers and distant terrain take the pack resources' context.
@@ -871,7 +871,9 @@ impl Game<'_> {
         let text = match report.status {
             PackStatus::Works => format!("Shader pack {file} loaded."),
             PackStatus::Partial => {
-                format!("Shader pack {file} loaded with parts missing (Options > Horizon Settings > Shader Packs > Report).")
+                format!(
+                    "Shader pack {file} loaded with parts missing (Options > Horizon Settings > Shader Packs > Report)."
+                )
             }
             PackStatus::Refused => format!(
                 "Shader pack {file} is not supported: {}",
@@ -901,9 +903,15 @@ mod tests {
 
     #[test]
     fn option_values_round_trip() {
-        let values = vec![("SHADOWS".to_string(), "false".to_string()), ("sunPathRotation".to_string(), "-30.0".to_string())];
+        let values = vec![
+            ("SHADOWS".to_string(), "false".to_string()),
+            ("sunPathRotation".to_string(), "-30.0".to_string()),
+        ];
         assert_eq!(parse_values(&serialize_values(&values)), values);
-        assert_eq!(parse_values("# comment\n\nA = 1\n"), vec![("A".into(), "1".into())]);
+        assert_eq!(
+            parse_values("# comment\n\nA = 1\n"),
+            vec![("A".into(), "1".into())]
+        );
     }
 
     #[test]
@@ -935,11 +943,7 @@ impl Game<'_> {
             .chain(sp.cli.iter())
             .map(|p| PackRow {
                 file: p.file.clone(),
-                title: p
-                    .file
-                    .strip_suffix(".zip")
-                    .unwrap_or(&p.file)
-                    .to_string(),
+                title: p.file.strip_suffix(".zip").unwrap_or(&p.file).to_string(),
                 status: sp.reports.get(&p.file).map(|r| r.status),
             })
             .collect();
@@ -973,7 +977,10 @@ impl Game<'_> {
 
     /// A Shader Packs page event (`options_ui::Event::ShaderPacks`), handled while the click
     /// that caused it is (the browser's file picker needs that).
-    pub(crate) fn shader_pack_event(&mut self, ev: horizon_client::shader_packs_ui::ShaderPackEvent) {
+    pub(crate) fn shader_pack_event(
+        &mut self,
+        ev: horizon_client::shader_packs_ui::ShaderPackEvent,
+    ) {
         use horizon_client::shader_packs_ui::ShaderPackEvent as E;
         self.shader_packs.load();
         let sp = &mut self.shader_packs;
@@ -1029,7 +1036,8 @@ impl Game<'_> {
                     && let Some(model) = sp.model_of(&file)
                 {
                     let values = model.values_from(sp.values_of(&file));
-                    let values = horizon_glsl_pack::screens::apply_profile(&model, &profile, &values);
+                    let values =
+                        horizon_glsl_pack::screens::apply_profile(&model, &profile, &values);
                     let changed = model.changed(&values);
                     sp.save_values(&file, changed);
                 }
