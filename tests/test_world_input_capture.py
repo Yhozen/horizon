@@ -48,8 +48,10 @@ class WorldInputCaptureTests(unittest.TestCase):
 use std::cell::Cell;
 #[derive(Clone, Copy, PartialEq)]
 enum Screen { Playing, Paused, Inventory, Chat }
-enum CursorGrabMode { Locked, Confined, None }
 mod winit {
+    pub mod window {
+        pub enum CursorGrabMode { Locked, Confined, None }
+    }
     pub mod dpi {
         #[derive(Clone, Copy)]
         pub struct PhysicalPosition<T> { pub x: T, pub y: T }
@@ -61,6 +63,7 @@ mod winit {
     }
 }
 use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::window::CursorGrabMode;
 struct HudBatch { scale: f32 }
 impl HudBatch { fn new(_size: [u32; 2]) -> Self { Self { scale: 2.0 } } }
 struct Config { width: u32, height: u32 }
@@ -200,8 +203,9 @@ fn main() {
     assert!(game.window.as_ref().unwrap().visible.get());
 }
 '''
-        fixture = fixture.replace("METHODS", method(source, "capture") + "\n" +
-                                  method(source, "capture_loaded_world"))
+        fixture = fixture.replace("METHODS", "\n".join(
+            method(source, name) for name in ("grab_cursor", "capture", "capture_loaded_world")
+        ))
         with tempfile.TemporaryDirectory(prefix="horizon-input-") as folder:
             folder = Path(folder)
             rust = folder / "capture.rs"
