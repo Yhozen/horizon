@@ -127,8 +127,12 @@ Terms: *gbuffers* are the programs that draw world geometry; *composite-style* p
 **colortex mipmaps**
 - `const bool colortexNMipmapEnabled = true;` is read from a pass's fragment source. It works in `deferred`,
   `composite` and `final`. (The docs disagree about `prepare` and `begin`.)
-- Before each such pass the mip chain is rebuilt for the half that pass reads, changed or not.
-- From then on that buffer samples trilinear until the end of the frame.
+- Before each such pass the mip chain is rebuilt for the half that pass reads, changed or not, and the pass
+  itself samples it trilinear.
+- Later passes sample it trilinear for the rest of the frame while they read that half. Once a pass writes
+  the buffer (it flips), the half just written has no fresh mips and reads at level 0 until a pass rebuilds
+  them. (Horizon's model: GL keeps the filter on the texture object that was mipmapped. Not measured under
+  Iris. Without it, Fantasy's FXAA read stale levels and drew black dots.)
 
 **Shadow filtering keys**
 - `shadowtexNNearest` (also `shadowtexNearest` for 0, `shadowNMinMagNearest`): nearest. `shadowtexNMipmap`
