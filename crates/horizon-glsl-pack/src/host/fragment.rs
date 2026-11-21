@@ -4,9 +4,11 @@ use super::*;
 use crate::plan::FragOutput;
 use crate::plan::{AlphaFunc, AlphaTest, BufferFormat, FormatKind};
 
-/// What a GL target does with a written value: unorm clamps 0..1 (NaN → 0),
-/// float flushes NaN and infinities to 0 (Horizon's float targets would keep
-/// them and spread them through every later blur).
+/// What a GL target does with a written value: unorm clamps 0..1 (NaN → 0);
+/// a float target stores it as written, NaN and infinities included. Packs
+/// count on that: Photon's clouds history stores a NaN distance on its first
+/// frame, which `min` drops on the next; stored as 0 it reprojected by 0/0
+/// every frame and the clouds' transmittance stayed 0 (terrain and sky black).
 ///
 /// 16-bit unorm targets are half floats where the device cannot render into
 /// R16/RG16/RGBA16 (WebGPU): there `k / 65535` reads back a hair under it, and
@@ -21,10 +23,6 @@ const OUTPUT_HELPERS: &str = "vec4 hz_unorm(vec4 v) {
 vec4 hz_unorm16(vec4 v) {
     vec4 k = round(hz_unorm(v) * 65535.0);
     return mix(min((k + 0.25) / 65535.0, vec4(1.0)), vec4(0.0), equal(k, vec4(0.0)));
-}
-vec4 hz_finite(vec4 v) {
-    bvec4 bad = greaterThanEqual(floatBitsToUint(v) & uvec4(0x7fffffffu), uvec4(0x7f800000u));
-    return mix(v, vec4(0.0), bad);
 }
 vec4 hz_snorm(vec4 v) {
     bvec4 nan = greaterThan(floatBitsToUint(v) & uvec4(0x7fffffffu), uvec4(0x7f800000u));
@@ -323,7 +321,7 @@ pub(super) fn fragment_source(
         let format = output_format(spec, i);
         let value = match format.map(BufferFormat::kind) {
             _ if target != Scalar::Float => widen(&value, "vec4", target)?,
-            Some(FormatKind::Float) => format!("hz_finite({value})"),
+            Some(FormatKind::Float) => value,
             Some(FormatKind::Snorm) => format!("hz_snorm({value})"),
             _ if format.is_some_and(BufferFormat::is_unorm16) => format!("hz_unorm16({value})"),
             _ => format!("hz_unorm({value})"),
