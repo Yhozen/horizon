@@ -99,9 +99,9 @@ still fails on its own textures.
 
 | rank | pack | version | 16 varyings | 28 varyings | rendered natively | notes |
 |---|---|---|---|---|---|---|
-| 25 | [BSL Shaders - Classic](https://modrinth.com/shader/bsl-shaders-classic) | 10.0 | Works-candidate | Works-candidate | Draws, Iris diff 52 |  |
+| 25 | [BSL Shaders - Classic](https://modrinth.com/shader/bsl-shaders-classic) | 10.0 | Works-candidate | Works-candidate | Draws, Iris diff 14 (0271d3c4) |  |
 | 26 | [Shrimple](https://modrinth.com/shader/shrimple) | v0.12 | Refused | Refused |  | requires compute shaders and custom images |
-| 27 | [Bloop Shaders](https://modrinth.com/shader/bloop-shaders) | 1.8.0-Alpha-3 | Works-candidate | Works-candidate | Draws, Iris diff 51 | its shadow program writes an undeclared varying, declared as Iris does |
+| 27 | [Bloop Shaders](https://modrinth.com/shader/bloop-shaders) | 1.8.0-Alpha-3 | Works-candidate | Works-candidate | Draws, Iris diff 17 (0271d3c4) | its shadow program writes an undeclared varying, declared as Iris does |
 | 28 | [FastPBR](https://modrinth.com/shader/fastpbr) | 2.0 | Refused | Refused |  | requires compute shaders, custom images, storage buffers |
 | 29 | [E-LITE shaders (MakeUp edit)](https://modrinth.com/shader/lite-shaders) | ELT513 | Works-candidate | Works-candidate | Draws, Iris diff 32 | water packs into exactly 16 varying locations |
 | 30 | [Fantasy Shaders Reimagined](https://modrinth.com/shader/fantasy-shaders) | 1.11 | Works-candidate | Works-candidate |  |  |
@@ -125,10 +125,8 @@ Packs with an Iris diff of 30 or more. The tree beside the wall is shaped differ
   The number says nothing.
 - **Kappa (57)**: blocks under the water are lit bright cyan, the sky is a dark blue-green and the
   leaves have dark holes; Iris has pale sand, a cloudy blue sky and full leaves.
-- **BSL Classic (52)**: the noon sky and light are orange, like a sunset, and everything is dimmer;
-  Iris has a blue noon sky. A light block under the water glows in Iris but not in Horizon.
-- **Bloop (51)**: the sky is black around the wall where Iris has a pale blue sky; the water shows
-  less of the sky's colour.
+- BSL Classic (52 → 14) and Bloop (51 → 17) were in this list until custom uniforms divided as floats and
+  full-screen passes stopped blending (re-rendered at 0271d3c4).
 - **Nostalgia (36)**: the same over-bright cyan as Kappa on blocks under the water; the sky is
   close.
 - **Lite (32)**: close; darker leaves and less clear water near the bottom edge.
