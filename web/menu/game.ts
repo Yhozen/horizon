@@ -5,7 +5,7 @@
 import { inflateArchive, loadAsset, retainRelease } from "../cache.js";
 import { validateRelease } from "../release.js";
 import type { Edition, WorldId } from "./edition.ts";
-import { installHooks, listFiles, mirrorInto, packNameFromUrl, PACKS, persist, requestPersistence } from "./shaderpacks.ts";
+import { installHooks, listFiles, mirrorAtBoot, packNameFromUrl, PACKS, persist, requestPersistence } from "./shaderpacks.ts";
 
 export type Progress =
   | { readonly _tag: "Step"; readonly step: string; readonly index: number }
@@ -88,8 +88,9 @@ export async function* boot(edition: Edition, world: WorldId, name: string, cust
     await game.default({ module_or_path: new Response(wasm, { headers: { "Content-Type": "application/wasm" } }) });
     const installFile = (path: string, bytes: Uint8Array) => game.install_file(path, bytes);
 
-    // The files the game asked the browser to keep (shader packs, their settings) go
-    // back in before it starts. A browser without storage just starts without them.
+    // The files the game asked the browser to keep go back in before it starts: the
+    // selection, the option files and the selected pack; other packs load when the game
+    // asks. A browser without storage just starts without them.
     requestPersistence();
     const stored = await listFiles().catch((error: unknown) => {
       console.warn("The saved shader packs could not be read", error);
@@ -97,10 +98,15 @@ export async function* boot(edition: Edition, world: WorldId, name: string, cust
     });
     if (stored.length) {
       yield step(2, "Loading your shader packs");
-      await mirrorInto(installFile, stored);
+      await mirrorAtBoot(installFile, stored);
     }
     hooks?.dispose();
-    hooks = installHooks({ installFile, onChanged: () => game.shader_packs_changed?.() });
+    hooks = installHooks({
+      installFile,
+      onChanged: () => game.shader_packs_changed?.(),
+      notice: (line: string) => game.shader_pack_notice?.(line),
+      acceptsDrop: () => game.shader_pack_page_open?.() ?? true,
+    });
 
     yield step(2, edition.id === "open" ? "Loading the artwork" : "Loading resources");
     const report = (state: string) =>
@@ -121,7 +127,7 @@ export async function* boot(edition: Edition, world: WorldId, name: string, cust
       if (!pack.ok) throw new Error(`Could not load the shader pack (${pack.status})`);
       const bytes = new Uint8Array(await pack.arrayBuffer());
       installFile(packPath, bytes);
-      persist(packPath, bytes);
+      persist(packPath, bytes, (line: string) => game.shader_pack_notice?.(line));
     }
 
     const address = serverAddress(world, location);
