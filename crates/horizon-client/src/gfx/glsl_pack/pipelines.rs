@@ -151,19 +151,24 @@ fn pack_blend(blend: horizon_glsl_pack::plan::Blend) -> Option<wgpu::BlendState>
     }
 }
 
-fn blendable(format: wgpu::TextureFormat) -> bool {
+/// Whether pipelines may blend into `format`: never into integer targets, and
+/// into 32-bit float targets in the browser only with `FLOAT32_BLENDABLE`
+/// (WebGPU rejects the pipeline otherwise).
+fn blendable(format: wgpu::TextureFormat, features: wgpu::Features) -> bool {
+    if cfg!(not(target_arch = "wasm32")) {
+        return true;
+    }
     let integer = matches!(
         format.sample_type(None, None),
         Some(wgpu::TextureSampleType::Sint | wgpu::TextureSampleType::Uint)
     );
-    !integer
-        && !matches!(
-            format,
-            wgpu::TextureFormat::R32Float
-                | wgpu::TextureFormat::Rg32Float
-                | wgpu::TextureFormat::Rgba32Float
-        )
-        || cfg!(not(target_arch = "wasm32"))
+    let float32 = matches!(
+        format,
+        wgpu::TextureFormat::R32Float
+            | wgpu::TextureFormat::Rg32Float
+            | wgpu::TextureFormat::Rgba32Float
+    );
+    !integer && (!float32 || features.contains(wgpu::Features::FLOAT32_BLENDABLE))
 }
 
 pub(super) fn build(
@@ -284,7 +289,7 @@ pub(super) fn build(
             let blend = state.blend_of(i).map_or(blend, pack_blend);
             Some(wgpu::ColorTargetState {
                 format,
-                blend: blend.filter(|_| blendable(format)),
+                blend: blend.filter(|_| blendable(format, device.features())),
                 write_mask: wgpu::ColorWrites::ALL,
             })
         })
