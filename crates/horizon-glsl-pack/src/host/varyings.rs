@@ -1227,3 +1227,368 @@ mod unread_tests {
         assert_eq!(names, ["hz_v_used", "hz_v_used_2"]);
     }
 }
+
+/// Runs the vertex stage's hand-off statements and the fragment stage's
+/// rebuilding ones on concrete values, as GLSL would, and checks every
+/// carried component arrives with the same bits.
+#[cfg(test)]
+mod round_trip_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[derive(Clone, Copy, Debug)]
+    enum Val {
+        F(f32),
+        I(i32),
+        U(u32),
+    }
+
+    impl Val {
+        fn bits(self) -> (u8, u32) {
+            match self {
+                Val::F(f) => (b'f', f.to_bits()),
+                Val::I(i) => (b'i', i as u32),
+                Val::U(u) => (b'u', u),
+            }
+        }
+        /// GLSL's constructor conversion to the base type `to` (`f`, `i`, `u`).
+        fn to(self, to: u8) -> Val {
+            match (to, self) {
+                (b'f', Val::F(f)) => Val::F(f),
+                (b'f', Val::I(i)) => Val::F(i as f32),
+                (b'f', Val::U(u)) => Val::F(u as f32),
+                (b'i', Val::F(f)) => Val::I(f as i32),
+                (b'i', Val::I(i)) => Val::I(i),
+                (b'i', Val::U(u)) => Val::I(u as i32),
+                (b'u', Val::F(f)) => Val::U(f as u32),
+                (b'u', Val::I(i)) => Val::U(i as u32),
+                (b'u', Val::U(u)) => Val::U(u),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn base(ty: &str) -> u8 {
+        match ty.as_bytes()[0] {
+            b'i' => b'i',
+            b'u' => b'u',
+            _ => b'f',
+        }
+    }
+
+    /// `name.xz` → (`name`, lanes), when the part after the last dot is a swizzle.
+    fn split_swizzle(s: &str) -> (&str, Option<Vec<usize>>) {
+        if let Some((name, sw)) = s.rsplit_once('.')
+            && !sw.is_empty()
+            && sw.bytes().all(|b| b"xyzw".contains(&b))
+        {
+            let lanes = sw
+                .bytes()
+                .map(|b| (b"xyzw".iter().position(|&c| c == b)).unwrap());
+            return (name, Some(lanes.collect()));
+        }
+        (s, None)
+    }
+
+    struct Machine {
+        vars: HashMap<String, Vec<Val>>,
+    }
+
+    impl Machine {
+        fn eval(&self, e: &str) -> Vec<Val> {
+            let e = e.trim();
+            if e == "0" {
+                return vec![Val::I(0)];
+            }
+            if let Some(open) = e.find('(')
+                && e.ends_with(')')
+                && e[..open].bytes().all(|b| b.is_ascii_alphanumeric())
+            {
+                let func = &e[..open];
+                let inner = &e[open + 1..e.len() - 1];
+                let mut args = Vec::new();
+                let (mut depth, mut start) = (0, 0);
+                for (i, c) in inner.char_indices() {
+                    match c {
+                        '(' => depth += 1,
+                        ')' => depth -= 1,
+                        ',' if depth == 0 => {
+                            args.push(&inner[start..i]);
+                            start = i + 1;
+                        }
+                        _ => {}
+                    }
+                }
+                args.push(&inner[start..]);
+                let vals: Vec<Val> = args.iter().flat_map(|a| self.eval(a)).collect();
+                return match func {
+                    "floatBitsToInt" => vals
+                        .iter()
+                        .map(|v| match v {
+                            Val::F(f) => Val::I(f.to_bits() as i32),
+                            _ => panic!("floatBitsToInt of {v:?}"),
+                        })
+                        .collect(),
+                    "intBitsToFloat" => vals
+                        .iter()
+                        .map(|v| match v {
+                            Val::I(i) => Val::F(f32::from_bits(*i as u32)),
+                            _ => panic!("intBitsToFloat of {v:?}"),
+                        })
+                        .collect(),
+                    ty => {
+                        let n = width(ty) as usize;
+                        let vals = if vals.len() == 1 {
+                            vec![vals[0]; n]
+                        } else {
+                            vals
+                        };
+                        assert_eq!(vals.len(), n, "{e}");
+                        vals.into_iter().map(|v| v.to(base(ty))).collect()
+                    }
+                };
+            }
+            let (name, lanes) = split_swizzle(e);
+            let v = self
+                .vars
+                .get(name)
+                .unwrap_or_else(|| panic!("unset {name} in {e}"));
+            match lanes {
+                Some(l) => l.iter().map(|&k| v[k]).collect(),
+                None => v.clone(),
+            }
+        }
+
+        /// Runs `target = value;` lines; returns the (variable, lane)s written.
+        fn run(&mut self, code: &str, written: &mut Vec<(String, usize)>) {
+            for line in code.lines() {
+                let line = line.trim().strip_suffix(';').unwrap();
+                let (target, value) = line.split_once(" = ").unwrap();
+                let value = self.eval(value);
+                let (name, lanes) = split_swizzle(target);
+                let var = self
+                    .vars
+                    .get_mut(name)
+                    .unwrap_or_else(|| panic!("no {name}"));
+                let lanes = lanes.unwrap_or_else(|| (0..var.len()).collect());
+                assert_eq!(lanes.len(), value.len(), "{line}");
+                for (&k, v) in lanes.iter().zip(value) {
+                    // Stores keep the variable's base type (as GLSL's types would).
+                    let ty = var[k].bits().0;
+                    assert_eq!(v.bits().0, ty, "{line}: stores a different type");
+                    var[k] = v;
+                    written.push((name.to_string(), k));
+                }
+            }
+        }
+    }
+
+    fn zero(ty: &str) -> Vec<Val> {
+        vec![Val::I(0).to(base(ty)); width(ty) as usize]
+    }
+
+    /// Distinct values that survive only an exact trip: negative zero,
+    /// subnormals, NaN-free extremes and large integers.
+    fn value(ty: &str, seed: u32, k: u32) -> Val {
+        let n = seed * 4 + k;
+        match base(ty) {
+            b'f' => Val::F(match n % 5 {
+                0 => -0.0,
+                1 => f32::from_bits(n + 1), // subnormal
+                2 => f32::MAX / (n as f32 + 1.0),
+                3 => -(n as f32) * 0.1 - 0.0625,
+                _ => 1.0e-30 * n as f32,
+            }),
+            b'i' => Val::I(if n % 2 == 0 {
+                i32::MIN + n as i32
+            } else {
+                -(n as i32) - 1
+            }),
+            _ => Val::U(u32::MAX - n),
+        }
+    }
+
+    /// Packs `vars` (vertex and fragment alike, the fragment reading `reads`
+    /// of each: `None` = every component) at `max` locations, runs the
+    /// statements and checks each component: read ones exact, unread ones 0.
+    fn check(
+        vars: &[(&str, &str, bool, Option<u32>, Option<&str>)],
+        geometry: Geometry,
+        max: u32,
+    ) -> Interface {
+        let decl: Vec<Var> = vars
+            .iter()
+            .map(|&(n, t, f, a, _)| Var {
+                name: n.into(),
+                ty: t.into(),
+                flat: f,
+                array_len: a,
+            })
+            .collect();
+        let reads: Vec<String> = vars
+            .iter()
+            .map(|&(n, t, _, a, r)| {
+                let g = if a.is_some() {
+                    format!("{n}[0]")
+                } else {
+                    n.to_string()
+                };
+                match r {
+                    Some(sw) => format!("float({g}.{sw})"),
+                    None if matrix(t).is_some() => format!("{g}[0][0]"),
+                    None if width(t) == 1 => format!("float({g})"),
+                    None => format!("float({g}[0])"),
+                }
+            })
+            .collect();
+        let vs = Rewritten {
+            varyings: decl.clone(),
+            ..Default::default()
+        };
+        let fs = Rewritten {
+            body: format!("void hz_pack_main() {{ float s = {}; }}", reads.join(" + ")),
+            varyings: decl,
+            ..Default::default()
+        };
+        let i = Interface::new(&vs, &fs, geometry, max).unwrap_or_else(|e| panic!("{e}"));
+        let mut vertex = Machine {
+            vars: HashMap::new(),
+        };
+        let mut fragment = Machine {
+            vars: HashMap::new(),
+        };
+        for s in &i.slots {
+            vertex.vars.insert(s.name.clone(), zero(&s.ty));
+        }
+        for (seed, p) in i.pieces.iter().enumerate() {
+            let w = width(&p.vertex_ty);
+            let vals = (0..w)
+                .map(|k| value(&p.vertex_ty, seed as u32, k))
+                .collect();
+            vertex.vars.insert(p.global.clone(), vals);
+            fragment.vars.insert(p.global.clone(), zero(&p.fragment_ty));
+        }
+        let mut code = String::new();
+        i.write(&mut code);
+        let mut written = Vec::new();
+        vertex.run(&code, &mut written);
+        // Every lane at most once, besides the zeroing of whole slots.
+        // (`write` zeroes whole packed slots first.)
+        let zeroed: usize = i
+            .slots
+            .iter()
+            .filter(|s| code.contains(&format!("    {} = {}(0);", s.name, s.ty)))
+            .map(|s| width(&s.ty) as usize)
+            .sum();
+        let mut lanes = written.split_off(zeroed);
+        let before = lanes.len();
+        lanes.sort();
+        lanes.dedup();
+        assert_eq!(before, lanes.len(), "a lane written twice:\n{code}");
+        let mut sprite = String::new();
+        i.write_sprite(&mut sprite);
+        if let Some((target, _)) = sprite.trim().split_once(" = ") {
+            let (name, l) = split_swizzle(target);
+            let lane = (name.to_string(), l.unwrap()[0]);
+            assert!(!lanes.contains(&lane), "hz_sprite shares {lane:?}:\n{code}");
+        }
+        for s in &i.slots {
+            fragment
+                .vars
+                .insert(s.name.clone(), vertex.vars[&s.name].clone());
+        }
+        let mut code = String::new();
+        i.read(&mut code);
+        fragment.run(&code, &mut Vec::new());
+        for p in &i.pieces {
+            let base_name = p.global.split('[').next().unwrap();
+            let read = vars.iter().find(|v| v.0 == base_name).and_then(|v| v.4);
+            let sent = &vertex.vars[&p.global];
+            let got = &fragment.vars[&p.global];
+            for (k, (s, g)) in sent.iter().zip(got).enumerate() {
+                let lane = b"xyzw"[k];
+                // Unpacked pieces travel whole; packed ones only what is read.
+                let want = match read {
+                    Some(sw) if p.partial && !sw.as_bytes().contains(&lane) => {
+                        Val::I(0).to(base(&p.fragment_ty))
+                    }
+                    _ => *s,
+                };
+                assert_eq!(g.bits(), want.bits(), "{}[{k}]:\n{code}", p.global);
+            }
+        }
+        i
+    }
+
+    #[test]
+    fn values_round_trip_exactly() {
+        let vars = [
+            ("a", "float", false, None, None),
+            ("b", "vec2", false, None, None),
+            ("c", "vec3", false, None, None),
+            ("d", "vec4", false, None, None),
+            ("e", "vec3", false, Some(2), None),
+            ("tbn", "mat3", false, None, None),
+            ("id", "int", true, None, None),
+            ("mat", "float", true, None, None),
+            ("dir", "ivec3", true, None, None),
+            ("mask", "uvec2", true, None, None),
+            ("normal", "vec3", true, None, None),
+            ("level", "int", false, None, None),
+        ];
+        // From every piece its own location down to the tightest packing.
+        for max in (10..=24).rev() {
+            for geometry in [Geometry::Fullscreen, Geometry::Terrain] {
+                let i = check(&vars, geometry, max);
+                assert!(i.slots.len() as u32 <= max);
+            }
+        }
+        // 13 + 8 + 4 = 25 smooth components (7 slots) and 1 + 1 + 3 + 2 + 3 + 1 = 11 flat (3).
+        let i = check(&vars, Geometry::Fullscreen, 10);
+        let kinds: Vec<_> = i.slots.iter().map(|s| (s.ty.as_str(), s.flat)).collect();
+        let mut want = vec![("vec4", false); 7];
+        want.extend([("ivec4", true); 3]);
+        assert_eq!(kinds, want);
+        // Straddling happened (first fit would take 11).
+        assert!(i.pieces.iter().any(|p| p.segments.len() > 1));
+        assert!(
+            Interface::new(
+                &Rewritten::default(),
+                &Rewritten::default(),
+                Geometry::Fullscreen,
+                9
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn partly_read_vectors_round_trip() {
+        let vars = [
+            ("lm", "vec4", false, None, Some("y")),
+            ("wp", "vec4", false, None, Some("zx")),
+            ("n", "vec3", false, None, Some("xz")),
+            ("uv", "vec2", false, None, Some("y")),
+            ("c", "vec4", false, None, None),
+            ("f", "float", false, None, None),
+            ("ids", "ivec4", true, None, Some("w")),
+            ("pos", "vec3", true, None, Some("zy")),
+        ];
+        for max in (4..=10).rev() {
+            for geometry in [Geometry::Fullscreen, Geometry::Terrain] {
+                check(&vars, geometry, max);
+            }
+        }
+        // 1 + 2 + 2 + 1 + 4 + 1 = 11 smooth (3 slots), 1 + 2 flat (1).
+        let i = check(&vars, Geometry::Fullscreen, 4);
+        assert_eq!(i.slots.len(), 4);
+        assert!(i.pieces.iter().any(|p| p.partial));
+        // hz_sprite takes the flat slot's free lane.
+        let i = check(&vars, Geometry::Terrain, 4);
+        assert!(
+            matches!(i.sprite, SpriteCarrier::Bits(3, _)),
+            "{:?}",
+            i.sprite
+        );
+    }
+}
