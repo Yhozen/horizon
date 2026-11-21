@@ -10,7 +10,7 @@ import { installHooks, listFiles, mirrorAtBoot, packNameFromUrl, PACKS, persist,
 export type Progress =
   | { readonly _tag: "Step"; readonly step: string; readonly index: number }
   | { readonly _tag: "Started" }
-  | { readonly _tag: "Failed"; readonly error: string };
+  | { readonly _tag: "Failed"; readonly error: string; readonly reload: boolean };
 
 /** The loading steps, in order; the progress bar moves one step at a time. */
 export const STEPS = 4;
@@ -63,17 +63,51 @@ let hooks: ReturnType<typeof installHooks> | undefined;
 
 const message = (error: unknown) => String((error as Error)?.message ?? error);
 
-/** Loads and starts the game, reporting each step. Stopping early (Cancel) abandons it
- * before `start`; once started, the game owns the page. */
+/** Start the watchdog at handoff and stop counting while the tab is hidden. */
+function renderSignals(signal: AbortSignal) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const watching = new AbortController();
+  const stopWatching = () => {
+    watching.abort();
+    clearTimeout(timer);
+  };
+  signal.addEventListener("abort", stopWatching, { once: true });
+  const ready = new Promise<void>((resolve) => {
+    window.addEventListener("horizon-render-ready", () => {
+      stopWatching();
+      resolve();
+    }, { once: true, signal });
+  });
+  const failed = new Promise<Error>((resolve) => {
+    const watch = () => {
+      clearTimeout(timer);
+      if (!document.hidden) timer = setTimeout(() => resolve(new Error("Timed out waiting for the first game frame")), 45_000);
+    };
+    document.addEventListener("visibilitychange", watch, { signal: watching.signal });
+    window.addEventListener("horizon-render-error", (event) => {
+      resolve(new Error((event as CustomEvent<string>).detail));
+    }, { once: true, signal });
+    watch();
+  });
+  return { ready, failed };
+}
+
+/** Loads the game, waits for the first frame, and delivers fatal errors for the session. */
 export async function* boot(edition: Edition, world: WorldId, name: string, custom?: string): AsyncGenerator<Progress> {
   const telemetry = page.horizonTelemetry;
   const step = (index: number, text: string): Progress => { say(text); return { _tag: "Step", step: text, index }; };
+  let renderer: AbortController | undefined;
+  delete page.horizonError;
+  delete page.horizonStarted;
   try {
     yield step(0, "Checking your graphics");
-    const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-    if (!gpu) throw new Error("This browser can't run the game: it has no WebGPU. Try a recent Chrome or Edge.");
+    const gpu = (navigator as Navigator & { gpu?: { requestAdapter(options: { powerPreference: string }): Promise<unknown> } }).gpu;
+    if (!gpu) throw new Error("This browser does not provide WebGPU.");
     // A GPU process that is still starting answers the first requests with nothing.
-    for (let i = 0; i < 20 && !(await gpu.requestAdapter()); i++) await new Promise((r) => setTimeout(r, 500));
+    for (let attempt = 1; !(await gpu.requestAdapter({ powerPreference: "high-performance" })); attempt++) {
+      if (attempt === 20) throw new Error("WebGPU could not find a usable graphics adapter.");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
 
     yield step(1, "Downloading the game");
     const response = await fetch("./release.json", { cache: "no-store", redirect: "error" });
@@ -133,18 +167,26 @@ export async function* boot(edition: Edition, world: WorldId, name: string, cust
     const address = serverAddress(world, location);
     const args = [...gameArgs(edition, world, name, address, custom), ...(packUrl ? ["--shader-pack", packPath] : [])];
     yield step(3, world === "solo" ? "Creating your world" : "Joining the world");
-    if (shared) await game.start_overlaid(new Uint8Array(shared), new Uint8Array(data), args);
-    else await game.start(new Uint8Array(data), args);
+    renderer = new AbortController();
+    const { ready, failed } = renderSignals(renderer.signal);
+    const started = shared ? game.start_overlaid(new Uint8Array(shared), new Uint8Array(data), args)
+      : game.start(new Uint8Array(data), args);
+    const error = await Promise.race([Promise.all([started, ready]).then(() => undefined), failed]);
+    if (error) throw error;
     page.horizonStarted = true;
     say(world === "solo" ? "Playing" : "Joining");
-    // Not awaited: the menu stops listening once the game has started.
     void retainRelease(release).catch((error: unknown) => console.warn("Keeping the release cached failed", error));
     yield { _tag: "Started" };
+    throw await failed;
   } catch (error) {
     telemetry?.captureException(error, { phase: page.horizonStatus });
+    if (document.pointerLockElement) document.exitPointerLock();
+    page.horizonStarted = false;
     page.horizonError = message(error);
     say("Failed: " + message(error));
     console.error(error);
-    yield { _tag: "Failed", error: message(error) };
+    yield { _tag: "Failed", error: message(error), reload: renderer !== undefined };
+  } finally {
+    renderer?.abort();
   }
 }

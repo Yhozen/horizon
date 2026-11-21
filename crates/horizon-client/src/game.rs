@@ -244,7 +244,7 @@ use winit::{
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
-    window::{CursorGrabMode, Window, WindowId},
+    window::{Window, WindowId},
 };
 
 /// The page added shader packs to the `shaderpacks` folder.
@@ -4625,6 +4625,58 @@ impl Game<'_> {
             self.pitch = rotation.x_rot;
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn grab_cursor(window: &Window, capture: bool) -> bool {
+        use winit::window::CursorGrabMode;
+        if capture {
+            window
+                .set_cursor_grab(CursorGrabMode::Locked)
+                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+                .is_ok()
+        } else {
+            window.set_cursor_grab(CursorGrabMode::None).is_ok()
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn grab_cursor(window: &Window, capture: bool) -> bool {
+        use wasm_bindgen::JsCast;
+        use winit::platform::web::WindowExtWebSys;
+
+        // winit calls these optional DOM methods unconditionally. A JS exception
+        // during the first grab interrupts the frame that places the player.
+        let Some(canvas) = window.canvas() else {
+            return false;
+        };
+        let Some(document) = canvas.owner_document() else {
+            return false;
+        };
+        let (target, method) = if capture {
+            (canvas.as_ref(), "requestPointerLock")
+        } else {
+            if document.pointer_lock_element().is_none() {
+                return true;
+            }
+            (document.as_ref(), "exitPointerLock")
+        };
+        let Ok(function) = js_sys::Reflect::get(target, &method.into())
+            .and_then(|v| v.dyn_into::<js_sys::Function>())
+        else {
+            return false;
+        };
+        let Ok(value) = function.call0(target) else {
+            return false;
+        };
+        // A supported browser may still require a click. sync_web_pointer_lock
+        // observes the actual lock state and allows a subsequent click to retry.
+        if let Ok(promise) = value.dyn_into::<js_sys::Promise>() {
+            wasm_bindgen_futures::spawn_local(async move {
+                let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+            });
+        }
+        true
+    }
+
     /// `Minecraft.pause`: a single-player game with a pausing screen open.
     fn pauses_game(&self) -> bool {
         self.has_singleplayer_server()
@@ -4688,10 +4740,7 @@ impl Game<'_> {
             // so everywhere else warp after grabbing.
             #[cfg(target_os = "macos")]
             warp(window);
-            self.captured = window
-                .set_cursor_grab(CursorGrabMode::Locked)
-                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
-                .is_ok();
+            self.captured = Self::grab_cursor(window, true);
             #[cfg(not(target_os = "macos"))]
             if self.captured && self.focused {
                 warp(window);
@@ -4706,14 +4755,14 @@ impl Game<'_> {
                 if self.focused {
                     warp(window);
                 }
-                let _ = window.set_cursor_grab(CursorGrabMode::None);
+                Self::grab_cursor(window, false);
                 if self.focused {
                     warp(window);
                 }
                 let scale = HudBatch::new(size).scale;
                 self.cursor = (size[0] as f32 / 2.0 / scale, size[1] as f32 / 2.0 / scale);
             } else {
-                let _ = window.set_cursor_grab(CursorGrabMode::None);
+                Self::grab_cursor(window, false);
             }
             self.captured = false;
         }
@@ -4759,7 +4808,7 @@ impl Game<'_> {
             GRAB.set((None, false));
             self.captured = false;
             if let Some(window) = &self.window {
-                let _ = window.set_cursor_grab(CursorGrabMode::None);
+                Self::grab_cursor(window, false);
                 window.set_cursor_visible(true);
             }
         } else {
@@ -11798,6 +11847,11 @@ impl ApplicationHandler for Game<'_> {
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         #[cfg(target_arch = "wasm32")]
+        if horizon_client::gfx::web_gpu::failed() {
+            event_loop.exit();
+            return;
+        }
+        #[cfg(target_arch = "wasm32")]
         self.sync_web_pointer_lock();
         if self.pending_save.is_some() {
             match self.poll_closing_save() {
@@ -11855,6 +11909,7 @@ impl ApplicationHandler for Game<'_> {
         #[cfg(target_arch = "wasm32")]
         if let Some(e) = &self.error {
             log::error!("Horizon: the game stopped: {e}");
+            horizon_client::gfx::web_gpu::report_error(&e.to_string());
         }
         self.pad_close_output();
         if let Err(e) = self.save_for_exit() {
