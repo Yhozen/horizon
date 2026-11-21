@@ -758,7 +758,9 @@ impl Game<'_> {
         excluded.extend(named);
         let more = excluded.len() > before;
         if more {
-            log::warn!("Horizon: shader pack {file}: the GPU rejected {excluded:?}; compiling without them");
+            log::warn!(
+                "Horizon: shader pack {file}: the GPU rejected {excluded:?}; compiling without them: {error}"
+            );
             self.shader_packs.failed = None;
         }
         more
