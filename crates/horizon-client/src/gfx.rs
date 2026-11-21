@@ -2597,6 +2597,7 @@ impl Renderer {
                 on_off(gpu_timer.is_some()),
             ));
         }
+        let pack_check = glsl_pack::Probation::new(&device);
         Ok(Self {
             instance,
             adapter,
@@ -2726,7 +2727,7 @@ impl Renderer {
             occlusion: occlusion::Occlusion::new(crate::chunk::MIN_Y, crate::chunk::HEIGHT / 16),
             world_post,
             glsl_pack: None,
-            pack_check: glsl_pack::Probation::default(),
+            pack_check,
             sprite_host: horizon_glsl_pack::HostParams {
                 sprite_arrays,
                 sprite_split: split,
@@ -3308,6 +3309,7 @@ impl Renderer {
         resources: &dyn Fn(&str) -> Option<Vec<u8>>,
     ) -> std::result::Result<(), String> {
         self.glsl_pack = None;
+        self.pack_check.reset();
         let Some((pack, files)) = pack else {
             return Ok(());
         };
@@ -3336,12 +3338,14 @@ impl Renderer {
         renderer.set_atlas_sizes([sprite, sprite], atlas);
         // Natively the verdict comes at once; the browser's arrives a few
         // frames later through `shader_pack_error`.
-        self.pack_check = glsl_pack::Probation::default();
+        self.pack_check.reset();
         self.pack_check.watch("pipelines", scope.pop());
         if let Some(error) = self.pack_check.error() {
             return Err(error);
         }
         self.glsl_pack = Some(renderer);
+        // From now on the device's uncaptured errors turn the pack off.
+        self.pack_check.installed();
         Ok(())
     }
     /// An error the GPU reported for the installed pack (its pipelines, or
@@ -3349,6 +3353,7 @@ impl Renderer {
     pub fn shader_pack_error(&mut self) -> Option<String> {
         let error = self.pack_check.error()?;
         self.glsl_pack = None;
+        self.pack_check.reset();
         Some(error)
     }
     pub fn view_projection(&self, frame: &Frame) -> Mat4 {
