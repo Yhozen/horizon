@@ -38,6 +38,24 @@ with the fix, on the same day's integration build (f479a1b7, reports `fix-tt-16`
 show the new results. Rethinking Voxels stays Refused, and Arc's water passes, but its composite pass
 still fails on its own textures.
 
+**Re-measured 2026-11-21** (every pack, both limits, all dimensions, Chrome): `gabriel/packs-corpus` at
+20953199 (`gabriel/packs-int` 35ed995a, which has the tighter varying packing of 5ce30a71, plus the Bloop fix
+70fd317c). The 16 and 28 columns below are from this build; the render column is not. Reports: `c2-*-16`,
+`c2-*-28` (35ed995a alone: `c1-*`). What changed, and why:
+- MakeUp (O/E) and E-LITE (O/N/E) at 16: Fails → Works-candidate. Their water needs fewer locations once
+  unread components stay home and pieces straddle slots: MakeUp 17 → 15, E-LITE 19 → 16.
+- Bliss (O) at 16: Partial → Works-candidate, from the sampler fix e737596f (already in the 28 column).
+- Bloop (O): Partial → Works-candidate. Its shadow vertex stage writes a varying it never declares; Iris
+  patches the declaration in, and so does the translator now (70fd317c).
+- Photon (O) stays Partial: its optional deferred pass went from 18 to 14 locations, and now stops at the next
+  limit, 17 textures.
+- Totals over all dimensions, at both 16 and 28: train 34 / 5 / 3 / 0, batch 1 24 / 3 / 6 / 0 (unchanged),
+  batch 2 28 / 0 / 15 / 2 / 3.
+- Arc compiles every program, Chrome included, with `--max-textures 32` (`c2-arc-t32`). The game asks the
+  adapter for its own texture limit, so a desktop GPU that allows more than 16 could run it (not rendered yet).
+- No status got worse. `final` left the essential lists (316126b6: final is not essential), which changed
+  no status.
+
 ## Packs
 
 ### Train set
@@ -46,10 +64,10 @@ still fails on its own textures.
 |---|---|---|---|---|---|---|
 | 1 | [Complementary Shaders - Reimagined](https://modrinth.com/shader/complementary-reimagined) | r5.10 | Works-candidate | Works-candidate | Draws, Iris diff 13 | optional compute and storage buffers skipped |
 | 3 | [BSL Shaders](https://modrinth.com/shader/bsl-shaders) | 10.1.8 | Works-candidate | Works-candidate | Draws, Iris diff 22 | optional compute pass skipped |
-| 4 | [Photon Shaders](https://modrinth.com/shader/photon-shader) | v1.4 | Partial (O/E), Works-candidate (N) | Partial (O/E), Works-candidate (N) | Draws, Iris diff 115 | an optional deferred pass fails (overworld: varyings or textures; End: a sky function) |
+| 4 | [Photon Shaders](https://modrinth.com/shader/photon-shader) | v1.4 | Partial (O/E), Works-candidate (N) | Partial (O/E), Works-candidate (N) | Draws, Iris diff 115 | an optional deferred pass fails (overworld: 17 textures; End: a sky function) |
 | 5 | [Solas Shader](https://modrinth.com/shader/solas-shader) | 3.9 | Partial | Partial | Draws, Iris diff 23 | shadow programs use image writes |
-| 6 | [Bliss Shaders](https://modrinth.com/shader/bliss-shader) | 2.1.2 | Partial (O), Works-candidate (N/E) | Works-candidate | Black, Iris diff 129 | renders black; its optional deferred pass compiles from e737596f on (28 column) |
-| 7 | [MakeUp - Ultra Fast](https://modrinth.com/shader/makeup-ultra-fast-shaders) | 9.6 | Fails (O/E), Works-candidate (N) | Works-candidate | Suspect, Iris diff 58 | water needs 17 varying locations |
+| 6 | [Bliss Shaders](https://modrinth.com/shader/bliss-shader) | 2.1.2 | Works-candidate | Works-candidate | Black, Iris diff 129 | renders black |
+| 7 | [MakeUp - Ultra Fast](https://modrinth.com/shader/makeup-ultra-fast-shaders) | 9.6 | Works-candidate | Works-candidate | Suspect, Iris diff 58 | water packs into 15 varying locations |
 | 8 | [Rethinking Voxels](https://modrinth.com/shader/rethinking-voxels) | r0.1-beta9 | Refused | Refused | Looks vanilla | requires compute shaders, custom images, storage buffers |
 | 9 | [Super Duper Vanilla](https://modrinth.com/shader/super-duper-vanilla) | 1.3.8 | Works-candidate | Works-candidate | Draws, Iris diff 14 |  |
 | 10 | [Mellow](https://modrinth.com/shader/mellow) | 3.5 | Works-candidate | Works-candidate | Draws, Iris diff 13 | optional compute passes skipped |
@@ -81,9 +99,9 @@ still fails on its own textures.
 |---|---|---|---|---|---|---|
 | 25 | [BSL Shaders - Classic](https://modrinth.com/shader/bsl-shaders-classic) | 10.0 | Works-candidate | Works-candidate |  |  |
 | 26 | [Shrimple](https://modrinth.com/shader/shrimple) | v0.12 | Refused | Refused |  | requires compute shaders and custom images |
-| 27 | [Bloop Shaders](https://modrinth.com/shader/bloop-shaders) | 1.8.0-Alpha-3 | Partial (O), Works-candidate (N/E) | Partial (O), Works-candidate (N/E) |  | an alpha release; its shadow program is broken |
+| 27 | [Bloop Shaders](https://modrinth.com/shader/bloop-shaders) | 1.8.0-Alpha-3 | Works-candidate | Works-candidate |  | its shadow program writes an undeclared varying, declared as Iris does |
 | 28 | [FastPBR](https://modrinth.com/shader/fastpbr) | 2.0 | Refused | Refused |  | requires compute shaders, custom images, storage buffers |
-| 29 | [E-LITE shaders (MakeUp edit)](https://modrinth.com/shader/lite-shaders) | ELT513 | Fails | Works-candidate |  | water needs 18–19 varying locations |
+| 29 | [E-LITE shaders (MakeUp edit)](https://modrinth.com/shader/lite-shaders) | ELT513 | Works-candidate | Works-candidate |  | water packs into exactly 16 varying locations |
 | 30 | [Fantasy Shaders Reimagined](https://modrinth.com/shader/fantasy-shaders) | 1.11 | Works-candidate | Works-candidate |  |  |
 | 31 | [Body Camera](https://modrinth.com/shader/body-camera-shader) | 1.6.2 | Works-candidate | Works-candidate |  |  |
 | 32 | [RenderPearl](https://modrinth.com/shader/renderpearl) | 2.8.0-beta.4 | Refused | Refused |  | requires compute shaders, storage buffers and 5 more features |
@@ -92,7 +110,7 @@ still fails on its own textures.
 | 35 | [Fantasy Shaders Unbound](https://modrinth.com/shader/fantasy-shader-unbound) | 1.11 | Works-candidate | Works-candidate |  |  |
 | 36 | [RedHat Shaders](https://modrinth.com/shader/redhat-shaders) | 34.3.1 | Works-candidate | Works-candidate |  |  |
 | 37 | [No Fog](https://modrinth.com/shader/nofog) | 2.1.1 | Not a pack | Not a pack |  | a resource pack, not a shader pack |
-| 38 | [Arc](https://modrinth.com/shader/arc-shader) | 0.15.2 | Fails (O/E), Works-candidate (N) | Fails (O/E), Works-candidate (N) |  | an essential composite pass reads 19 of its own textures (16 allowed) |
+| 38 | [Arc](https://modrinth.com/shader/arc-shader) | 0.15.2 | Fails (O/E), Works-candidate (N) | Fails (O/E), Works-candidate (N) |  | an essential composite pass reads 19 of its own textures (16 allowed); passes with a device allowing more (`--max-textures 32`) |
 | 39 | [Pegasus Shaders](https://modrinth.com/shader/pegasus) | 0.8.1 | Refused | Refused |  | requires custom images |
 | 40 | [Aurora's Shaders](https://modrinth.com/shader/auroras-shaders) | 1.9 | Works-candidate | Works-candidate |  |  |
 
@@ -126,6 +144,7 @@ Overworld statuses; "renders" counts Works-candidate and Partial.
 | | | first try, 28 varyings | 6 | 0 | 5 | 5 | – | 6 |
 | | | after fixes, 16 varyings | 7 | 1 | 5 | 2 | 1 | 8 |
 | | | after fixes, 28 varyings | 8 | 1 | 5 | 1 | 1 | 9 |
+| | | re-measured 2026-11-21, 16 and 28 varyings | 9 | 0 | 5 | 1 | 1 | 9 |
 
 - **Batch 1** (rank 13 was already in the train set): 16 and 28 varyings gave the same statuses throughout.
   Over all three dimensions: 7 / 3 / 6 / 17 on the first try, 24 / 3 / 6 / 0 after.
@@ -133,9 +152,8 @@ Overworld statuses; "renders" counts Works-candidate and Partial.
     require storage buffers or compute shaders.
 - **Batch 2**: no rank was already measured. The first try counted the resource pack as Fails; the Not a pack
   status was added afterwards. Over all three dimensions: 16 / 0 / 15 / 17 on the first try, 24 / 1 / 15 / 5 / 3
-  after (27 / 1 / 15 / 2 / 3 at 28 varyings).
-  - What is left is device limits: one pack reads more than 16 textures in a pass, one needs more than 16
-    varying locations.
+  after (27 / 1 / 15 / 2 / 3 at 28 varyings); 28 / 0 / 15 / 2 / 3 at both limits when re-measured on 2026-11-21.
+  - What is left is a device limit: Arc reads more than 16 textures in a pass (overworld and End).
 - The fixes in both batches were translator gaps: GLSL forms naga's front end does not accept, sampler
   overloads, preprocessor leniency, built-ins without a host form.
 - No fix in either batch changed a train-set status. Photon's water failure in that period came from the
