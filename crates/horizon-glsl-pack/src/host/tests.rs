@@ -1017,3 +1017,65 @@ fn gcolor_is_the_atlas_in_gbuffers_programs() {
     glsl_to_wgsl(&entities.fragment, Stage::Fragment)
         .unwrap_or_else(|e| panic!("{e}\n{}", entities.fragment));
 }
+
+#[test]
+fn sixteen_bit_unorm_outputs_keep_whole_steps() {
+    let mut plan = PackPlan::default();
+    plan.buffers[2].format = crate::plan::BufferFormat::Rgb16;
+    let (out, _, fs) = run(ProgramKind::Entities, &plan, &[0, 2], &entity_program());
+    assert!(
+        out.fragment.contains("hz_out_0 = hz_unorm("),
+        "{}",
+        out.fragment
+    );
+    assert!(
+        out.fragment.contains("hz_out_1 = hz_unorm16("),
+        "{}",
+        out.fragment
+    );
+    assert!(fs.contains("fn hz_unorm16"), "{fs}");
+}
+
+/// The nearest half float to a non-negative `x` (round to nearest even is not
+/// needed: no tested value falls on a tie).
+fn to_half(x: f32) -> f32 {
+    if x == 0.0 {
+        return 0.0;
+    }
+    let exponent = x.log2().floor().max(-14.0);
+    let step = (exponent - 10.0).exp2();
+    (x / step).round() * step
+}
+
+/// What `hz_unorm16` writes for step `k` (the GLSL helper, in f32).
+fn unorm16_written(k: u32) -> f32 {
+    if k == 0 {
+        0.0
+    } else {
+        ((k as f32 + 0.25) / 65535.0).min(1.0)
+    }
+}
+
+#[test]
+fn unorm16_writes_decode_to_their_step_on_both_storages() {
+    for k in 0..=65535u32 {
+        let v = unorm16_written(k);
+        // A real 16-bit unorm target rounds to the nearest step.
+        assert_eq!((v * 65535.0).round() as u32, k, "unorm16 {k}");
+    }
+    for k in 0..=512u32 {
+        let read = to_half(unorm16_written(k)) * 65535.0;
+        // Packs decode ids by truncating or by rounding; both give k.
+        assert_eq!(read as u32, k, "half float, int(): {k} read {read}");
+        assert_eq!(
+            read.round() as u32,
+            k,
+            "half float, round(): {k} read {read}"
+        );
+        // Without the quarter step, the half float reads under k.
+        if k > 0 {
+            assert!(to_half(k as f32 / 65535.0) * 65535.0 < k as f32 + 1e-9);
+        }
+    }
+    assert_eq!(to_half(unorm16_written(65535)), 1.0);
+}

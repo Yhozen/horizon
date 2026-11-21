@@ -4,14 +4,18 @@
 //   node scripts/bench.mjs [--site open] [--args="GAME ARGS"] [--shaderpack pack.zip] [--seconds 60]
 //     [--tail 15] [--shot frame.png] [--profile main.cpuprofile] [--trace trace.json]
 //     [--release other/release.json] [--gpu] [--verbose] [--strict] [--expect-chunks N]
-//     [--profile-dir DIR] [--reload] [--port N] [--log console.txt]
+//     [--profile-dir DIR] [--reload] [--port N] [--log console.txt] [--files DIR] [--size WxH]
 // Without --gpu, WebGPU runs on SwiftShader (a machine without a GPU). --profile-dir keeps the
 // browser profile (OPFS included) in DIR; --reload then opens the page a second time in it
 // without ?shaderpack= (the saved pack and selection must carry over) and saves a second
 // --shot as NAME-reload.png. Console lines about the shader pack are always printed.
+// --files DIR puts DIR's files into the page's store (OPFS horizon-files/) before the first
+// visit; the page installs them into the game folder, so DIR/saves/W can be played with
+// --args="--world W …". --size sets the page's viewport (default 1300x800).
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { watchFrameRate } from "./bench-frames.mjs";
@@ -22,7 +26,7 @@ const { values } = parseArgs({ options: {
   site: { type: "string", default: "horizon" }, shaderpack: { type: "string" },
   gpu: { type: "boolean", default: false }, verbose: { type: "boolean", default: false },
   strict: { type: "boolean", default: false }, "expect-chunks": { type: "string" },
-  "profile-dir": { type: "string" }, log: { type: "string" }, reload: { type: "boolean", default: false }, port: { type: "string" },
+  "profile-dir": { type: "string" }, files: { type: "string" }, size: { type: "string" }, log: { type: "string" }, reload: { type: "boolean", default: false }, port: { type: "string" },
 } });
 if (values.reload && !values["profile-dir"]) throw new Error("--reload needs --profile-dir");
 if (values.trace && values["profile-dir"]) throw new Error("--trace and --profile-dir do not mix");
@@ -38,7 +42,9 @@ const flags = values.gpu ? [] : ["--enable-features=Vulkan", "--use-webgpu-adapt
   "--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--use-gl=angle"];
 const launch = { executablePath: process.env.CHROME_PATH ?? "/usr/bin/google-chrome",
   headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage", "--enable-unsafe-webgpu", ...flags] };
-const viewport = { width: 1300, height: 800 };
+const [width, height] = (values.size ?? "1300x800").split("x").map(Number);
+if (!(width > 0 && height > 0)) throw new Error("--size is WIDTHxHEIGHT");
+const viewport = { width, height };
 // A persistent profile keeps OPFS between the two visits of --reload.
 const context = values["profile-dir"]
   ? await chromium.launchPersistentContext(values["profile-dir"], { ...launch, viewport })
@@ -127,6 +133,26 @@ try {
     ]);
     await page.waitForFunction(() => window.horizonStarted || window.horizonError, null, { timeout: 300000 });
   };
+  if (values.files) {
+    // Any same-origin page gives access to the origin's OPFS.
+    await page.goto(`${origin}/release.json`);
+    const root = values.files;
+    const walk = async (dir) => (await Promise.all((await readdir(dir, { withFileTypes: true })).map((e) =>
+      e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]))).flat();
+    for (const file of await walk(root)) {
+      const path = relative(root, file).split("\\").join("/");
+      const bytes = [...await readFile(file)];
+      await page.evaluate(async ({ path, bytes }) => {
+        let dir = await (await navigator.storage.getDirectory()).getDirectoryHandle("horizon-files", { create: true });
+        const parts = path.split("/"), name = parts.pop();
+        for (const part of parts) dir = await dir.getDirectoryHandle(part, { create: true });
+        const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
+        await writable.write(new Uint8Array(bytes));
+        await writable.close();
+      }, { path, bytes });
+    }
+    console.log(`files: ${values.files} stored`);
+  }
   await visit(true);
   const wait = (fraction) => new Promise((done) => setTimeout(done, seconds * 1000 * fraction));
   if (values.profile) {

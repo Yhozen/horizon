@@ -9,10 +9,13 @@ use super::mips;
 use horizon_glsl_pack::schedule::Side;
 
 /// The wgpu format a pack format is stored in. 16-bit normalized formats are
-/// not render targets without adapter-specific features, so they are stored
-/// as half floats; the programs clamp what they write (`horizon_glsl_pack`'s
-/// host). colortex0 in an 8-bit format takes the world's format, so Horizon's
-/// own pipelines can draw into it for slots the pack has no program for.
+/// not render targets without adapter-specific features (WebGPU never has
+/// them), so they are stored as 32-bit floats where those filter and blend,
+/// else as half floats; the programs clamp what they write (`horizon_glsl_pack`'s
+/// host). Half floats hold `k / 65535` exactly only for small `k`: packs that
+/// pack two bytes into one 16-bit channel need the 32-bit floats. colortex0 in
+/// an 8-bit format takes the world's format, so Horizon's own pipelines can
+/// draw into it for slots the pack has no program for.
 pub(super) fn wgpu_format(
     format: BufferFormat,
     world: Option<wgpu::TextureFormat>,
@@ -36,6 +39,9 @@ pub(super) fn wgpu_format(
         BufferFormat::R16 if norm16 => T::R16Unorm,
         BufferFormat::Rg16 if norm16 => T::Rg16Unorm,
         BufferFormat::Rgb16 | BufferFormat::Rgba16 if norm16 => T::Rgba16Unorm,
+        BufferFormat::R16 if float32 => T::R32Float,
+        BufferFormat::Rg16 if float32 => T::Rg32Float,
+        BufferFormat::Rgb16 | BufferFormat::Rgba16 if float32 => T::Rgba32Float,
         BufferFormat::R16 | BufferFormat::R16F => T::R16Float,
         BufferFormat::Rg16 | BufferFormat::Rg16F => T::Rg16Float,
         BufferFormat::Rgb16
@@ -344,5 +350,35 @@ impl ShadowTargets {
             ),
             colors,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wgpu::{Features as F, TextureFormat as T};
+
+    #[test]
+    fn sixteen_bit_unorm_buffers_keep_their_precision_where_they_can() {
+        let norm16 = F::TEXTURE_FORMAT_16BIT_NORM | F::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+        let float32 = F::FLOAT32_FILTERABLE | F::FLOAT32_BLENDABLE;
+        let rgba16 = BufferFormat::Rgba16;
+        // Native: exact unorm targets.
+        assert_eq!(wgpu_format(rgba16, None, norm16 | float32), T::Rgba16Unorm);
+        // WebGPU: 32-bit floats hold every k / 65535 (bytes packed into one channel too).
+        assert_eq!(wgpu_format(rgba16, None, float32), T::Rgba32Float);
+        assert_eq!(
+            wgpu_format(BufferFormat::Rgb16, None, float32),
+            T::Rgba32Float
+        );
+        assert_eq!(wgpu_format(BufferFormat::Rg16, None, float32), T::Rg32Float);
+        assert_eq!(wgpu_format(BufferFormat::R16, None, float32), T::R32Float);
+        // Neither: half floats.
+        assert_eq!(wgpu_format(rgba16, None, F::empty()), T::Rgba16Float);
+        // Float formats are unchanged.
+        assert_eq!(
+            wgpu_format(BufferFormat::Rgba16F, None, float32),
+            T::Rgba16Float
+        );
     }
 }

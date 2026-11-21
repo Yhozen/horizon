@@ -7,9 +7,20 @@ use crate::plan::{AlphaFunc, AlphaTest, BufferFormat, FormatKind};
 /// What a GL target does with a written value: unorm clamps 0..1 (NaN → 0),
 /// float flushes NaN and infinities to 0 (Horizon's float targets would keep
 /// them and spread them through every later blur).
+///
+/// 16-bit unorm targets are half floats where the device cannot render into
+/// R16/RG16/RGBA16 (WebGPU): there `k / 65535` reads back a hair under it, and
+/// a pack that decodes with `int(x * 65535.0)` gets `k - 1` (every material id
+/// off by one). `hz_unorm16` writes the step `k` a quarter step above it: a
+/// real 16-bit unorm target still rounds it to `k`, and a half float keeps it
+/// above `k` for every `k` up to 512. 0 and 1 stay exact.
 const OUTPUT_HELPERS: &str = "vec4 hz_unorm(vec4 v) {
     bvec4 nan = greaterThan(floatBitsToUint(v) & uvec4(0x7fffffffu), uvec4(0x7f800000u));
     return mix(clamp(v, 0.0, 1.0), vec4(0.0), nan);
+}
+vec4 hz_unorm16(vec4 v) {
+    vec4 k = round(hz_unorm(v) * 65535.0);
+    return mix(min((k + 0.25) / 65535.0, vec4(1.0)), vec4(0.0), equal(k, vec4(0.0)));
 }
 vec4 hz_finite(vec4 v) {
     bvec4 bad = greaterThanEqual(floatBitsToUint(v) & uvec4(0x7fffffffu), uvec4(0x7f800000u));
@@ -309,10 +320,12 @@ pub(super) fn fragment_source(
             continue;
         }
         let value = format!("hz_gl_FragData[{i}]");
-        let value = match output_format(spec, i).map(BufferFormat::kind) {
+        let format = output_format(spec, i);
+        let value = match format.map(BufferFormat::kind) {
             _ if target != Scalar::Float => widen(&value, "vec4", target)?,
             Some(FormatKind::Float) => format!("hz_finite({value})"),
             Some(FormatKind::Snorm) => format!("hz_snorm({value})"),
+            _ if format.is_some_and(BufferFormat::is_unorm16) => format!("hz_unorm16({value})"),
             _ => format!("hz_unorm({value})"),
         };
         writeln!(out, "    hz_out_{i} = {value};").unwrap();
