@@ -231,9 +231,10 @@ impl Extras {
                 .any(|u| u.name == name)
         };
         let atlas = fragment.sample_calls.iter().any(|c| {
-            split_sampling_call(c)
-                .and_then(|(_, name)| canonical(name, false))
-                .is_some_and(|n| n == "gtexture")
+            split_sampling_call(c).is_some_and(|(_, name)| {
+                // `gcolor` is the atlas in gbuffers programs (sampling::resolve).
+                name == "gcolor" || canonical(name, false).is_some_and(|n| n == "gtexture")
+            })
         });
         Self {
             entity_color: entity && uses("entityColor"),

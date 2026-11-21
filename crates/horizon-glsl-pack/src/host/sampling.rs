@@ -345,6 +345,13 @@ pub(super) fn resolve(
     depth2_is_1: bool,
 ) -> Result<Source, String> {
     let fullscreen = spec.geometry == Geometry::Fullscreen;
+    // `gcolor` names texture unit 0, which in gbuffers programs is the
+    // albedo atlas (packs read their blocks' colour through it there).
+    let name = if !fullscreen && name == "gcolor" {
+        "gtexture"
+    } else {
+        name
+    };
     let Some(canon) = canonical(name, watershadow) else {
         // The pack's own name: a custom texture, else the 1×1 default.
         return Ok(custom_entry(name, dim, None, spec).map_or(Source::Default, Source::Pack));
