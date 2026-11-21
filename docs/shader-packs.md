@@ -11,15 +11,26 @@ like vanilla until a pack is chosen.
 it; `Done` applies. The pack compiles while the world keeps running ("Compiling 12/41"), then replaces
 Horizon's own shaders; a chat line says whether it loaded fully, partly, or not at all.
 
-- **Adding packs**: `Open Shader Pack Folder…`, or drop zips on the window. In the browser, `Add Shader
-  Pack…` opens a file picker, and zips can be dropped on the page.
+- **Adding packs**: `Open Shader Pack Folder…`, or drop zips on the window while the Shader Packs page
+  shows (as Iris takes drops only on its shader screen). In the browser, `Add Shader Pack…` opens a file
+  picker, and zips can be dropped on the page while that page shows. Only a pack's `shaders/` folder is
+  read; a pack with more than 10,000 files there or more than 256 MiB unpacked is refused (its report says
+  so), and the browser takes zips up to 128 MB. A pack added again under the same name is read and
+  compiled again.
 - **Settings…**: the pack's own option screens (`screen=`, sub-screens, sliders, profiles, the labels of its
   `lang/en_us.lang`). Values are saved in `shaderpacks/<pack file>.txt`, the `NAME=VALUE` file Iris and
   OptiFine keep beside a pack, so a settings file copied from Iris gives the same configuration.
 - **Report…**: what the pack uses that Horizon does not have, every program that was skipped and why
   (pack file and line), the GPU compiler's messages, uniforms that read zero. `Copy Report` puts it on the
   clipboard; the same text is in the log (`logs/latest.log`, or the browser console).
-- The choice is saved in `horizon-shaders.txt` (`enabled:`, `pack:`) beside `options.txt`.
+- The choice is saved in `horizon-shaders.txt` (`enabled:`, `pack:`) beside `options.txt`. While a newly
+  installed pack has not yet drawn the world for 10 seconds the file also says `trial:true`; a game that
+  starts and finds it there (the last run stopped in that time, perhaps crashed by the pack) leaves the pack
+  off, says so in chat and in its report, and `Done` turns it on again.
+- A GPU error the pack causes at any time (natively; in the browser in its first frames) turns it off with
+  the error in its report, rather than stopping the game.
+- The pack stays compiled on the title and loading screens, and the last two compiles (say the Overworld's
+  and the Nether's) are kept, so a portal round trip or a new world does not compile again.
 
 Statuses: **Works** (every program the pack enables compiled), **Partial** (it runs; the report lists what is
 missing), **Not supported** (it requires something Horizon lacks, such as compute shaders; the report says
@@ -29,7 +40,10 @@ stay).
 ### In the browser
 
 The page keeps the `shaderpacks` folder and `horizon-shaders.txt` in the browser's private storage (the
-Origin Private File System), so packs and the choice survive a reload. `?shaderpack=<url of a zip>` adds that
+Origin Private File System), so packs and the choice survive a reload. At boot only the choice, the option
+files and the chosen pack (when shaders are on) are put in the game's memory; another pack is read from
+storage when the page first shows it or it is chosen. A write the storage refuses (it is full, say) is
+said in chat. `?shaderpack=<url of a zip>` adds that
 pack to the folder and chooses it. A pack whose shaders the browser's own compiler rejects is turned off
 during its first frames, and its report gives the browser's message; other programs of the pack fall back
 when they can.

@@ -253,6 +253,18 @@ pub fn shader_packs_changed() {
     shader_packs::RESCAN.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// A line from the page for the player (a pack it could not store or load).
+#[cfg(target_arch = "wasm32")]
+pub fn shader_pack_notice(line: String) {
+    shader_packs::notice(line);
+}
+
+/// Whether the Shader Packs page shows, where dropped files are packs.
+#[cfg(target_arch = "wasm32")]
+pub fn shader_pack_page_open() -> bool {
+    shader_packs::PAGE_OPEN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The event loop's flow between frames. The desktop polls; in the browser the
 /// redraw request already schedules the next animation frame, and polling would
 /// spin winit's `scheduler.postTask` loop, starving the frames it waits for.
@@ -11057,7 +11069,10 @@ impl ApplicationHandler for Game<'_> {
             return;
         }
         if let WindowEvent::DroppedFile(path) = &event {
-            self.shader_pack_dropped(path);
+            // Only the Shader Packs page takes files, as Iris's shader screen does.
+            if self.shader_pack_page_open() {
+                self.shader_pack_dropped(path);
+            }
             return;
         }
         if (self.pending_entry.is_some() || self.world_loader.is_some())

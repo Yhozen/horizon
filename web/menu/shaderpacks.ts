@@ -2,7 +2,9 @@
 // option files and `horizon-shaders.txt`. The wasm game keeps its files in memory
 // (`horizon_core::fs`); this store mirrors the ones it wants kept into the origin private
 // file system (OPFS) under `horizon-files/`, by the same relative path, and puts them
-// back with `install_file` on the next visit. It also gives the game the page-side
+// back with `install_file` on the next visit: at boot only the selection, the option
+// files and the selected pack (when shaders are on); every other pack is an empty
+// placeholder until the game asks for it (`horizonLoadShaderPack`). It also gives the game the page-side
 // helpers its shader pack screen calls: a file picker, drag and drop, and the clipboard.
 
 /** The OPFS folder that mirrors the game folder. */
@@ -11,6 +13,11 @@ export const ROOT = "horizon-files";
 export const PACKS = "shaderpacks";
 
 export type InstallFile = (path: string, bytes: Uint8Array) => void;
+
+/** The selection file the game keeps beside its options. */
+export const SELECTION = "horizon-shaders.txt";
+/** The largest zip the page takes (the game also refuses packs that unpack past 256 MiB). */
+export const MAX_PACK_BYTES = 128 << 20;
 
 /** A file name safe to use as one path segment: no slashes, no `..`, no control
  * characters. Spaces, `§`, `+`, brackets and the like stay, as packs use them. */
@@ -150,14 +157,63 @@ export function flush(): Promise<void> {
   return queue;
 }
 
-/** The game's `persist`: fire and forget, failures only log. */
-export function persist(path: string, bytes: Uint8Array | null): void {
+/** The game's `persist`: fire and forget; a failure logs and goes to `onError` (the
+ * game's chat). */
+export function persist(path: string, bytes: Uint8Array | null, onError?: (line: string) => void): void {
+  const failed = (error: unknown) => {
+    console.warn(`Keeping ${path} failed`, error);
+    onError?.(`${path} could not be kept in this browser (${message(error)}): it will be gone after a reload.`);
+  };
   try {
     const done = bytes ? writeFile(path, bytes) : deleteFile(path);
-    done.catch((error: unknown) => console.warn(`Keeping ${path} failed`, error));
+    done.catch(failed);
   } catch (error) {
-    console.warn(`Keeping ${path} failed`, error);
+    failed(error);
   }
+}
+
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** The pack `horizon-shaders.txt` turns on (`enabled:true` and its `pack:`), if any. */
+export function selectedPack(text: string): string | undefined {
+  let enabled = false, pack: string | undefined;
+  for (const line of text.split(/\r?\n/)) {
+    const at = line.indexOf(":");
+    if (at < 0) continue;
+    const key = line.slice(0, at), value = line.slice(at + 1).trim();
+    if (key === "enabled") enabled = value === "true";
+    else if (key === "pack" && value) pack = value;
+  }
+  return enabled ? pack : undefined;
+}
+
+/** Whether a stored path is a pack zip in the packs folder. */
+const isStoredPack = (path: string) => path.startsWith(`${PACKS}/`) && path.split("/").length === 2 && /\.zip$/i.test(path);
+
+/** Which stored files go into the game at boot (`now`) and which only as empty
+ * placeholders, loaded when the game asks (`later`): every pack but the selected one. */
+export function bootPlan(paths: string[], selected?: string): { now: string[]; later: string[] } {
+  const now: string[] = [], later: string[] = [];
+  const chosen = selected ? joinPath(PACKS, selected) : undefined;
+  for (const path of paths) (isStoredPack(path) && path !== chosen ? later : now).push(path);
+  return { now, later };
+}
+
+/** Boot: the selection, the option files and the selected pack go into the game, the
+ * other packs as empty placeholders; returns how many files were read. Never throws. */
+export async function mirrorAtBoot(installFile: InstallFile, paths: string[]): Promise<number> {
+  let selected: string | undefined;
+  if (paths.includes(SELECTION)) {
+    try {
+      const text = await readFile(SELECTION);
+      if (text) selected = selectedPack(new TextDecoder().decode(text));
+    } catch (error) {
+      console.warn(`Loading the saved ${SELECTION} failed`, error);
+    }
+  }
+  const { now, later } = bootPlan(paths, selected);
+  for (const path of later) installFile(path, new Uint8Array(0));
+  return mirrorInto(installFile, now);
 }
 
 /** Puts every stored file (or the `paths` given) into the game; returns how many. Never
@@ -215,14 +271,19 @@ export function copyText(text: string): void {
 
 export interface Hooks {
   installFile: InstallFile;
-  /** Called once after one or more packs were added. */
+  /** Called once after one or more packs were added (or one was loaded). */
   onChanged?: () => void;
+  /** A line for the player (the game's chat): a pack that could not be stored or loaded. */
+  notice?: (line: string) => void;
+  /** Whether a drop on the page is a shader pack (the game's Shader Packs page shows). */
+  acceptsDrop?: () => boolean;
 }
 
 type HookWindow = typeof globalThis & {
   horizonPersist?: (path: string, bytes: Uint8Array | null) => void;
   horizonPickShaderPack?: () => void;
   horizonCopyText?: (text: string) => void;
+  horizonLoadShaderPack?: (path: string) => void;
 };
 
 /** The hidden picker's id (tests reach it by this). */
@@ -231,13 +292,23 @@ export const PICKER_ID = "horizon-shaderpack-input";
 /** Installs the game's page hooks (`window.horizonPersist`, `horizonPickShaderPack`,
  * `horizonCopyText`) and drag and drop of zips on the page. Returns `addFiles` (what a
  * pick or drop runs; resolves once the packs are stored) and `dispose`. */
-export function installHooks({ installFile, onChanged }: Hooks) {
+export function installHooks({ installFile, onChanged, notice, acceptsDrop }: Hooks) {
   const page = globalThis as HookWindow;
+  const say = (line: string) => {
+    try { notice?.(line); } catch (error) { console.warn(line, error); }
+  };
+  const changed = () => {
+    try { onChanged?.(); } catch (error) { console.warn("The game's shader pack rescan failed", error); }
+  };
 
   const addFiles = async (files: Iterable<File>) => {
     let added = 0;
     for (const file of files) {
       if (!isZip(file)) { console.info(`Ignored ${file.name}: shader packs are .zip files`); continue; }
+      if (file.size > MAX_PACK_BYTES) {
+        say(`Not added: ${file.name} is larger than ${MAX_PACK_BYTES >> 20} MB.`);
+        continue;
+      }
       const path = packPath(file.name);
       let bytes: Uint8Array;
       try {
@@ -248,12 +319,29 @@ export function installHooks({ installFile, onChanged }: Hooks) {
       }
       installFile(path, bytes);
       added++;
-      await writeFile(path, bytes).catch((error: unknown) => console.warn(`Keeping ${path} failed`, error));
+      await writeFile(path, bytes).catch((error: unknown) => {
+        console.warn(`Keeping ${path} failed`, error);
+        say(`${file.name} could not be stored in this browser (${message(error)}): it will be gone after a reload.`);
+      });
     }
-    if (added) {
-      try { onChanged?.(); } catch (error) { console.warn("The game's shader pack rescan failed", error); }
-    }
+    if (added) changed();
     return added;
+  };
+
+  /** A pack left out at boot, when the game first needs it. */
+  const load = (path: string) => {
+    void (async () => {
+      try {
+        const bytes = await readFile(path);
+        if (!bytes?.length) throw new Error("it is not stored");
+        installFile(path, bytes);
+      } catch (error) {
+        console.warn(`Loading the saved ${path} failed`, error);
+        say(`Shader pack ${path} could not be loaded (${message(error)}).`);
+        return;
+      }
+      changed();
+    })();
   };
 
   const pick = () => {
@@ -283,15 +371,18 @@ export function installHooks({ installFile, onChanged }: Hooks) {
   };
   const drop = (event: DragEvent) => {
     if (!hasFiles(event)) return;
+    // Never opened by the browser; taken only on the game's Shader Packs page.
     event.preventDefault();
+    if (acceptsDrop && !acceptsDrop()) { console.info("Ignored a drop: open Shader Packs to add a pack"); return; }
     void addFiles([...event.dataTransfer!.files]);
   };
   addEventListener("dragover", dragover);
   addEventListener("drop", drop);
 
-  page.horizonPersist = persist;
+  page.horizonPersist = (path, bytes) => persist(path, bytes, say);
   page.horizonPickShaderPack = pick;
   page.horizonCopyText = copyText;
+  page.horizonLoadShaderPack = load;
 
   return {
     addFiles,
@@ -301,6 +392,7 @@ export function installHooks({ installFile, onChanged }: Hooks) {
       delete page.horizonPersist;
       delete page.horizonPickShaderPack;
       delete page.horizonCopyText;
+      delete page.horizonLoadShaderPack;
     },
   };
 }

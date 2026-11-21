@@ -52,6 +52,15 @@ test("pure helpers sanitize names and URLs", async () => {
     assert.equal(m.packNameFromUrl("https://cdn.example/"), "pack.zip");
     assert.equal(m.packNameFromUrl("/packs/..%2F..%2Fx.zip"), "._._x.zip");
     assert(m.isZip({ name: "A.ZIP" }) && !m.isZip({ name: "notes.txt", type: "text/plain" }));
+    assert.equal(m.selectedPack("enabled:true\npack:B.zip\ntrial:true\n"), "B.zip");
+    assert.equal(m.selectedPack("enabled:false\npack:B.zip\n"), undefined);
+    assert.equal(m.selectedPack("enabled:true\npack:\n"), undefined);
+    assert.deepEqual(m.bootPlan(["horizon-shaders.txt", "shaderpacks/A.zip", "shaderpacks/A.zip.txt", "shaderpacks/B.zip",
+      "shaderpacks/Folder/shaders/final.fsh"], "B.zip"), {
+      now: ["horizon-shaders.txt", "shaderpacks/A.zip.txt", "shaderpacks/B.zip", "shaderpacks/Folder/shaders/final.fsh"],
+      later: ["shaderpacks/A.zip"],
+    });
+    assert.deepEqual(m.bootPlan(["shaderpacks/A.zip"]).later, ["shaderpacks/A.zip"]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -66,9 +75,13 @@ test("Chrome keeps shader packs in OPFS across restarts; picker, drop and clipbo
     window.store = store;
     window.installs = [];
     window.changes = 0;
+    window.notices = [];
+    window.acceptDrops = true;
     window.hooks = store.installHooks({
       installFile: (path, bytes) => installs.push([path, new TextDecoder().decode(bytes.slice(0, 4))]),
       onChanged: () => { changes++; },
+      notice: (line) => notices.push(line),
+      acceptsDrop: () => window.acceptDrops,
     });
     window.ready = true;
   </script></body>`;
@@ -154,6 +167,22 @@ test("Chrome keeps shader packs in OPFS across restarts; picker, drop and clipbo
   assert(dropped.files.includes("shaderpacks/sub_Dropped.zip") && dropped.files.includes("shaderpacks/My Pack [v2] §a+.zip"));
   assert(!dropped.files.some((f) => f.endsWith("readme.md") || f.endsWith("notes.txt")));
 
+  // Away from the game's Shader Packs page a drop is not taken (nor opened by the browser).
+  const ignored = await page.evaluate(async (bytes) => {
+    window.acceptDrops = false;
+    const data = new DataTransfer();
+    data.items.add(new File([new Uint8Array(bytes)], "Elsewhere.zip", { type: "application/zip" }));
+    const drop = new DragEvent("drop", { dataTransfer: data, cancelable: true, bubbles: true });
+    document.body.dispatchEvent(drop);
+    await new Promise((r) => setTimeout(r, 100));
+    await store.flush();
+    window.acceptDrops = true;
+    return { prevented: drop.defaultPrevented, changes, files: await store.listFiles() };
+  }, [...zip]);
+  assert.equal(ignored.prevented, true);
+  assert.equal(ignored.changes, 2);
+  assert(!ignored.files.includes("shaderpacks/Elsewhere.zip"));
+
   // Clipboard.
   await page.bringToFront();
   await page.evaluate(() => window.horizonCopyText("Status: Works\nline 2"));
@@ -174,6 +203,31 @@ test("Chrome keeps shader packs in OPFS across restarts; picker, drop and clipbo
   const pack = await page.evaluate(async () => [...(await store.readFile("shaderpacks/sub_Dropped.zip"))]);
   assert.deepEqual(Buffer.from(pack), zip);
 
+  // Boot: the selection names B.zip (shaders on), so only it of the packs is read; the
+  // others are empty placeholders until the game asks for one.
+  const booted = await page.evaluate(async () => {
+    const got = [];
+    const count = await store.mirrorAtBoot((path, bytes) => got.push([path, bytes.length]), await store.listFiles());
+    return { count, got };
+  });
+  assert.equal(booted.count, 4);
+  assert.deepEqual(booted.got, [
+    ["shaderpacks/My Pack [v2] §a+.zip", 0], ["shaderpacks/sub_Dropped.zip", 0],
+    ["horizon-shaders.txt", 24], ["shaderpacks/A.zip.txt", 5], ["shaderpacks/B.zip", 3],
+    ["shaderpacks/Folder/shaders/final.fsh", 13],
+  ]);
+  const loaded = await page.evaluate(async () => {
+    const before = installs.length, changed = changes;
+    window.horizonLoadShaderPack("shaderpacks/sub_Dropped.zip");
+    while (changes === changed) await new Promise((r) => setTimeout(r, 20));
+    window.horizonLoadShaderPack("shaderpacks/Missing.zip");
+    while (notices.length === 0) await new Promise((r) => setTimeout(r, 20));
+    return { installs: installs.slice(before), notices: notices.splice(0) };
+  });
+  assert.deepEqual(loaded.installs, [["shaderpacks/sub_Dropped.zip", "PK\u0003\u0004"]]);
+  assert.equal(loaded.notices.length, 1);
+  assert.match(loaded.notices[0], /Missing\.zip could not be loaded/);
+
   // An OPFS that throws: mirrorInto and horizonPersist report nothing to the caller.
   const failed = await page.evaluate(async () => {
     navigator.storage.getDirectory = () => { throw new DOMException("Denied", "SecurityError"); };
@@ -183,7 +237,11 @@ test("Chrome keeps shader packs in OPFS across restarts; picker, drop and clipbo
     await store.flush();
     let listThrew = false;
     try { await store.listFiles(); } catch { listThrew = true; }
-    return { count, added: installs.length - before, listThrew };
+    return { count, added: installs.length - before, listThrew, notices: notices.splice(0) };
   });
+  // The player hears of the failed write (the game's chat).
+  assert.equal(failed.notices.length, 1);
+  assert.match(failed.notices[0], /shaderpacks\/x\.zip could not be kept in this browser/);
+  delete failed.notices;
   assert.deepEqual(failed, { count: 0, added: 0, listThrew: true });
 });
