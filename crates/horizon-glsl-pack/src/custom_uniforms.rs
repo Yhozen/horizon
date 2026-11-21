@@ -1062,7 +1062,11 @@ fn eval(e: &Expr, ctx: &mut Ctx) -> Result<Val, String> {
 
 fn binary(op: Op, a: Val, b: Val) -> Result<Val, String> {
     use Op::*;
-    let ints = matches!((a, b), (Val::I(_), Val::I(_)));
+    // `/` is always float division: OptiFine's shaders.txt ("Custom uniforms") has only floating point
+    // constants and lists `worldTime` and the other scalar uniforms as float parameters, and Iris draws
+    // BSL Classic's `timeAngle = worldTime / 24000` as noon at day time 6000 (integer division gives 0,
+    // sunrise). The other operators give the same value either way, so they stay integral.
+    let ints = op != Div && matches!((a, b), (Val::I(_), Val::I(_)));
     Ok(match op {
         And => Val::B(a.b()? && b.b()?),
         Or => Val::B(a.b()? || b.b()?),
@@ -1088,7 +1092,6 @@ fn binary(op: Op, a: Val, b: Val) -> Result<Val, String> {
                 Add => x.wrapping_add(y),
                 Sub => x.wrapping_sub(y),
                 Mul => x.wrapping_mul(y),
-                Div => x.checked_div(y).unwrap_or(0),
                 _ => x.checked_rem(y).unwrap_or(0),
             })
         }
@@ -1254,8 +1257,10 @@ mod tests {
         close(value_of("(1 + 2) * 3"), 9.0);
         close(value_of("-a * 2"), -5.0);
         close(value_of("7 % 3 + 7.5 % 2"), 2.5);
-        // Integer division stays integral until the float uniform.
-        close(value_of("worldTime / 1000"), 13.0);
+        // `/` divides as floats even between ints (OptiFine's docs: constants and parameters are
+        // floats; Iris draws BSL Classic's `worldTime / 24000` as noon).
+        close(value_of("worldTime / 1000"), 13.5);
+        close(value_of("6000 / 24000"), 0.25);
         close(value_of("worldTime / 1000.0"), 13.5);
         close(value_of("if(1 < 2 && !(3 >= 4) || false, 1.5, 2.5)"), 1.5);
         close(value_of("if(1 == 2, 1, 2 != 2, 2, 3)"), 3.0);

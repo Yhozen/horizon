@@ -382,14 +382,11 @@ pub(super) fn resolve(
     if let Some(n) = index("colortex") {
         let format = spec.plan.buffers[usize::from(n)].format;
         let sample = buffer_sample(format);
-        // Mip sampling lasts from the first pass that regenerates the buffer's mips to the frame's end.
+        // Mips are sampled on the side whose chain was rebuilt this frame (see `mipmapped_reads`).
         let mips = fullscreen
             && sample == SampleKind::Float
-            && spec
-                .plan
-                .mipmaps
-                .iter()
-                .any(|(k, set)| k.is_fullscreen() && *k <= spec.kind && set.contains(&n));
+            && usize::from(n) < crate::schedule::BUFFERS
+            && crate::schedule::mipmapped_reads(spec.plan, spec.kind)[usize::from(n)];
         let hardware = filterable(format);
         let kind = match (hardware, mips) {
             (false, _) => SamplerKind::Point,

@@ -127,8 +127,12 @@ Terms: *gbuffers* are the programs that draw world geometry; *composite-style* p
 **colortex mipmaps**
 - `const bool colortexNMipmapEnabled = true;` is read from a pass's fragment source. It works in `deferred`,
   `composite` and `final`. (The docs disagree about `prepare` and `begin`.)
-- Before each such pass the mip chain is rebuilt for the half that pass reads, changed or not.
-- From then on that buffer samples trilinear until the end of the frame.
+- Before each such pass the mip chain is rebuilt for the half that pass reads, changed or not, and the pass
+  itself samples it trilinear.
+- Later passes sample it trilinear for the rest of the frame while they read that half. Once a pass writes
+  the buffer (it flips), the half just written has no fresh mips and reads at level 0 until a pass rebuilds
+  them. (Horizon's model: GL keeps the filter on the texture object that was mipmapped. Not measured under
+  Iris. Without it, Fantasy's FXAA read stale levels and drew black dots.)
 
 **Shadow filtering keys**
 - `shadowtexNNearest` (also `shadowtexNearest` for 0, `shadowNMinMagNearest`): nearest. `shadowtexNMipmap`
@@ -490,6 +494,11 @@ unverified against Iris)
 - Entity-state booleans (`is_sneaking`, `is_in_water`, `is_hurt`…) are standard values too. Horizon reads them
   as 0 until the client supplies them.
 - Operators: `+ - * / %`, `! && ||`, comparisons.
+- `/` divides as floats, even between two ints: `worldTime / 24000` is 0.25 at day time 6000, not 0. (From
+  the docs, which list only floating-point constants and give `worldTime` and the other scalar uniforms as
+  float parameters. Iris agrees black-box: it draws BSL Classic, whose sun position is `worldTime / 24000`,
+  at noon at day time 6000; integer division would put it at sunrise. Iris's own expression types are not
+  measured here.) Of the corpus, only BSL Classic changes value.
 
 **Functions**
 - `sin cos tan asin acos atan atan2 exp exp2 exp10 log log2 log10 sqrt pow torad todeg abs signum floor ceil

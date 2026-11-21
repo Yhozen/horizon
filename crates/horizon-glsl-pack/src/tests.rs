@@ -774,3 +774,40 @@ fn integer_colour_buffers_bind_as_integers() {
         p.fragment_wgsl.contains("texture_2d<u32>") && p.fragment_wgsl.contains("texture_2d<i32>")
     );
 }
+
+#[test]
+fn mipmaps_are_sampled_on_the_side_they_were_built_for() {
+    // composite1 rebuilds colortex3's mips and samples them, then writes
+    // colortex3 (it flips); composite2 reads the side just written, whose
+    // levels are stale: it samples level 0. composite3 rebuilds them again.
+    let mipmapped = "#version 120\nuniform sampler2D colortex3;\nvarying vec2 uv;\n\
+                     const bool colortex3MipmapEnabled = true;\n\
+                     void main() {\n    /* DRAWBUFFERS:3 */\n    gl_FragData[0] = texture2D(colortex3, uv);\n}\n";
+    let plain = "#version 120\nuniform sampler2D colortex3;\nvarying vec2 uv;\n\
+                 void main() {\n    /* DRAWBUFFERS:3 */\n    gl_FragData[0] = texture2D(colortex3, uv);\n}\n";
+    let files = pack_of(
+        &[
+            program("gbuffers_terrain", GBUFFERS_VSH, GBUFFERS_FSH),
+            program("composite1", PASS_VSH, mipmapped),
+            program("composite2", PASS_VSH, plain),
+            program("composite3", PASS_VSH, mipmapped),
+            program("composite4", PASS_VSH, plain),
+            program("final", PASS_VSH, PASS_FSH),
+        ],
+        &[],
+    );
+    let pack = compile_all(&files, &PackOptions::default()).unwrap();
+    let sampler = |kind| {
+        let p = &pack.programs[&kind];
+        p.textures
+            .iter()
+            .find(|t| t.source == TextureSource::Buffer(3))
+            .map(|t| t.sampler)
+            .unwrap()
+    };
+    use ProgramKind as K;
+    assert_eq!(sampler(K::Composite(1)), SamplerKind::Trilinear);
+    assert_eq!(sampler(K::Composite(2)), SamplerKind::Linear);
+    assert_eq!(sampler(K::Composite(3)), SamplerKind::Trilinear);
+    assert_eq!(sampler(K::Composite(4)), SamplerKind::Linear);
+}
