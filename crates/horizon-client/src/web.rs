@@ -178,6 +178,18 @@ pub fn shader_packs_changed() {
     crate::game::shader_packs_changed();
 }
 
+/// A line for the player from the page (a shader pack it could not store or load).
+#[wasm_bindgen]
+pub fn shader_pack_notice(line: String) {
+    crate::game::shader_pack_notice(line);
+}
+
+/// Whether the Shader Packs page shows: the page takes dropped files only then.
+#[wasm_bindgen]
+pub fn shader_pack_page_open() -> bool {
+    crate::game::shader_pack_page_open()
+}
+
 /// Mounts `archive` (tools/web/pack.py) as the prepared resources, opens WebGPU and
 /// starts the game with `args`, the desktop game's command line.
 #[wasm_bindgen]

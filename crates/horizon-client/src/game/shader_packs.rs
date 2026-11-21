@@ -19,6 +19,24 @@ use std::sync::Arc;
 /// Set when the page added packs (browser): the folder is scanned again.
 pub(super) static RESCAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// The Shader Packs page shows (the page's drop handler asks, browser).
+pub(super) static PAGE_OPEN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Lines the page has for the player (browser: a pack that could not be
+/// stored or loaded), shown in chat on the next frame.
+static NOTICES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Queues a line for the player (`web.rs` `shader_pack_notice`).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(super) fn notice(line: String) {
+    NOTICES.lock().unwrap_or_else(|e| e.into_inner()).push(line);
+}
+
+fn take_notices() -> Vec<String> {
+    std::mem::take(&mut *NOTICES.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
 /// The selection file, beside `options.txt`.
 pub(super) const SELECTION_FILE: &str = "horizon-shaders.txt";
 /// The packs' folder, in the game folder.
@@ -30,14 +48,27 @@ pub(super) struct Selection {
     pub enabled: bool,
     /// The pack's file name in the folder (`BSL_v10.zip`, or a folder's name).
     pub pack: Option<String>,
+    /// The pack was installed but has not drawn for [`PROVEN_AFTER`] yet
+    /// (`trial:true`): found at start, the game stopped in that time (it may
+    /// have crashed it), so the pack is not turned on again by itself.
+    pub trial: bool,
 }
+
+/// A pack's file name, one entry of the folder: never a path out of it
+/// (`pack:../options` would reach `options.txt` through the option file).
+pub(super) fn is_pack_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains(['/', '\\']) && !name.contains("..")
+}
+
+/// How long a pack draws before a crash is no longer blamed on it.
+const PROVEN_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Shaders were left on with a pack chosen, before the device opens.
 pub(super) fn saved_selection_on() -> bool {
     let path = fs::current_dir().unwrap_or_default().join(SELECTION_FILE);
     fs::read_to_string(path)
         .map(|text| Selection::parse(&text))
-        .is_ok_and(|s| s.enabled && s.pack.is_some())
+        .is_ok_and(|s| s.enabled && s.pack.is_some() && !s.trial)
 }
 
 impl Selection {
@@ -46,7 +77,8 @@ impl Selection {
         for line in text.lines() {
             match line.split_once(':') {
                 Some(("enabled", v)) => s.enabled = v.trim() == "true",
-                Some(("pack", v)) if !v.trim().is_empty() => s.pack = Some(v.trim().to_string()),
+                Some(("trial", v)) => s.trial = v.trim() == "true",
+                Some(("pack", v)) if is_pack_name(v.trim()) => s.pack = Some(v.trim().to_string()),
                 _ => {}
             }
         }
@@ -55,10 +87,17 @@ impl Selection {
 
     pub fn serialize(&self) -> String {
         format!(
-            "enabled:{}\npack:{}\n",
+            "enabled:{}\npack:{}\n{}",
             self.enabled,
-            self.pack.as_deref().unwrap_or("")
+            self.pack.as_deref().unwrap_or(""),
+            if self.trial { "trial:true\n" } else { "" }
         )
+    }
+
+    /// Whether this selection, read at start, turns its pack on: not when
+    /// the last run stopped while the pack was on trial.
+    pub fn starts_on(&self) -> bool {
+        self.enabled && !self.trial
     }
 }
 
@@ -69,6 +108,26 @@ pub(super) struct LibraryPack {
     pub file: String,
     /// Where it is (the folder, or the `--shader-pack` path).
     pub path: PathBuf,
+    /// Its size and time (a zip's): a pack added again under the same name
+    /// changes it, which drops what was read or compiled from the old one.
+    pub stamp: u64,
+}
+
+/// [`LibraryPack::stamp`]; 0 for folders. In the browser a not yet loaded
+/// pack is an empty file (`web/menu/shaderpacks.ts`).
+fn stamp_of(path: &Path) -> u64 {
+    let Ok(meta) = fs::metadata(path) else {
+        return 0;
+    };
+    if meta.is_dir() {
+        return 0;
+    }
+    let time = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_nanos() as u64);
+    meta.len() ^ time.rotate_left(17)
 }
 
 /// The packs a folder holds: zips and folders with a `shaders` folder,
@@ -87,7 +146,11 @@ pub(super) fn scan(dir: &Path) -> Vec<LibraryPack> {
             }
             let is_zip = file.to_ascii_lowercase().ends_with(".zip") && path.is_file_vfs();
             let is_pack_dir = path.is_dir_vfs() && path.join("shaders").is_dir_vfs();
-            (is_zip || is_pack_dir).then_some(LibraryPack { file, path })
+            (is_zip || is_pack_dir).then(|| LibraryPack {
+                file,
+                stamp: stamp_of(&path),
+                path,
+            })
         })
         .collect();
     packs.sort_by_key(|p| p.file.to_lowercase());
@@ -110,20 +173,91 @@ pub(super) fn serialize_values(values: &[(String, String)]) -> String {
     values.iter().map(|(k, v)| format!("{k}={v}\n")).collect()
 }
 
-/// Every file of a folder or zip, by its path inside the pack; a pack zipped
-/// with its folder as the top level loses that level.
+/// How much of a pack is read: far above any real pack (the largest known
+/// has under 1,000 files and 20 MB), well below what would exhaust memory.
+#[derive(Clone, Copy)]
+pub(super) struct ReadLimits {
+    pub files: usize,
+    pub bytes: u64,
+}
+
+pub(super) const READ_LIMITS: ReadLimits = ReadLimits {
+    files: 10_000,
+    bytes: 256 << 20,
+};
+
+/// Whether a path inside a pack is one of its shader files (the pack's own
+/// `shaders/` folder, perhaps under one top folder), read at all.
+fn is_pack_file(name: &str) -> bool {
+    !name.starts_with("__MACOSX/") && name.split('/').take(2).any(|part| part == "shaders")
+}
+
+/// Counts what is read against [`ReadLimits`].
+struct Budget {
+    limits: ReadLimits,
+    files: usize,
+    bytes: u64,
+}
+
+impl Budget {
+    /// One more file of `bytes`.
+    fn take(&mut self, bytes: u64) -> Result<(), String> {
+        self.files += 1;
+        self.grow(bytes)
+    }
+
+    /// `bytes` more than counted.
+    fn grow(&mut self, bytes: u64) -> Result<(), String> {
+        self.bytes = self.bytes.saturating_add(bytes);
+        if self.files > self.limits.files {
+            return Err(format!(
+                "the pack has more than {} files: not read",
+                self.limits.files
+            ));
+        }
+        if self.bytes > self.limits.bytes {
+            return Err(format!(
+                "the pack unpacks to more than {} MiB: not read",
+                self.limits.bytes >> 20
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Every shader file of a folder or zip, by its path inside the pack; a pack
+/// zipped with its folder as the top level loses that level.
 pub(super) fn read_files(path: &Path) -> Result<PackFiles, String> {
+    read_files_within(path, READ_LIMITS)
+}
+
+pub(super) fn read_files_within(path: &Path, limits: ReadLimits) -> Result<PackFiles, String> {
     let mut files = PackFiles::default();
+    let mut budget = Budget {
+        limits,
+        files: 0,
+        bytes: 0,
+    };
     if path.is_dir_vfs() {
         let mut stack = vec![path.to_path_buf()];
         while let Some(dir) = stack.pop() {
             for entry in fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))? {
                 let entry = entry.map_err(|e| e.to_string())?.path();
+                let Ok(name) = entry.strip_prefix(path) else {
+                    continue;
+                };
+                let name = name.to_string_lossy().replace('\\', "/");
+                // A link back up the tree would never end.
+                if std::fs::symlink_metadata(&entry).is_ok_and(|m| m.file_type().is_symlink()) {
+                    continue;
+                }
                 if entry.is_dir_vfs() {
-                    stack.push(entry);
-                } else if let Ok(name) = entry.strip_prefix(path) {
-                    let name = name.to_string_lossy().replace('\\', "/");
+                    if name.split('/').count() < 2 || is_pack_file(&name) {
+                        stack.push(entry);
+                    }
+                } else if is_pack_file(&name) {
                     let bytes = fs::read(&entry).map_err(|e| format!("{name}: {e}"))?;
+                    budget.take(bytes.len() as u64)?;
                     files.0.insert(name, bytes);
                 }
             }
@@ -131,8 +265,13 @@ pub(super) fn read_files(path: &Path) -> Result<PackFiles, String> {
     } else {
         let zip =
             horizon_client::zip::Zip::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        for name in zip.names() {
+        for name in zip.names().filter(|n| is_pack_file(n)) {
+            // The declared size first, so a bomb is refused before it inflates
+            // (an entry inflates to at most about twice what it declares).
+            let declared = zip.size(name).unwrap_or(0);
+            budget.take(declared)?;
             let bytes = zip.read(name).map_err(|e| format!("{name}: {e}"))?;
+            budget.grow((bytes.len() as u64).saturating_sub(declared))?;
             files.0.insert(name.to_string(), bytes);
         }
     }
@@ -233,6 +372,7 @@ pub(super) fn call_page(name: &str, arg: Option<&str>) -> bool {
 pub(super) struct Target {
     pub file: String,
     pub path: PathBuf,
+    pub stamp: u64,
     pub dimension: &'static str,
     pub overrides: Vec<(String, Option<String>)>,
     /// Programs the GPU rejected earlier: their slots fall back.
@@ -250,7 +390,7 @@ pub(super) struct Applied {
 pub(super) struct Job {
     pub target: Target,
     #[cfg(not(target_arch = "wasm32"))]
-    handle: std::thread::JoinHandle<JobResult>,
+    handle: Option<std::thread::JoinHandle<JobResult>>,
     #[cfg(target_arch = "wasm32")]
     state: WebJob,
 }
@@ -274,7 +414,10 @@ impl Job {
                 .name("Shader pack".into())
                 .spawn(move || compile_target(&t, &host))
                 .expect("thread");
-            Self { target, handle }
+            Self {
+                target,
+                handle: Some(handle),
+            }
         }
         #[cfg(target_arch = "wasm32")]
         Self {
@@ -287,13 +430,10 @@ impl Job {
     fn poll(&mut self) -> Option<JobResult> {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if !self.handle.is_finished() {
+            if !self.handle.as_ref().is_some_and(|h| h.is_finished()) {
                 return None;
             }
-            let handle = std::mem::replace(
-                &mut self.handle,
-                std::thread::spawn(|| (None, PackReport::default(), None)),
-            );
+            let handle = self.handle.take()?;
             Some(
                 handle
                     .join()
@@ -339,6 +479,13 @@ impl Job {
         }
         None
     }
+}
+
+fn held_back_report() -> PackReport {
+    failed_report(
+        "Not turned on at start: the game stopped before this pack had drawn for 10 seconds \
+         last time, so it may have crashed the game. Choose Done here to try it again.",
+    )
 }
 
 fn failed_report(why: &str) -> PackReport {
@@ -406,12 +553,24 @@ pub(super) struct ShaderPacks {
     pub applied: Option<Applied>,
     /// The last target that failed, not retried until something changes.
     pub failed: Option<Target>,
-    /// Each pack's option screens, read when its settings are first shown.
-    pub models: BTreeMap<String, Arc<horizon_glsl_pack::screens::OptionModel>>,
+    /// Each pack's option screens, read when its settings are first shown
+    /// (`None`: it could not be read; tried again after a rescan).
+    pub models: BTreeMap<String, Option<Arc<horizon_glsl_pack::screens::OptionModel>>>,
+    /// The pack compiled before the applied one, kept so going back (a
+    /// portal round trip, the title screen) does not compile again.
+    pub previous: Option<Applied>,
+    /// Packs asked of the page (browser: not loaded at boot).
+    requested: std::collections::BTreeSet<String>,
     /// The settings sub-screen shown (`None`: the root).
     pub settings_screen: Option<String>,
     /// Per pack, programs the GPU rejected (retried without them).
     pub excluded: BTreeMap<String, std::collections::BTreeSet<String>>,
+    /// The running selection has drawn for [`PROVEN_AFTER`] this run.
+    proven: bool,
+    /// When the pack on trial first drew.
+    trial_drawn: Option<web_time::Instant>,
+    /// A pack left on trial by the last run, not turned on (said in chat once in a world).
+    held_back: Option<String>,
     loaded: bool,
 }
 
@@ -441,30 +600,104 @@ impl ShaderPacks {
         }
         self.rescan();
         self.active = self.selection.clone();
+        if self.selection.enabled
+            && !self.selection.starts_on()
+            && let Some(file) = self.selection.pack.clone()
+        {
+            // The last run stopped before this pack had drawn for a while.
+            self.active.enabled = false;
+            self.reports.insert(file.clone(), held_back_report());
+            self.held_back = Some(file);
+        }
         if let Some(path) = cli {
             let file = path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            let in_folder = path
-                .parent()
-                .is_some_and(|p| p.ends_with(FOLDER) || p == Self::folder());
+            // Natively only the game's own folder; in the browser the page's
+            // `?shaderpack=` is the relative `shaderpacks/NAME`.
+            let in_folder = path.parent().is_some_and(|p| {
+                fs::current_dir().unwrap_or_default().join(p) == Self::folder()
+                    || (cfg!(target_arch = "wasm32") && p.ends_with(FOLDER))
+            });
             if in_folder && self.library.iter().any(|p| p.file == file) {
                 // A pack the page put in the folder (`?shaderpack=`): chosen and kept.
                 self.selection = Selection {
                     enabled: true,
                     pack: Some(file),
+                    trial: false,
                 };
                 self.active = self.selection.clone();
                 self.save_selection();
             } else {
-                self.cli = Some(LibraryPack { file, path });
+                self.cli = Some(LibraryPack {
+                    file,
+                    stamp: stamp_of(&path),
+                    path,
+                });
             }
         }
     }
 
     pub fn rescan(&mut self) {
-        self.library = scan(&Self::folder());
+        let old = std::mem::replace(&mut self.library, scan(&Self::folder()));
+        self.models.retain(|_, m| m.is_some());
+        let changed: Vec<String> = self
+            .library
+            .iter()
+            .filter(|p| !old.iter().any(|o| o.file == p.file && o.stamp == p.stamp))
+            .map(|p| p.file.clone())
+            .collect();
+        for file in changed {
+            self.forget(&file);
+        }
+    }
+
+    /// Drops what was read or compiled from a pack (added again, or loaded in the browser).
+    fn forget(&mut self, file: &str) {
+        self.models.remove(file);
+        self.reports.remove(file);
+        self.excluded.remove(file);
+        self.requested.remove(file);
+        if self.failed.as_ref().is_some_and(|t| t.file == file) {
+            self.failed = None;
+        }
+        if self
+            .previous
+            .as_ref()
+            .is_some_and(|a| a.target.file == file)
+        {
+            self.previous = None;
+        }
+    }
+
+    /// Whether `file` is a pack of the library (or the `--shader-pack` one).
+    fn known(&self, file: &str) -> bool {
+        self.library
+            .iter()
+            .chain(self.cli.iter())
+            .any(|p| p.file == file)
+    }
+
+    /// Whether a pack's bytes are here. In the browser the page loads packs
+    /// other than the selected one when first needed (an empty placeholder
+    /// until then): this asks for it once, and the page's rescan follows.
+    fn ready(&mut self, pack: &LibraryPack) -> bool {
+        if !cfg!(target_arch = "wasm32")
+            || pack.path.is_dir_vfs()
+            || fs::metadata(&pack.path).is_ok_and(|m| m.len() > 0)
+        {
+            return true;
+        }
+        if self.requested.insert(pack.file.clone()) {
+            let root = fs::current_dir().unwrap_or_default();
+            let rel = pack.path.strip_prefix(&root).unwrap_or(&pack.path);
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            if !call_page("horizonLoadShaderPack", Some(&rel)) {
+                log::warn!("Horizon: shader pack {} could not be asked for", pack.file);
+            }
+        }
+        false
     }
 
     pub fn save_selection(&self) {
@@ -480,6 +713,9 @@ impl ShaderPacks {
     }
 
     pub fn values_of(&mut self, file: &str) -> &Vec<(String, String)> {
+        if !self.known(file) {
+            return self.values.entry(file.to_string()).or_default();
+        }
         self.values.entry(file.to_string()).or_insert_with(|| {
             fs::read_to_string(Self::values_path(file))
                 .map(|t| parse_values(&t))
@@ -488,6 +724,9 @@ impl ShaderPacks {
     }
 
     pub fn save_values(&mut self, file: &str, values: Vec<(String, String)>) {
+        if !self.known(file) || !is_pack_name(file) {
+            return;
+        }
         let path = Self::values_path(file);
         if values.is_empty() {
             let _ = fs::remove_file(&path);
@@ -503,9 +742,11 @@ impl ShaderPacks {
     }
 
     /// A pack's options and screens (read from its files once).
+    /// A pack's options and screens (read from its files once; a pack that
+    /// can't be read is not read again until a rescan).
     pub fn model_of(&mut self, file: &str) -> Option<Arc<horizon_glsl_pack::screens::OptionModel>> {
         if let Some(m) = self.models.get(file) {
-            return Some(m.clone());
+            return m.clone();
         }
         let pack = self
             .library
@@ -513,16 +754,21 @@ impl ShaderPacks {
             .chain(self.cli.iter())
             .find(|p| p.file == file)?
             .clone();
-        let files = match read_files(&pack.path) {
-            Ok(f) => f,
+        if !self.ready(&pack) {
+            return None;
+        }
+        let model = match read_files(&pack.path) {
+            Ok(files) => Some(Arc::new(horizon_glsl_pack::screens::option_model(&files))),
             Err(e) => {
                 log::warn!("Horizon: shader pack {file}: {e}");
-                return None;
+                self.reports
+                    .entry(file.to_string())
+                    .or_insert_with(|| failed_report(&e));
+                None
             }
         };
-        let model = Arc::new(horizon_glsl_pack::screens::option_model(&files));
         self.models.insert(file.to_string(), model.clone());
-        Some(model)
+        model
     }
 
     /// The chosen pack, if shaders are on.
@@ -542,7 +788,52 @@ impl ShaderPacks {
         self.active = self.selection.clone();
         self.active_values = self.active.pack.clone().map(|f| self.values_of(&f).clone());
         self.failed = None;
+        self.proven = false;
+        self.trial_drawn = None;
+        self.held_back = None;
+        if !self.active.enabled {
+            self.selection.trial = false;
+            self.active.trial = false;
+        }
         self.save_selection();
+    }
+
+    /// Once a frame while a pack is installed in a world: puts it on trial
+    /// (saved before it draws), and ends the trial once it has drawn for [`PROVEN_AFTER`].
+    fn tick_trial(&mut self, in_world: bool, draws: bool) {
+        if in_world && self.trial_step(draws, web_time::Instant::now()) {
+            self.save_selection();
+        }
+    }
+
+    /// The pack was turned off without a crash: nothing to hold back at the next start.
+    fn end_trial(&mut self) {
+        self.trial_drawn = None;
+        if self.selection.trial && self.cli.is_none() {
+            self.selection.trial = false;
+            self.active.trial = false;
+            self.save_selection();
+        }
+    }
+
+    /// [`Self::tick_trial`]'s bookkeeping; true when the saved flag changes.
+    fn trial_step(&mut self, draws: bool, now: web_time::Instant) -> bool {
+        if self.proven || self.cli.is_some() {
+            return false;
+        }
+        let mut on = true;
+        if draws {
+            let first = *self.trial_drawn.get_or_insert(now);
+            if now.duration_since(first) >= PROVEN_AFTER {
+                self.proven = true;
+                self.trial_drawn = None;
+                on = false;
+            }
+        }
+        let changed = self.selection.trial != on;
+        self.selection.trial = on;
+        self.active.trial = on;
+        changed
     }
 
     /// What should be compiled for `dim`, if anything.
@@ -558,6 +849,7 @@ impl ShaderPacks {
             excluded: self.excluded.get(&pack.file).cloned().unwrap_or_default(),
             file: pack.file,
             path: pack.path,
+            stamp: pack.stamp,
             dimension: dimension_id(dim),
         })
     }
@@ -591,7 +883,7 @@ impl ShaderPacks {
             self.selection.pack = None;
             self.save_selection();
         }
-        self.reports.remove(file);
+        self.forget(file);
         self.values.remove(file);
         self.rescan();
     }
@@ -633,91 +925,42 @@ impl Game<'_> {
 
     /// Once a frame: starts, polls and installs compiles so the running pack
     /// matches the selection, the dimension and the options; reinstalls the
-    /// pack into a rebuilt renderer and its tags into a rebuilt mesher.
+    /// pack into a rebuilt renderer and its tags into a rebuilt mesher. On
+    /// the title and loading screens the installed pack stays (it doesn't
+    /// draw there) and nothing new is compiled.
     pub(super) fn tick_shader_packs(&mut self, title: bool) {
         self.shader_packs.load();
         if RESCAN.swap(false, std::sync::atomic::Ordering::Relaxed) {
             self.shader_packs.rescan();
         }
-        let want = if title {
-            None
-        } else {
-            self.shader_packs.target(self.dim)
-        };
+        for line in take_notices() {
+            self.system_message(horizon_client::text::Text::literal(line));
+        }
+        let want = self.shader_packs.target(self.dim);
         // A finished compile.
         if let Some(job) = &mut self.shader_packs.job
-            && let Some((compiled, mut report, files)) = job.poll()
+            && let Some(result) = job.poll()
         {
             let target = self.shader_packs.job.take().map(|j| j.target).expect("job");
-            let installed = match (compiled, files) {
-                (Some(compiled), Some(files)) => {
-                    let compiled = Arc::new(compiled);
-                    for program in compiled.programs.values() {
-                        report.notes.extend(
-                            program
-                                .notes
-                                .iter()
-                                .map(|n| format!("{}: {n}", program.source)),
-                        );
-                    }
-                    report.notes.sort();
-                    report.notes.dedup();
-                    match self.install_shader_pack(&compiled, &files) {
-                        Ok(()) => Some(Applied {
-                            target: target.clone(),
-                            compiled,
-                            files,
-                        }),
-                        Err(e) => {
-                            if self.exclude_rejected(&target.file, &e, &compiled) {
-                                // Compiled again without them on the next frame.
-                                report.gpu_errors.push(("pipelines".into(), e));
-                                self.shader_packs
-                                    .reports
-                                    .insert(target.file.clone(), report);
-                                return;
-                            }
-                            report.status = PackStatus::Failed;
-                            report.gpu_errors.push(("pipelines".into(), e));
-                            None
-                        }
-                    }
-                }
-                _ => None,
-            };
-            if installed.is_some()
-                && let Some(r) = self.renderer.as_ref()
-            {
-                report.notes.extend(r.shader_pack_notes());
-            }
-            log::info!(
-                "Horizon: shader pack {} ({}): {}\n{}",
-                target.file,
-                target.dimension,
-                report.status.label(),
-                report.text(&target.file)
-            );
-            self.announce_shader_pack(&target.file, &report);
-            self.shader_packs
-                .reports
-                .insert(target.file.clone(), report);
-            match installed {
-                Some(applied) => {
-                    self.shader_packs.applied = Some(applied);
-                    self.shader_packs.failed = None;
-                }
-                None => {
-                    self.shader_packs.failed = Some(target);
-                    self.uninstall_shader_pack();
-                }
+            if want.as_ref() == Some(&target) {
+                self.finish_shader_pack(target, result);
+            } else {
+                // Shaders turned off, or another pack or option chosen meanwhile.
+                log::info!(
+                    "Horizon: shader pack {} ({}) compiled but no longer wanted",
+                    target.file,
+                    target.dimension
+                );
             }
         }
-        // The GPU rejected the running pack (in the browser, frames later).
+        // The GPU rejected the running pack (in the browser, frames later;
+        // natively also any error the device reports while it is installed).
         if let Some(error) = self.renderer.as_mut().and_then(|r| r.shader_pack_error())
             && let Some(applied) = self.shader_packs.applied.take()
         {
             let file = applied.target.file.clone();
             self.set_shader_pack_tags(None);
+            self.shader_packs.end_trial();
             if !self.exclude_rejected(&file, &error, &applied.compiled) {
                 let report = self.shader_packs.reports.entry(file.clone()).or_default();
                 report.status = PackStatus::Failed;
@@ -729,24 +972,144 @@ impl Game<'_> {
                 )));
             }
         }
-        if self.shader_packs.job.is_some() {
+        if self.shader_packs.applied.is_some() {
+            let draws = self.shader_pack_draws(title);
+            self.shader_packs.tick_trial(!title, draws);
+        }
+        if !title && let Some(file) = self.shader_packs.held_back.take() {
+            self.system_message(horizon_client::text::Text::literal(format!(
+                "Shader pack {file} was not turned on: the game stopped while it was new last time (see its report)."
+            )));
+        }
+        let Some(target) = want else {
+            // Off at once, even while a compile runs (natively its thread
+            // finishes and the result is dropped; in the browser it stops).
+            #[cfg(target_arch = "wasm32")]
+            {
+                self.shader_packs.job = None;
+            }
+            self.shader_packs.previous = None;
+            if self.shader_packs.applied.is_some() {
+                self.uninstall_shader_pack();
+            }
+            return;
+        };
+        if self.shader_packs.job.is_some() || title {
             return;
         }
-        match want {
-            None => {
-                if self.shader_packs.applied.is_some() {
-                    self.uninstall_shader_pack();
+        let current = self.shader_packs.applied.as_ref().map(|a| &a.target);
+        if current == Some(&target) {
+            self.keep_shader_pack_installed();
+            return;
+        }
+        // Another dimension: the old pack can't draw it, so Horizon's own
+        // shaders (and meshes) take over until the new one is ready.
+        if self
+            .shader_packs
+            .applied
+            .as_ref()
+            .is_some_and(|a| a.target.dimension != target.dimension)
+        {
+            self.shader_packs.previous = self.uninstall_shader_pack();
+        }
+        if self.shader_packs.previous.as_ref().map(|a| &a.target) == Some(&target) {
+            let back = self.shader_packs.previous.take().expect("previous");
+            match self.install_shader_pack(&back.compiled, &back.files) {
+                Ok(()) => {
+                    self.shader_packs.previous = self.shader_packs.applied.replace(back);
+                    return;
+                }
+                Err(e) => log::warn!(
+                    "Horizon: shader pack {} could not be put back: {e}",
+                    target.file
+                ),
+            }
+        }
+        if self.shader_packs.failed.as_ref() == Some(&target) {
+            return;
+        }
+        let pack = LibraryPack {
+            file: target.file.clone(),
+            path: target.path.clone(),
+            stamp: target.stamp,
+        };
+        if !self.shader_packs.ready(&pack) {
+            return;
+        }
+        if let Some(host) = self.renderer.as_ref().map(|r| r.shader_pack_host()) {
+            self.shader_packs.job = Some(Job::start(target, host));
+        }
+    }
+
+    /// Installs a compile that is still wanted, or records why it can't be.
+    fn finish_shader_pack(&mut self, target: Target, (compiled, mut report, files): JobResult) {
+        let installed = match (compiled, files) {
+            (Some(compiled), Some(files)) => {
+                let compiled = Arc::new(compiled);
+                for program in compiled.programs.values() {
+                    report.notes.extend(
+                        program
+                            .notes
+                            .iter()
+                            .map(|n| format!("{}: {n}", program.source)),
+                    );
+                }
+                report.notes.sort();
+                report.notes.dedup();
+                match self.install_shader_pack(&compiled, &files) {
+                    Ok(()) => Some(Applied {
+                        target: target.clone(),
+                        compiled,
+                        files,
+                    }),
+                    Err(e) => {
+                        // The renderer has no pack now: neither may the meshes.
+                        if let Some(old) = self.uninstall_shader_pack() {
+                            self.shader_packs.previous = Some(old);
+                        }
+                        if self.exclude_rejected(&target.file, &e, &compiled) {
+                            // Compiled again without them on the next frame.
+                            report.gpu_errors.push(("pipelines".into(), e));
+                            self.shader_packs
+                                .reports
+                                .insert(target.file.clone(), report);
+                            return;
+                        }
+                        report.status = PackStatus::Failed;
+                        report.gpu_errors.push(("pipelines".into(), e));
+                        None
+                    }
                 }
             }
-            Some(target) => {
-                let current = self.shader_packs.applied.as_ref().map(|a| &a.target);
-                if current == Some(&target) {
-                    self.keep_shader_pack_installed();
-                } else if self.shader_packs.failed.as_ref() != Some(&target)
-                    && let Some(host) = self.renderer.as_ref().map(|r| r.shader_pack_host())
-                {
-                    self.shader_packs.job = Some(Job::start(target, host));
+            _ => None,
+        };
+        if installed.is_some()
+            && let Some(r) = self.renderer.as_ref()
+        {
+            report.notes.extend(r.shader_pack_notes());
+        }
+        log::info!(
+            "Horizon: shader pack {} ({}): {}\n{}",
+            target.file,
+            target.dimension,
+            report.status.label(),
+            report.text(&target.file)
+        );
+        self.announce_shader_pack(&target.file, &report);
+        self.shader_packs
+            .reports
+            .insert(target.file.clone(), report);
+        match installed {
+            Some(applied) => {
+                let old = self.shader_packs.applied.replace(applied);
+                if old.is_some() {
+                    self.shader_packs.previous = old;
                 }
+                self.shader_packs.failed = None;
+            }
+            None => {
+                self.shader_packs.failed = Some(target);
+                self.uninstall_shader_pack();
             }
         }
     }
@@ -802,14 +1165,17 @@ impl Game<'_> {
         Ok(())
     }
 
-    /// Back to Horizon's own shaders.
-    fn uninstall_shader_pack(&mut self) {
+    /// Back to Horizon's own shaders; the pack that was applied.
+    fn uninstall_shader_pack(&mut self) -> Option<Applied> {
         if let Some(renderer) = self.renderer.as_mut() {
             let _ = renderer.set_shader_pack(None, &|_| None);
         }
-        if self.shader_packs.applied.take().is_some() {
+        let old = self.shader_packs.applied.take();
+        if old.is_some() {
             self.set_shader_pack_tags(None);
         }
+        self.shader_packs.end_trial();
+        old
     }
 
     /// A renderer rebuilt by a resource reload starts without the pack.
@@ -822,7 +1188,8 @@ impl Game<'_> {
             let (compiled, files) = (applied.compiled.clone(), applied.files.clone());
             if let Err(e) = self.install_shader_pack(&compiled, &files) {
                 log::warn!("Horizon: shader pack could not be reinstalled: {e}");
-                self.shader_packs.applied = None;
+                // Its tags go too, so the meshes are Horizon's own again.
+                self.uninstall_shader_pack();
             }
         }
     }
@@ -854,6 +1221,12 @@ impl Game<'_> {
         if let Some(renderer) = &mut self.renderer {
             renderer.set_pack_vertex_stream(tags.is_some());
         }
+    }
+
+    /// Whether the Shader Packs page shows: dropped files are taken only there.
+    pub(super) fn shader_pack_page_open(&self) -> bool {
+        self.screen == super::Screen::Options
+            && self.ui.options.page() == horizon_client::options_ui::Page::ShaderPacks
     }
 
     /// A file dropped on the window: a zip goes into the packs folder.
@@ -896,9 +1269,92 @@ mod tests {
         let s = Selection {
             enabled: true,
             pack: Some("BSL v10.zip".into()),
+            trial: false,
         };
         assert_eq!(Selection::parse(&s.serialize()), s);
+        assert!(!s.serialize().contains("trial"), "the old two-line file");
+        let t = Selection { trial: true, ..s };
+        assert_eq!(Selection::parse(&t.serialize()), t);
         assert_eq!(Selection::parse("garbage\n"), Selection::default());
+    }
+
+    #[test]
+    fn pack_names_never_leave_the_folder() {
+        for bad in ["../options", "a/b.zip", "a\\b.zip", "..", "x..zip", ""] {
+            assert!(!is_pack_name(bad), "{bad}");
+            let s = Selection::parse(&format!("enabled:true\npack:{bad}\n"));
+            assert_eq!(s.pack, None, "{bad}");
+        }
+        assert!(is_pack_name("BSL v10 [x] + §.zip"));
+        // Option files only for packs of the library.
+        let mut sp = ShaderPacks::default();
+        sp.save_values("options", vec![("A".into(), "1".into())]);
+        assert!(sp.values.is_empty());
+        assert!(sp.values_of("options").is_empty());
+    }
+
+    #[test]
+    fn forgetting_a_pack_drops_what_was_read_from_it() {
+        let target = Target {
+            file: "A.zip".into(),
+            path: "shaderpacks/A.zip".into(),
+            stamp: 1,
+            dimension: "minecraft:overworld",
+            overrides: Vec::new(),
+            excluded: Default::default(),
+        };
+        let mut sp = ShaderPacks::default();
+        sp.models.insert("A.zip".into(), None);
+        sp.models.insert("B.zip".into(), None);
+        sp.reports.insert("A.zip".into(), PackReport::default());
+        sp.excluded.insert("A.zip".into(), ["x".to_string()].into());
+        sp.failed = Some(target);
+        sp.forget("A.zip");
+        assert!(!sp.models.contains_key("A.zip") && sp.models.contains_key("B.zip"));
+        assert!(sp.reports.is_empty() && sp.excluded.is_empty() && sp.failed.is_none());
+    }
+
+    #[test]
+    fn a_pack_on_trial_is_not_turned_on_again_at_start() {
+        let s = Selection::parse("enabled:true\npack:X.zip\ntrial:true\n");
+        assert!(!s.starts_on());
+        assert!(Selection::parse("enabled:true\npack:X.zip\n").starts_on());
+    }
+
+    #[test]
+    fn the_trial_ends_after_drawing_for_a_while() {
+        let mut sp = ShaderPacks::default();
+        sp.selection = Selection {
+            enabled: true,
+            pack: Some("X.zip".into()),
+            trial: false,
+        };
+        sp.active = sp.selection.clone();
+        let t0 = web_time::Instant::now();
+        // Installed, not drawing yet: on trial (saved), the clock not started.
+        assert!(sp.trial_step(false, t0));
+        assert!(sp.selection.trial && sp.trial_drawn.is_none());
+        assert!(!sp.trial_step(true, t0), "already saved");
+        assert!(!sp.trial_step(true, t0 + PROVEN_AFTER / 2));
+        assert!(
+            sp.trial_step(true, t0 + PROVEN_AFTER),
+            "proven: the flag is cleared"
+        );
+        assert!(sp.proven && !sp.selection.trial && !sp.active.trial);
+        assert!(
+            !sp.trial_step(true, t0 + PROVEN_AFTER * 2),
+            "nothing more to save"
+        );
+        // A `--shader-pack` run is never on trial.
+        let mut cli = ShaderPacks {
+            cli: Some(LibraryPack {
+                file: "X.zip".into(),
+                path: "X.zip".into(),
+                stamp: 0,
+            }),
+            ..ShaderPacks::default()
+        };
+        assert!(!cli.trial_step(false, t0));
     }
 
     #[test]
@@ -912,6 +1368,68 @@ mod tests {
             parse_values("# comment\n\nA = 1\n"),
             vec![("A".into(), "1".into())]
         );
+    }
+
+    /// A zip of `(name, bytes)` entries, deflated.
+    fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for (name, bytes) in entries {
+            out.start_file(*name, options).unwrap();
+            out.write_all(bytes).unwrap();
+        }
+        out.finish().unwrap().into_inner()
+    }
+
+    fn temp_zip(tag: &str, bytes: &[u8]) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "horizon-shader-pack-{tag}-{}.zip",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn only_the_shaders_folder_is_read() {
+        let path = temp_zip(
+            "filter",
+            &zip_of(&[
+                ("Pack/shaders/final.fsh", b"void main() {}"),
+                ("Pack/readme.txt", b"hello"),
+                ("__MACOSX/Pack/shaders/._final.fsh", b"junk"),
+                ("Pack/extras/huge.bin", &[0; 4096]),
+            ]),
+        );
+        let files = read_files(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(files.0.keys().collect::<Vec<_>>(), ["shaders/final.fsh"]);
+    }
+
+    #[test]
+    fn a_pack_past_the_limits_is_refused_with_a_reason() {
+        // A small zip that inflates far past what it is: refused by its declared size.
+        let zeros = vec![0u8; 4 << 20];
+        let path = temp_zip(
+            "bomb",
+            &zip_of(&[("shaders/a.fsh", &zeros), ("shaders/b.fsh", &zeros)]),
+        );
+        assert!(std::fs::metadata(&path).unwrap().len() < 64 << 10);
+        let tight = ReadLimits {
+            files: 100,
+            bytes: 6 << 20,
+        };
+        let err = read_files_within(&path, tight).unwrap_err();
+        assert!(err.contains("more than 6 MiB"), "{err}");
+        let few = ReadLimits {
+            files: 1,
+            bytes: 1 << 30,
+        };
+        let err = read_files_within(&path, few).unwrap_err();
+        let _ = std::fs::remove_file(&path);
+        assert!(err.contains("more than 1 files"), "{err}");
     }
 
     #[test]

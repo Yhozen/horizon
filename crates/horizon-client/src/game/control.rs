@@ -140,6 +140,10 @@ impl Game<'_> {
         {
             self.ui.options.shader_packs = self.shader_packs_view();
         }
+        super::shader_packs::PAGE_OPEN.store(
+            self.shader_pack_page_open(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
 
     fn answer(&mut self, request: horizon_client::control::Request, event_loop: &ActiveEventLoop) {
