@@ -40,6 +40,7 @@ use targets::{Need, ShadowTargets, Targets};
 pub(crate) const FEATURES: wgpu::Features = wgpu::Features::FLOAT32_FILTERABLE
     .union(wgpu::Features::FLOAT32_BLENDABLE)
     .union(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM)
+    .union(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)
     .union(wgpu::Features::RG11B10UFLOAT_RENDERABLE);
 
 /// The uniform block, once per kind of pass (the camera's, the light's, the hand's).
