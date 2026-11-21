@@ -990,3 +990,30 @@ fn targets_are_stored_bottom_up_and_final_is_upright() {
         last.vertex
     );
 }
+
+#[test]
+fn gcolor_is_the_atlas_in_gbuffers_programs() {
+    let blocks = BlockIds::default();
+    let plan = PackPlan::default();
+    let host = HostParams::default();
+    let spec = |kind: ProgramKind| ProgramSpec {
+        kind,
+        geometry: kind.geometry(),
+        draw_buffers: &[0],
+        host: &host,
+        blocks: &blocks,
+        plan: &plan,
+    };
+    let (vertex, fragment) = final_program();
+    // `final_program` samples colortex0, gcolor, colortex6 and depthtex0.
+    let entities = program_sources(&vertex, &fragment, &spec(ProgramKind::Entities)).unwrap();
+    assert!(
+        entities.fragment.contains("hz_atlas"),
+        "{}",
+        entities.fragment
+    );
+    let composite = program_sources(&vertex, &fragment, &spec(ProgramKind::Composite(0))).unwrap();
+    assert!(!composite.fragment.contains("hz_atlas"));
+    glsl_to_wgsl(&entities.fragment, Stage::Fragment)
+        .unwrap_or_else(|e| panic!("{e}\n{}", entities.fragment));
+}
