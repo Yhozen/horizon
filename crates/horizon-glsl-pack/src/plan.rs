@@ -253,6 +253,12 @@ impl BufferFormat {
         self.kind() == FormatKind::Unorm
     }
 
+    /// The 16-bit normalized formats (`R16` … `RGBA16`), which the client may
+    /// store as half floats.
+    pub fn is_unorm16(self) -> bool {
+        self.is_unorm() && self.row().4 == 16
+    }
+
     /// Integer formats (`R32UI`, `RGBA16I` …).
     pub fn is_integer(self) -> bool {
         matches!(self.kind(), FormatKind::Sint | FormatKind::Uint)
