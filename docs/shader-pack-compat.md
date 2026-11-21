@@ -27,8 +27,9 @@ committed. This page lists names, links and results; it holds no pack code.
 
 Builds, all 2026-11-19: the 16-varying columns are `gabriel/packs-corpus` at 2a28d2a4 (after the batch 2
 fixes). The 28-varying columns of the train set and batch 1 are one integration merge later (6ce23c03),
-which adds a fix to sampler declarations (e737596f); batch 2's 28 column is 2a28d2a4. The render column is
-from an earlier build of the same day.
+which adds a fix to sampler declarations (e737596f); batch 2's 28 column is 2a28d2a4. The render column of
+the train set is from 2026-11-21, `gabriel/packs-sampling` at 9d2b61eb (lavapipe, noon pose); the hold-out
+batches' render column is from an earlier build of 2026-11-19.
 
 **Instrument fix (77fc9958).** Until then `pack_check` counted 9 of Horizon's own textures against each terrain
 program's 16. That was the old layout of 8 sprite arrays and the lightmap. The game binds the sprite
@@ -62,20 +63,20 @@ still fails on its own textures.
 
 | rank | pack | version | 16 varyings | 28 varyings | rendered natively | notes |
 |---|---|---|---|---|---|---|
-| 1 | [Complementary Shaders - Reimagined](https://modrinth.com/shader/complementary-reimagined) | r5.10 | Works-candidate | Works-candidate | Draws, Iris diff 13 | optional compute and storage buffers skipped |
-| 3 | [BSL Shaders](https://modrinth.com/shader/bsl-shaders) | 10.1.8 | Works-candidate | Works-candidate | Draws, Iris diff 22 | optional compute pass skipped |
-| 4 | [Photon Shaders](https://modrinth.com/shader/photon-shader) | v1.4 | Partial (O/E), Works-candidate (N) | Partial (O/E), Works-candidate (N) | Draws, Iris diff 115 | an optional deferred pass fails (overworld: 17 textures; End: a sky function) |
-| 5 | [Solas Shader](https://modrinth.com/shader/solas-shader) | 3.9 | Partial | Partial | Draws, Iris diff 23 | shadow programs use image writes |
-| 6 | [Bliss Shaders](https://modrinth.com/shader/bliss-shader) | 2.1.2 | Works-candidate | Works-candidate | Black, Iris diff 129 | renders black |
-| 7 | [MakeUp - Ultra Fast](https://modrinth.com/shader/makeup-ultra-fast-shaders) | 9.6 | Works-candidate | Works-candidate | Suspect, Iris diff 58 | water packs into 15 varying locations |
+| 1 | [Complementary Shaders - Reimagined](https://modrinth.com/shader/complementary-reimagined) | r5.10 | Works-candidate | Works-candidate | Draws, Iris diff 8 | optional compute and storage buffers skipped |
+| 3 | [BSL Shaders](https://modrinth.com/shader/bsl-shaders) | 10.1.8 | Works-candidate | Works-candidate | Draws, Iris diff 10 | optional compute pass skipped |
+| 4 | [Photon Shaders](https://modrinth.com/shader/photon-shader) | v1.4 | Partial (O/E), Works-candidate (N) | Partial (O/E), Works-candidate (N) | Draws, Iris diff 116 | an optional deferred pass fails (overworld: 17 textures; End: a sky function) |
+| 5 | [Solas Shader](https://modrinth.com/shader/solas-shader) | 3.9 | Partial | Partial | Draws, Iris diff 16 | shadow programs use image writes |
+| 6 | [Bliss Shaders](https://modrinth.com/shader/bliss-shader) | 2.1.2 | Works-candidate | Works-candidate | Draws, Iris diff 18 |  |
+| 7 | [MakeUp - Ultra Fast](https://modrinth.com/shader/makeup-ultra-fast-shaders) | 9.6 | Works-candidate | Works-candidate | Draws, Iris diff 39 | water packs into 15 varying locations |
 | 8 | [Rethinking Voxels](https://modrinth.com/shader/rethinking-voxels) | r0.1-beta9 | Refused | Refused | Looks vanilla | requires compute shaders, custom images, storage buffers |
-| 9 | [Super Duper Vanilla](https://modrinth.com/shader/super-duper-vanilla) | 1.3.8 | Works-candidate | Works-candidate | Draws, Iris diff 14 |  |
-| 10 | [Mellow](https://modrinth.com/shader/mellow) | 3.5 | Works-candidate | Works-candidate | Draws, Iris diff 13 | optional compute passes skipped |
-| 11 | [Insanity Shader](https://modrinth.com/shader/insanity-shader) | 1.650 | Works-candidate | Works-candidate | Draws, Iris diff 50 |  |
-| 12 | [AstraLex Shaders](https://modrinth.com/shader/astralex) | 93.0 | Works-candidate | Works-candidate | Draws, Iris diff 25 |  |
+| 9 | [Super Duper Vanilla](https://modrinth.com/shader/super-duper-vanilla) | 1.3.8 | Works-candidate | Works-candidate | Draws, Iris diff 11 |  |
+| 10 | [Mellow](https://modrinth.com/shader/mellow) | 3.5 | Works-candidate | Works-candidate | Draws, Iris diff 7 | optional compute passes skipped |
+| 11 | [Insanity Shader](https://modrinth.com/shader/insanity-shader) | 1.650 | Works-candidate | Works-candidate | Draws, Iris diff 30 |  |
+| 12 | [AstraLex Shaders](https://modrinth.com/shader/astralex) | 93.0 | Works-candidate | Works-candidate | Draws, Iris diff 17 |  |
 | 13 | [Miniature Shader](https://modrinth.com/shader/miniature-shader) | 2.19 | Works-candidate | Works-candidate | Draws, Iris diff 9 |  |
-| 43 | [Sildur's Vibrant Shaders](https://modrinth.com/shader/sildurs-vibrant-shaders) | 2.02 | Works-candidate | Works-candidate | Draws, Iris diff 20 |  |
-| – | SEUS Renewed (not from Modrinth) | not recorded | Works-candidate | Works-candidate | Timeout | a folder pack; render check timed out |
+| 43 | [Sildur's Vibrant Shaders](https://modrinth.com/shader/sildurs-vibrant-shaders) | 2.02 | Works-candidate | Works-candidate | Draws, Iris diff 17 |  |
+| – | SEUS Renewed (not from Modrinth) | not recorded | Works-candidate | Works-candidate | Draws, Iris diff 40 | a folder pack; drew in 539 s on 11-21 (timed out on 11-19) |
 
 ### Hold-out batch 1 (Modrinth ranks 14–24)
 
