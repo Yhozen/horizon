@@ -68,7 +68,7 @@ pub(crate) struct PackRenderer {
     /// `size.buffer.colortexN`.
     sizes: [horizon_glsl_pack::plan::BufferSize; 16],
     /// Copies colortex0 to the screen when the pack has no `final`.
-    pub(super) blit: Option<debug::Debug>,
+    blit: Option<debug::Debug>,
     /// `scale.<program>` of full-screen passes.
     pub(super) scales: BTreeMap<ProgramKind, horizon_glsl_pack::plan::Scale>,
     mips: mips::Mips,
