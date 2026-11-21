@@ -403,6 +403,8 @@ def check(args: argparse.Namespace) -> int:
             command += ["--option", option]
         if args.max_varyings:
             command += ["--max-varyings", str(args.max_varyings)]
+        if args.max_textures:
+            command += ["--max-textures", str(args.max_textures)]
         if args.terrain_textures:
             command += ["--terrain-textures", str(args.terrain_textures)]
         subprocess.run(command, check=True)
@@ -455,6 +457,8 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--chrome", action="store_true", help="also compile the WGSL in headless Chrome")
     c.add_argument("--web", default=str(ROOT / "web"), help="the web folder with node_modules")
     c.add_argument("--max-varyings", type=int, help="the device's inter-stage locations (default: 16, WebGPU's)")
+    c.add_argument("--max-textures", type=int,
+                   help="the device's sampled textures per stage (default: 16, WebGPU's)")
     c.add_argument("--terrain-textures", type=int,
                    help="Horizon's own textures in terrain programs (default: 2, one sprite array and the lightmap)")
     c.add_argument("--jobs", type=int, default=3, help="packs checked in parallel")

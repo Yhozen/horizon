@@ -4,7 +4,7 @@
 //! ```text
 //! cargo run --example pack_check -p horizon-glsl-pack -- <pack.zip|folder>... --out <dir>
 //!     [--dimension minecraft:overworld|minecraft:the_nether|minecraft:the_end|all]
-//!     [--option NAME=VALUE]... [--max-varyings N] [--terrain-textures N] [--jobs N]
+//!     [--option NAME=VALUE]... [--max-varyings N] [--max-textures N] [--terrain-textures N] [--jobs N]
 //! ```
 //!
 //! For each pack it writes `<out>/<pack>/<dimension>/<slot>.{vs,fs}.wgsl` for
@@ -82,6 +82,13 @@ fn main() {
                     .and_then(|j| j.parse().ok())
                     .unwrap_or_else(|| usage());
             }
+            // Sampled textures per stage (16 = WebGPU's minimum; desktop adapters allow more).
+            "--max-textures" => {
+                host.max_textures = args
+                    .next()
+                    .and_then(|j| j.parse().ok())
+                    .unwrap_or_else(|| usage());
+            }
             // Horizon's own textures in terrain programs: the sprite arrays in use and the lightmap.
             "--terrain-textures" => {
                 host.terrain_textures = args
@@ -149,7 +156,7 @@ fn check_one(
 
 fn usage() -> ! {
     eprintln!(
-        "usage: pack_check <pack.zip|folder>... --out <dir> [--dimension <id>|all] [--option NAME=VALUE]... [--max-varyings N] [--terrain-textures N] [--jobs N]"
+        "usage: pack_check <pack.zip|folder>... --out <dir> [--dimension <id>|all] [--option NAME=VALUE]... [--max-varyings N] [--max-textures N] [--terrain-textures N] [--jobs N]"
     );
     std::process::exit(2)
 }
