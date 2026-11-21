@@ -93,12 +93,12 @@ fn blend(kind: ProgramKind) -> Option<wgpu::BlendState> {
         alpha: BlendComponent::OVER,
     };
     match kind {
-        ProgramKind::Shadow
-        | ProgramKind::ShadowEntities
-        | ProgramKind::Terrain
-        | ProgramKind::Deferred(_)
-        | ProgramKind::Composite(_)
-        | ProgramKind::Final => None,
+        // Full-screen passes (`prepare`, `deferred`, `composite`, `final`)
+        // write their outputs as they are: a pass that stores alpha 0 (Bloop's
+        // `prepare2` keeps last frame's cloud alpha there) must still write
+        // its colour.
+        k if k.is_fullscreen() => None,
+        ProgramKind::Shadow | ProgramKind::ShadowEntities | ProgramKind::Terrain => None,
         ProgramKind::SkyTextured | ProgramKind::ArmorGlint => Some(additive),
         ProgramKind::DamagedBlock => Some(BlendState {
             color: BlendComponent {
@@ -426,4 +426,26 @@ pub(super) fn samplers(device: &wgpu::Device) -> Vec<wgpu::Sampler> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_screen_passes_do_not_blend() {
+        for kind in [
+            ProgramKind::Prepare(0),
+            ProgramKind::Prepare(2),
+            ProgramKind::Deferred(0),
+            ProgramKind::Composite(5),
+            ProgramKind::Final,
+        ] {
+            assert_eq!(blend(kind), None, "{kind:?}");
+        }
+        assert_eq!(
+            blend(ProgramKind::Water),
+            Some(wgpu::BlendState::ALPHA_BLENDING)
+        );
+    }
 }
