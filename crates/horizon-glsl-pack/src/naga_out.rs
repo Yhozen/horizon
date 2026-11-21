@@ -34,6 +34,33 @@ pub fn glsl_to_wgsl(source: &str, stage: Stage) -> Result<String, String> {
             .map_err(|e| e.emit_to_string(&patched))?;
     }
     let source = if patched.is_empty() { source } else { &patched };
+    // Float `!=` as `!(a == b)`: true when either side is NaN, as in GLSL.
+    let mut unordered = String::new();
+    for _ in 0..4 {
+        let current = if unordered.is_empty() {
+            source
+        } else {
+            &unordered
+        };
+        let patches = float_not_equals(&module, current);
+        if patches.is_empty() {
+            break;
+        }
+        let next = replace_ranges(current, patches);
+        match glsl::Frontend::default().parse(&glsl::Options::from(stage), &next) {
+            Ok(m) => {
+                module = m;
+                unordered = next;
+            }
+            // A span naga reported wrongly: keep the ordered comparison.
+            Err(_) => break,
+        }
+    }
+    let source = if unordered.is_empty() {
+        source
+    } else {
+        &unordered
+    };
     spill_pointer_arguments(&mut module);
     end_terminated_cases(&mut module);
     flatten_else_if_chains(&mut module);
@@ -621,6 +648,85 @@ fn modulo_splats(module: &naga::Module, source: &str) -> Vec<(std::ops::Range<us
     out
 }
 
+/// Where float `a != b` sits in `source`, with its text written as
+/// `!(a == b)`. GLSL's `!=` is true when either side is NaN (packs test
+/// `clamp(x, 0, 1) != x` to catch NaN), but naga's SPIR-V writer emits the
+/// ordered comparison, which is false. The negated `==` keeps GLSL's answer.
+/// (`notEqual`, which naga gives no span, is a rewrite polyfill.)
+fn float_not_equals(module: &naga::Module, source: &str) -> Vec<(std::ops::Range<usize>, String)> {
+    use naga::{BinaryOperator, Expression, ScalarKind};
+    let functions = module
+        .functions
+        .iter()
+        .map(|(_, f)| f)
+        .chain(module.entry_points.iter().map(|e| &e.function));
+    let mut out = Vec::new();
+    for f in functions {
+        let Some(last) = f.expressions.iter().map(|(h, _)| h).next_back() else {
+            continue;
+        };
+        let ctx = naga::proc::ResolveContext::with_locals(module, &f.local_variables, &f.arguments);
+        let mut types = naga::front::Typifier::new();
+        if types.grow(last, &f.expressions, &ctx).is_err() {
+            continue;
+        }
+        for (h, e) in f.expressions.iter() {
+            let Expression::Binary {
+                op: BinaryOperator::NotEqual,
+                left,
+                ..
+            } = *e
+            else {
+                continue;
+            };
+            if types.get(left, &module.types).scalar_kind() != Some(ScalarKind::Float) {
+                continue;
+            }
+            let Some(range) = f.expressions.get_span(h).to_range() else {
+                continue;
+            };
+            let Some(text) = source.get(range.clone()) else {
+                continue;
+            };
+            if let Some(at) = top_level_not_equal(text) {
+                out.push((range, format!("!({}=={})", &text[..at], &text[at + 2..])));
+            }
+        }
+    }
+    out
+}
+
+/// The byte offset of the `!=` of `text` outside parentheses and brackets.
+fn top_level_not_equal(text: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let b = text.as_bytes();
+    for (i, &c) in b.iter().enumerate() {
+        match c {
+            b'(' | b'[' => depth += 1,
+            b')' | b']' => depth -= 1,
+            b'!' if depth == 0 && b.get(i + 1) == Some(&b'=') => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `source` with each range replaced by its text; a range overlapping one
+/// already replaced is left for the next round.
+fn replace_ranges(source: &str, mut patches: Vec<(std::ops::Range<usize>, String)>) -> String {
+    patches.sort_by_key(|(r, _)| std::cmp::Reverse(r.start));
+    let mut out = source.to_string();
+    let mut limit = usize::MAX;
+    for (r, text) in patches {
+        if r.end > limit || r.end > out.len() || r.start >= r.end {
+            continue;
+        }
+        out.replace_range(r.clone(), &text);
+        limit = r.start;
+    }
+    out
+}
+
 /// Parses `source`; a call naga finds ambiguous (`max(x, 1)` with a float
 /// or uint `x`: GLSL converts the `1`, naga's overload resolution does not
 /// choose) gets its integer literals written as `uint`s, which convert to
@@ -914,6 +1020,30 @@ mod modulo_tests {
             patched,
             "{ vec2 hz_sw = vec2(1.0); m[3][3] += hz_sw.x; m[3][0] += hz_sw.y; }"
         );
+    }
+
+    #[test]
+    fn float_not_equal_is_true_for_nan() {
+        // Photon tests `clamp01(uv) != uv` to catch a NaN reprojection: the
+        // ordered `!=` naga's SPIR-V writer emits misses it and the NaN
+        // reaches the clouds' history, which goes black.
+        let src = "#version 450\nlayout(location = 0) out vec4 o;\n\
+                   void main() { vec2 p = gl_FragCoord.xy / 0.0; float x = p.x; int i = int(o.w);\n\
+                   bool d = clamp(p, 0.0, 1.0) != p || (x != 1.0 && i != 2);\n\
+                   o = vec4(d ? 1.0 : 0.0, float(x != x), 0.0, 0.0); }\n";
+        let wgsl = glsl_to_wgsl(src, Stage::Fragment).unwrap();
+        // Integers keep `!=`; every float comparison is a negated `==`.
+        assert_eq!(wgsl.matches("!=").count(), 1, "{wgsl}");
+        assert!(wgsl.matches("!(").count() >= 3, "{wgsl}");
+        let patches = float_not_equals(
+            &glsl::Frontend::default()
+                .parse(&glsl::Options::from(naga::ShaderStage::Fragment), src)
+                .unwrap(),
+            src,
+        );
+        let texts: Vec<_> = patches.iter().map(|(_, t)| t.as_str()).collect();
+        assert!(texts.contains(&"!(clamp(p, 0.0, 1.0) == p)"), "{texts:?}");
+        assert!(texts.contains(&"!(x == 1.0)"), "{texts:?}");
     }
 
     #[test]

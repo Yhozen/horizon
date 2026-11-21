@@ -80,9 +80,10 @@ fn listed(list: &str, word: &str) -> bool {
 }
 
 /// Built-ins naga cannot translate (`out` parameters its GLSL front end
-/// lacks; `isnan`/`isinf`, which its WGSL writer cannot write), as `hz_`
-/// functions: (name, its overloads).
-const POLYFILLS: [(&str, &str); 4] = [
+/// lacks; `isnan`/`isinf`, which its WGSL writer cannot write; `notEqual`,
+/// whose ordered float comparison is false for NaN where GLSL's is true), as
+/// `hz_` functions: (name, its overloads).
+const POLYFILLS: [(&str, &str); 5] = [
     (
         "isnan",
         "bool hz_isnan(float x) { return (floatBitsToUint(x) & 0x7fffffffu) > 0x7f800000u; }
@@ -96,6 +97,21 @@ bvec4 hz_isnan(vec4 x) { return greaterThan(floatBitsToUint(x) & uvec4(0x7ffffff
 bvec2 hz_isinf(vec2 x) { return equal(floatBitsToUint(x) & uvec2(0x7fffffffu), uvec2(0x7f800000u)); }
 bvec3 hz_isinf(vec3 x) { return equal(floatBitsToUint(x) & uvec3(0x7fffffffu), uvec3(0x7f800000u)); }
 bvec4 hz_isinf(vec4 x) { return equal(floatBitsToUint(x) & uvec4(0x7fffffffu), uvec4(0x7f800000u)); }",
+    ),
+    (
+        "notEqual",
+        "bvec2 hz_notEqual(vec2 a, vec2 b) { return not(equal(a, b)); }
+bvec3 hz_notEqual(vec3 a, vec3 b) { return not(equal(a, b)); }
+bvec4 hz_notEqual(vec4 a, vec4 b) { return not(equal(a, b)); }
+bvec2 hz_notEqual(ivec2 a, ivec2 b) { return not(equal(a, b)); }
+bvec3 hz_notEqual(ivec3 a, ivec3 b) { return not(equal(a, b)); }
+bvec4 hz_notEqual(ivec4 a, ivec4 b) { return not(equal(a, b)); }
+bvec2 hz_notEqual(uvec2 a, uvec2 b) { return not(equal(a, b)); }
+bvec3 hz_notEqual(uvec3 a, uvec3 b) { return not(equal(a, b)); }
+bvec4 hz_notEqual(uvec4 a, uvec4 b) { return not(equal(a, b)); }
+bvec2 hz_notEqual(bvec2 a, bvec2 b) { return not(equal(a, b)); }
+bvec3 hz_notEqual(bvec3 a, bvec3 b) { return not(equal(a, b)); }
+bvec4 hz_notEqual(bvec4 a, bvec4 b) { return not(equal(a, b)); }",
     ),
     (
         "modf",

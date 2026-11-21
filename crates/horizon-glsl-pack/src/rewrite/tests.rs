@@ -686,6 +686,22 @@ fn modf_and_frexp_are_polyfilled() {
 }
 
 #[test]
+fn not_equal_is_polyfilled() {
+    // `notEqual` as `not(equal(...))`: true for NaN components, as in GLSL.
+    let src = "varying vec2 uv;\n\
+               void main() { bvec2 a = notEqual(uv, vec2(0.5)); bvec3 b = notEqual(ivec3(uv, 1), ivec3(0));\n\
+               gl_FragData[0] = vec4(any(a) ? 1.0 : 0.0, b.z ? 1.0 : 0.0, 0.0, 1.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(
+        rw.body.contains("hz_notEqual(uv, vec2(0.5))"),
+        "{}",
+        rw.body
+    );
+    let wgsl = naga(&rw, Stage::Fragment);
+    assert!(!wgsl.contains("!="), "{wgsl}");
+}
+
+#[test]
 fn isnan_and_isinf_are_polyfilled() {
     let src = "varying vec3 c;\n\
                void main() { bool a = isnan(c.x) || isinf(c.y); bvec3 b = isnan(c);\n\
