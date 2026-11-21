@@ -490,6 +490,11 @@ unverified against Iris)
 - Entity-state booleans (`is_sneaking`, `is_in_water`, `is_hurt`…) are standard values too. Horizon reads them
   as 0 until the client supplies them.
 - Operators: `+ - * / %`, `! && ||`, comparisons.
+- `/` divides as floats, even between two ints: `worldTime / 24000` is 0.25 at day time 6000, not 0. (From
+  the docs, which list only floating-point constants and give `worldTime` and the other scalar uniforms as
+  float parameters. Iris agrees black-box: it draws BSL Classic, whose sun position is `worldTime / 24000`,
+  at noon at day time 6000; integer division would put it at sunrise. Iris's own expression types are not
+  measured here.) Of the corpus, only BSL Classic changes value.
 
 **Functions**
 - `sin cos tan asin acos atan atan2 exp exp2 exp10 log log2 log10 sqrt pow torad todeg abs signum floor ceil
