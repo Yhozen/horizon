@@ -581,7 +581,8 @@ fn entity_geometry_reads_horizon_s_entity_vertex() {
     // Entities' alpha test, unorm output 0 and float output 1.
     assert!(out.fragment.contains("a > 0.1)"));
     assert!(out.fragment.contains("hz_out_0 = hz_unorm("));
-    assert!(out.fragment.contains("hz_out_1 = hz_finite("));
+    // A float target keeps NaN and infinities, as GL's do.
+    assert!(out.fragment.contains("hz_out_1 = hz_gl_FragData[1];"));
     assert!(out.fragment.contains("1.0 - gl_FragCoord.z"));
     // Projection per pass.
     assert!(
@@ -698,8 +699,8 @@ fn sampling_kinds_follow_the_plan() {
     assert!(out.fragment.contains("hz_bilinear_3("));
     assert!(out.fragment.contains("hz_trilinear_31("));
     assert!(out.fragment.contains("hz_lod_8(dFdx(uv), dFdy(uv)) + bias"));
-    // Output 1 is the R11G11B10F colortex5: a float target.
-    assert!(out.fragment.contains("hz_out_1 = hz_finite("));
+    // Output 1 is the R11G11B10F colortex5: a float target, written as is.
+    assert!(out.fragment.contains("hz_out_1 = hz_gl_FragData[1];"));
     assert!(!out.fragment.contains("discard"));
 
     // Before the pass that turns them on, colortex6 has no mip sampling; the custom texture applies.
