@@ -24,11 +24,15 @@ pub(super) fn vertex_source(
     shared.declare(&mut out, "out");
     let location = shared.next_location();
     if terrain {
-        writeln!(
-            out,
-            "layout(location = {location}) flat out uvec4 hz_sprite;"
-        )
-        .unwrap();
+        if shared.sprite == SpriteCarrier::Own {
+            writeln!(
+                out,
+                "layout(location = {location}) flat out uvec4 hz_sprite;"
+            )
+            .unwrap();
+        } else {
+            out += "uvec4 hz_sprite;\n";
+        }
         out += "vec4 hz_ft;\n";
         out += TERRAIN_TANGENT;
     } else if entity {
@@ -143,6 +147,7 @@ pub(super) fn vertex_source(
             per = g * g
         )
         .unwrap();
+        shared.write_sprite(&mut out);
     }
     out += "}\n";
     Ok((out, sampled.textures))

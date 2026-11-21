@@ -196,11 +196,15 @@ pub(super) fn fragment_source(
     shared.declare(&mut out, "in");
     let location = shared.next_location();
     if terrain {
-        writeln!(
-            out,
-            "layout(location = {location}) flat in uvec4 hz_sprite;"
-        )
-        .unwrap();
+        if shared.sprite == SpriteCarrier::Own {
+            writeln!(
+                out,
+                "layout(location = {location}) flat in uvec4 hz_sprite;"
+            )
+            .unwrap();
+        } else {
+            out += "uvec4 hz_sprite;\n";
+        }
     }
     if extras.entity_color {
         writeln!(
@@ -264,6 +268,7 @@ pub(super) fn fragment_source(
     out += &body;
     out += "\nvoid main() {\n";
     shared.read(&mut out);
+    shared.read_sprite(&mut out, spec.host.sprite_grid);
     if extras.entity_color {
         out += "    entityColor = hz_v_entityColor;\n";
     }

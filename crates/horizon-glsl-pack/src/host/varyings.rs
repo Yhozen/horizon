@@ -7,7 +7,11 @@
 //! own `hz_sprite` on terrain, need more locations than
 //! [`HostParams::max_varyings`], they are packed into `vec4` slots instead
 //! (`hz_vp<n>`): interpolated floats together in `vec4`s, integers and flat
-//! floats (as their bits) together in flat `ivec4`s.
+//! floats (as their bits) together in flat `ivec4`s. Packed, a vector the
+//! fragment stage only reads through swizzles carries just those
+//! components, a piece may straddle two slots when that saves one, and
+//! terrain's `hz_sprite` travels as one component of the slots (see
+//! [`SpriteCarrier`]) instead of a location of its own.
 
 use super::*;
 
@@ -18,20 +22,41 @@ pub(super) struct Slot {
     pub(super) flat: bool,
 }
 
-/// A scalar or vector of a varying, carried in (part of) a slot.
+/// Where part of a piece travels.
+struct Segment {
+    slot: usize,
+    /// The slot's components (`.yzw`), or `None` when it is the whole slot.
+    slot_swizzle: Option<String>,
+    /// The piece's components it carries (`xy`); empty for the whole piece.
+    source: String,
+}
+
+/// A scalar or vector of a varying, carried in (parts of) slots.
 struct Piece {
     /// The global it comes from and goes to (`m[2]`, `w[1][0]`).
     global: String,
     vertex_ty: String,
     fragment_ty: String,
-    /// The type it travels as: the vertex type, or (packed) the slot's base
-    /// type at its width.
-    carrier: String,
-    slot: usize,
-    /// The slot's components it takes (`.xyz`), or `None` when it is the whole slot.
-    swizzle: Option<String>,
+    segments: Vec<Segment>,
+    /// Some components are not carried (the fragment stage never reads them): they read 0.
+    partial: bool,
     /// A flat float carried as its bits in an integer slot.
     bits: bool,
+}
+
+/// How terrain's `hz_sprite` (all of it follows from the vertex's
+/// `hz_in_layer`, of which the fragment stage reads the low 16 bits) gets
+/// to the fragment stage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SpriteCarrier {
+    /// Its own flat `uvec4` location after the slots.
+    Own,
+    /// A component of a flat `ivec4` slot.
+    Bits(usize, u8),
+    /// A component of an interpolated `vec4` slot, rounded on arrival: the
+    /// value is the same at every vertex of a face and below 2^16, so the
+    /// interpolation's rounding error (well under 0.5) cannot change it.
+    Float(usize, u8),
 }
 
 /// What the two stages pass each other.
@@ -40,6 +65,7 @@ pub(super) struct Interface {
     pieces: Vec<Piece>,
     /// Fragment varyings the vertex stage does not declare: they read zero.
     zeroed: Vec<Var>,
+    pub(super) sprite: SpriteCarrier,
 }
 
 /// Whether a varying type is integer (`Some(true)`), float (`Some(false)`) or
@@ -192,21 +218,25 @@ impl Interface {
                 }
             }
         }
-        let own = u32::from(geometry == Geometry::Terrain);
+        let terrain = geometry == Geometry::Terrain;
         let mut interface = Self {
             slots: Vec::new(),
             pieces: Vec::new(),
             zeroed,
+            sprite: SpriteCarrier::Own,
         };
-        if parts.len() as u32 + own <= max {
+        if parts.len() as u32 + u32::from(terrain) <= max {
             for (suffix, global, vertex_ty, fragment_ty, flat) in parts {
                 interface.pieces.push(Piece {
                     global,
-                    carrier: vertex_ty.clone(),
                     vertex_ty: vertex_ty.clone(),
                     fragment_ty,
-                    slot: interface.slots.len(),
-                    swizzle: None,
+                    segments: vec![Segment {
+                        slot: interface.slots.len(),
+                        slot_swizzle: None,
+                        source: String::new(),
+                    }],
+                    partial: false,
                     bits: false,
                 });
                 interface.slots.push(Slot {
@@ -216,8 +246,9 @@ impl Interface {
                 });
             }
         } else {
-            interface.pack(parts);
+            interface.pack(parts, terrain, &fragment.body);
         }
+        let own = u32::from(interface.sprite == SpriteCarrier::Own && terrain);
         let total = interface.slots.len() as u32 + own;
         if total > max {
             return Err(format!(
@@ -227,54 +258,112 @@ impl Interface {
         Ok(interface)
     }
 
-    /// Packs pieces into 4-wide slots, widest first (first fit), one group
-    /// of slots per kind: interpolated floats, then everything flat (integers,
-    /// and flat floats as their bits) in `ivec4`s.
-    fn pack(&mut self, parts: Vec<(String, String, String, String, bool)>) {
-        for (group, slot_ty, flat) in [(0, "vec4", false), (2, "ivec4", true)] {
-            let mut members: Vec<_> = parts
-                .iter()
-                .filter(|p| {
-                    let integer =
-                        integer_type(&p.2) == Some(true) || integer_type(&p.3) == Some(true);
-                    match group {
-                        0 => !p.4 && !integer,
-                        _ => p.4 || integer,
-                    }
-                })
-                .collect();
+    /// Packs pieces into 4-wide slots, widest first, one group of slots per
+    /// kind: interpolated floats, then everything flat (integers, and flat
+    /// floats as their bits) in `ivec4`s. A vector the fragment stage reads
+    /// only through swizzles carries just the components it reads; pieces
+    /// straddle slots when first fit would take more than the components need;
+    /// on terrain, `hz_sprite` takes a free component (see [`SpriteCarrier`]).
+    fn pack(
+        &mut self,
+        parts: Vec<(String, String, String, String, bool)>,
+        terrain: bool,
+        fragment_body: &str,
+    ) {
+        // (global, vertex type, fragment type, carried components, flat group, bits)
+        let mut groups: [Vec<(String, String, String, String, bool)>; 2] = Default::default();
+        for (_, global, vertex_ty, fragment_ty, piece_flat) in parts {
+            let integer =
+                integer_type(&vertex_ty) == Some(true) || integer_type(&fragment_ty) == Some(true);
+            let w = width(&vertex_ty) as usize;
+            let all = &"xyzw"[..w];
+            let plain = global
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_');
+            let comps = if w > 1 && plain {
+                read_components(fragment_body, &global).unwrap_or_else(|| all.to_string())
+            } else {
+                all.to_string()
+            };
+            let comps = if comps.is_empty() {
+                all.to_string()
+            } else {
+                comps
+            };
+            let bits = piece_flat && !integer;
+            let g = usize::from(piece_flat || integer);
+            groups[g].push((global, vertex_ty, fragment_ty, comps, bits));
+        }
+        // hz_sprite: a free component, preferably flat (exact bits).
+        let total = |g: usize| groups[g].iter().map(|m| m.3.len()).sum::<usize>();
+        let (smooth, flat) = (total(0), total(1));
+        let sprite_group = if !terrain {
+            None
+        } else if flat % 4 != 0 {
+            Some(1)
+        } else if smooth % 4 != 0 {
+            Some(0)
+        } else if flat > 0 {
+            Some(1)
+        } else {
+            None
+        };
+        for (g, (slot_ty, flat)) in [("vec4", false), ("ivec4", true)].into_iter().enumerate() {
+            let mut members = std::mem::take(&mut groups[g]);
             // Stable: equal widths keep their name order.
-            members.sort_by_key(|p| std::cmp::Reverse(width(&p.2)));
+            members.sort_by_key(|m| std::cmp::Reverse(m.3.len()));
+            let mut widths: Vec<u32> = members.iter().map(|m| m.3.len() as u32).collect();
+            if sprite_group == Some(g) {
+                widths.push(1);
+            }
+            if widths.is_empty() {
+                continue;
+            }
+            let (count, places) = layout(&widths);
             let first = self.slots.len();
-            let mut used: Vec<u32> = Vec::new();
-            for (_, global, vertex_ty, fragment_ty, piece_flat) in members {
-                let bits = *piece_flat
-                    && integer_type(vertex_ty) == Some(false)
-                    && integer_type(fragment_ty) == Some(false);
-                let w = width(vertex_ty);
-                let at = match used.iter().position(|u| u + w <= 4) {
-                    Some(i) => i,
-                    None => {
-                        used.push(0);
-                        self.slots.push(Slot {
-                            name: format!("hz_vp{}", self.slots.len()),
-                            ty: slot_ty.into(),
-                            flat,
-                        });
-                        used.len() - 1
-                    }
-                };
-                let offset = used[at];
-                used[at] += w;
+            for k in 0..count {
+                self.slots.push(Slot {
+                    name: format!("hz_vp{}", first + k),
+                    ty: slot_ty.into(),
+                    flat,
+                });
+            }
+            let lanes = |offset: u32, len: u32| {
+                "xyzw"[offset as usize..(offset + len) as usize].to_string()
+            };
+            for (m, place) in members.into_iter().zip(&places) {
+                let (global, vertex_ty, fragment_ty, comps, bits) = m;
+                let w = width(&vertex_ty) as usize;
+                // A piece carried whole in one segment needs no swizzle of its own.
+                let scalar = w == 1 || (comps.len() == w && place.len() == 1);
+                let segments = place
+                    .iter()
+                    .map(|&(slot, offset, len, from)| Segment {
+                        slot: first + slot,
+                        slot_swizzle: Some(lanes(offset, len)),
+                        source: if scalar {
+                            String::new()
+                        } else {
+                            comps[from as usize..(from + len) as usize].to_string()
+                        },
+                    })
+                    .collect();
                 self.pieces.push(Piece {
-                    global: global.clone(),
-                    vertex_ty: vertex_ty.clone(),
-                    fragment_ty: fragment_ty.clone(),
-                    carrier: vector(slot_ty, w),
-                    slot: first + at,
-                    swizzle: Some("xyzw"[offset as usize..(offset + w) as usize].into()),
+                    partial: comps.len() < w,
+                    global,
+                    vertex_ty,
+                    fragment_ty,
+                    segments,
                     bits,
                 });
+            }
+            if sprite_group == Some(g) {
+                let &(slot, offset, _, _) = &places[places.len() - 1][0];
+                self.sprite = if flat {
+                    SpriteCarrier::Bits(first + slot, offset as u8)
+                } else {
+                    SpriteCarrier::Float(first + slot, offset as u8)
+                };
             }
         }
     }
@@ -300,44 +389,143 @@ impl Interface {
     /// The vertex `main`'s statements handing the globals on.
     pub(super) fn write(&self, out: &mut String) {
         for (k, s) in self.slots.iter().enumerate() {
-            if self
+            let packed = self
                 .pieces
                 .iter()
-                .any(|p| p.slot == k && p.swizzle.is_some())
+                .flat_map(|p| &p.segments)
+                .any(|g| g.slot == k && g.slot_swizzle.is_some());
+            if packed
+                || matches!(self.sprite, SpriteCarrier::Bits(s, _) | SpriteCarrier::Float(s, _) if s == k)
             {
                 // Unused components are written too: WGSL outputs have no undefined parts.
                 writeln!(out, "    {} = {}(0);", s.name, s.ty).unwrap();
             }
         }
         for p in &self.pieces {
-            let slot = &self.slots[p.slot].name;
-            let swizzle = p
-                .swizzle
-                .as_ref()
-                .map_or(String::new(), |s| format!(".{s}"));
-            let value = if p.bits {
-                format!("floatBitsToInt({})", p.global)
-            } else {
-                convert(&p.carrier, &p.vertex_ty, &p.global)
-            };
-            writeln!(out, "    {slot}{swizzle} = {value};").unwrap();
+            for g in &p.segments {
+                let slot = &self.slots[g.slot];
+                let (target, len) = match &g.slot_swizzle {
+                    Some(sw) => (format!("{}.{sw}", slot.name), sw.len() as u32),
+                    None => (slot.name.clone(), width(&slot.ty)),
+                };
+                let source = component(&p.global, &g.source);
+                let from = vector(
+                    &p.vertex_ty,
+                    if g.source.is_empty() {
+                        width(&p.vertex_ty)
+                    } else {
+                        len
+                    },
+                );
+                let value = if p.bits {
+                    format!("floatBitsToInt({source})")
+                } else {
+                    convert(&vector(&slot.ty, len), &from, &source)
+                };
+                writeln!(out, "    {target} = {value};").unwrap();
+            }
         }
+    }
+
+    /// The vertex statement handing `hz_sprite` on, once it is computed.
+    pub(super) fn write_sprite(&self, out: &mut String) {
+        match self.sprite {
+            SpriteCarrier::Own => {}
+            SpriteCarrier::Bits(k, c) => {
+                let lane = char::from(b"xyzw"[usize::from(c)]);
+                writeln!(out, "    {}.{lane} = int(hz_sprite.x);", self.slots[k].name).unwrap();
+            }
+            SpriteCarrier::Float(k, c) => {
+                let lane = char::from(b"xyzw"[usize::from(c)]);
+                writeln!(
+                    out,
+                    "    {}.{lane} = float(hz_sprite.x & 0xffffu);",
+                    self.slots[k].name
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    /// The fragment `main`'s statements rebuilding `hz_sprite` (as the vertex
+    /// stage computes it from `hz_in_layer`, `grid` = the sprite grid).
+    pub(super) fn read_sprite(&self, out: &mut String, grid: u32) {
+        let (k, c, value) = match self.sprite {
+            SpriteCarrier::Own => return,
+            SpriteCarrier::Bits(k, c) => (k, c, "uint({})"),
+            SpriteCarrier::Float(k, c) => (k, c, "uint(round({}))"),
+        };
+        let lane = char::from(b"xyzw"[usize::from(c)]);
+        let read = value.replace("{}", &format!("{}.{lane}", self.slots[k].name));
+        writeln!(
+            out,
+            "    uint hz_l = {read};\n    uint hz_n = hz_l & 0x7fffu;\n    \
+             hz_sprite = uvec4(hz_l, hz_n % {per}u % {grid}u, hz_n % {per}u / {grid}u, hz_n / {per}u);",
+            per = grid * grid
+        )
+        .unwrap();
     }
 
     /// The fragment `main`'s statements filling the globals.
     pub(super) fn read(&self, out: &mut String) {
         for p in &self.pieces {
-            let slot = &self.slots[p.slot].name;
-            let swizzle = p
-                .swizzle
-                .as_ref()
-                .map_or(String::new(), |s| format!(".{s}"));
-            let value = if p.bits {
-                format!("intBitsToFloat({slot}{swizzle})")
-            } else {
-                convert(&p.fragment_ty, &p.carrier, &format!("{slot}{swizzle}"))
-            };
-            writeln!(out, "    {} = {value};", p.global).unwrap();
+            if p.partial {
+                writeln!(out, "    {} = {}(0);", p.global, p.fragment_ty).unwrap();
+            }
+            if !p.partial && p.segments.len() > 1 {
+                // One constructor of the parts: naga cannot store into a
+                // swizzle of a matrix column (`tbn[2].x = …`).
+                let parts: Vec<String> = p
+                    .segments
+                    .iter()
+                    .map(|g| {
+                        let slot = &self.slots[g.slot];
+                        let sw = g.slot_swizzle.as_deref().unwrap_or("xyzw");
+                        let source = format!("{}.{sw}", slot.name);
+                        let len = sw.len() as u32;
+                        if p.bits {
+                            format!("intBitsToFloat({source})")
+                        } else {
+                            convert(
+                                &vector(&p.fragment_ty, len),
+                                &vector(&slot.ty, len),
+                                &source,
+                            )
+                        }
+                    })
+                    .collect();
+                writeln!(
+                    out,
+                    "    {} = {}({});",
+                    p.global,
+                    p.fragment_ty,
+                    parts.join(", ")
+                )
+                .unwrap();
+                continue;
+            }
+            for g in &p.segments {
+                let slot = &self.slots[g.slot];
+                let (source, len) = match &g.slot_swizzle {
+                    Some(sw) => (format!("{}.{sw}", slot.name), sw.len() as u32),
+                    None => (slot.name.clone(), width(&slot.ty)),
+                };
+                let target = component(&p.global, &g.source);
+                let to = vector(
+                    &p.fragment_ty,
+                    if g.source.is_empty() {
+                        width(&p.fragment_ty)
+                    } else {
+                        len
+                    },
+                );
+                let value = if p.bits {
+                    format!("intBitsToFloat({source})")
+                } else {
+                    convert(&to, &vector(&slot.ty, len), &source)
+                };
+                writeln!(out, "    {target} = {value};").unwrap();
+            }
         }
         for z in &self.zeroed {
             match z.array_len {
@@ -351,6 +539,90 @@ impl Interface {
             .unwrap();
         }
     }
+}
+
+/// `global.xy`, or `global` for its whole value.
+fn component(global: &str, source: &str) -> String {
+    if source.is_empty() {
+        global.to_string()
+    } else {
+        format!("{global}.{source}")
+    }
+}
+
+/// Slots for pieces of `widths` (widest first): `(slot count, per piece its
+/// segments (slot, offset in the slot, length, offset in the piece))`. First
+/// fit; when that takes more slots than the components need, the pieces are
+/// laid end to end instead, straddling slots.
+#[allow(clippy::type_complexity)]
+fn layout(widths: &[u32]) -> (usize, Vec<Vec<(usize, u32, u32, u32)>>) {
+    let need = widths.iter().sum::<u32>().div_ceil(4) as usize;
+    let mut used: Vec<u32> = Vec::new();
+    let mut places = Vec::new();
+    for &w in widths {
+        let at = match used.iter().position(|u| u + w <= 4) {
+            Some(i) => i,
+            None => {
+                used.push(0);
+                used.len() - 1
+            }
+        };
+        places.push(vec![(at, used[at], w, 0)]);
+        used[at] += w;
+    }
+    if used.len() <= need {
+        return (used.len(), places);
+    }
+    let mut places = Vec::new();
+    let mut at = 0u32;
+    for &w in widths {
+        let mut segments = Vec::new();
+        let mut done = 0;
+        while done < w {
+            let (slot, offset) = ((at / 4) as usize, at % 4);
+            let len = (4 - offset).min(w - done);
+            segments.push((slot, offset, len, done));
+            done += len;
+            at += len;
+        }
+        places.push(segments);
+    }
+    (need, places)
+}
+
+/// The components of vector `name` the fragment stage reads (`"xz"`), when
+/// every use of it in `body` is a swizzle; `None` when any is not.
+fn read_components(body: &str, name: &str) -> Option<String> {
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let mut seen = [false; 4];
+    for (i, _) in body.match_indices(name) {
+        if body[..i].ends_with(ident) || body[i + name.len()..].starts_with(ident) {
+            continue;
+        }
+        // A member of something else (`s.name`).
+        if body[..i].trim_end().ends_with('.') {
+            continue;
+        }
+        let rest = body[i + name.len()..].trim_start().strip_prefix('.')?;
+        let swizzle: String = rest
+            .trim_start()
+            .chars()
+            .take_while(|&c| ident(c))
+            .collect();
+        let set = ["xyzw", "rgba", "stpq"]
+            .into_iter()
+            .find(|set| !swizzle.is_empty() && swizzle.chars().all(|c| set.contains(c)))?;
+        for c in swizzle.chars() {
+            seen[set.find(c)?] = true;
+        }
+    }
+    Some(
+        "xyzw"
+            .chars()
+            .zip(seen)
+            .filter_map(|(c, s)| s.then_some(c))
+            .collect(),
+    )
 }
 
 /// `vars` with each struct-typed varying (`S s;`, `S s[2];`) replaced by
@@ -491,7 +763,8 @@ mod tests {
             } else if width(ty) == 1 {
                 format!("float({g})")
             } else {
-                format!("float({g}.x)")
+                // An index, not a swizzle: every component counts as read.
+                format!("float({g}[0])")
             };
             format!("    s += {value};\n")
         });
@@ -627,7 +900,7 @@ mod tests {
             fs.contains("@location(6)") && !fs.contains("@location(7)"),
             "{fs}"
         );
-        // Terrain needs one more for hz_sprite: still fits.
+        // Terrain carries hz_sprite too: still fits.
         translate(&p, Geometry::Terrain, 16).unwrap();
         // Unpacked when the device allows them all.
         let (vs, _) = translate(&p, Geometry::Fullscreen, 28).unwrap();
@@ -635,9 +908,159 @@ mod tests {
             vs.contains("@location(16)") && !vs.contains("@location(17)"),
             "{vs}"
         );
+        // Terrain fits in 7: hz_sprite takes the free component of the sixth slot.
+        translate(&p, Geometry::Terrain, 7).unwrap();
         // Too many even packed.
-        let err = translate(&p, Geometry::Terrain, 7).unwrap_err();
-        assert!(err.contains("8 varying locations"), "{err}");
+        let err = translate(&p, Geometry::Terrain, 6).unwrap_err();
+        assert!(err.contains("7 varying locations"), "{err}");
+    }
+
+    /// `program` with the fragment stage reading `reads` (GLSL expressions) instead.
+    fn program_reading(vars: Vec<Var>, reads: &str) -> (Rewritten, Rewritten) {
+        let (vs, mut fs) = program(vars.clone(), vars);
+        fs.body = format!(
+            "void hz_pack_main() {{\n    float s = 0.0;\n    s += {reads};\n    hz_gl_FragData[0] = vec4(s);\n}}\n"
+        );
+        (vs, fs)
+    }
+
+    #[test]
+    fn unread_components_are_not_carried() {
+        // 15 vec4s (60 components) + 2 more vec4s read as `.y` and `.xz`: 63 → 16 slots.
+        let mut vars: Vec<Var> = (0..15)
+            .map(|i| var(&format!("c{i}"), "vec4", false, None))
+            .collect();
+        vars.push(var("lm", "vec4", false, None));
+        vars.push(var("wp", "vec4", false, None));
+        let reads = (0..15)
+            .map(|i| format!("c{i}[0]"))
+            .chain(["lm.y".into(), "wp . x".into(), "wp.zx.y".into()])
+            .collect::<Vec<_>>()
+            .join(" + ");
+        let p = program_reading(vars, &reads);
+        let i = Interface::new(&p.0, &p.1, Geometry::Fullscreen, 16).unwrap();
+        assert_eq!(i.slots.len(), 16);
+        let mut write = String::new();
+        i.write(&mut write);
+        assert!(
+            write.contains("= wp.xz;") && write.contains("= lm.y;"),
+            "{write}"
+        );
+        let mut read = String::new();
+        i.read(&mut read);
+        assert!(
+            read.contains("    wp = vec4(0);\n") && read.contains("    wp.xz = "),
+            "{read}"
+        );
+        translate(&p, Geometry::Fullscreen, 16).unwrap();
+        // A whole read carries everything: 68 components do not fit.
+        let whole = (0..15)
+            .map(|i| format!("c{i}[0]"))
+            .chain(["lm[1]".into(), "wp[2]".into()]);
+        let mut vars: Vec<Var> = (0..15)
+            .map(|i| var(&format!("c{i}"), "vec4", false, None))
+            .collect();
+        vars.push(var("lm", "vec4", false, None));
+        vars.push(var("wp", "vec4", false, None));
+        let p = program_reading(vars, &whole.collect::<Vec<_>>().join(" + "));
+        assert!(Interface::new(&p.0, &p.1, Geometry::Fullscreen, 16).is_err());
+        assert_eq!(
+            read_components("a.x + a . zw + b.a", "a").as_deref(),
+            Some("xzw")
+        );
+        assert_eq!(read_components("a.x + f(a)", "a"), None);
+        assert_eq!(read_components("s.a + a.y", "a").as_deref(), Some("y"));
+    }
+
+    #[test]
+    fn pieces_straddle_slots_when_that_saves_one() {
+        assert_eq!(layout(&[3, 3, 1]).0, 2);
+        // Four vec3s and two vec2s: first fit takes 5 slots, 16 components need 4.
+        let (count, places) = layout(&[3, 3, 3, 3, 2, 2]);
+        assert_eq!(count, 4);
+        assert_eq!(places[1], vec![(0, 3, 1, 0), (1, 0, 2, 1)]);
+        let mut vars: Vec<Var> = (0..4)
+            .map(|i| var(&format!("n{i}"), "vec3", false, None))
+            .collect();
+        vars.push(var("a", "vec2", false, None));
+        vars.push(var("b", "vec2", false, None));
+        let p = program(vars.clone(), vars);
+        let i = Interface::new(&p.0, &p.1, Geometry::Fullscreen, 4).unwrap();
+        assert_eq!(i.slots.len(), 4);
+        let mut write = String::new();
+        i.write(&mut write);
+        assert!(
+            write.contains("hz_vp0.w = n1.x;") && write.contains("hz_vp1.xy = n1.yz;"),
+            "{write}"
+        );
+        let mut read = String::new();
+        i.read(&mut read);
+        assert!(read.contains("n1 = vec3(hz_vp0.w, hz_vp1.xy);"), "{read}");
+        translate(&p, Geometry::Fullscreen, 4).unwrap();
+        // Matrix columns straddle too (naga cannot store into `tbn[1].x`).
+        let vars = vec![
+            var("tbn", "mat3", false, None),
+            var("n", "vec3", false, None),
+            var("a", "vec2", false, None),
+            var("b", "vec2", false, None),
+        ];
+        let p = program(vars.clone(), vars);
+        let i = Interface::new(&p.0, &p.1, Geometry::Fullscreen, 4).unwrap();
+        let mut read = String::new();
+        i.read(&mut read);
+        assert!(
+            read.contains("tbn[0] = vec3(hz_vp0.w, hz_vp1.xy);"),
+            "{read}"
+        );
+        translate(&p, Geometry::Fullscreen, 4).unwrap();
+    }
+
+    #[test]
+    fn terrain_sprite_shares_the_slots() {
+        // 15 floats + a vec4 = 19 components: 5 slots, 1 free; hz_sprite takes it.
+        let mut vars: Vec<Var> = (0..15)
+            .map(|i| var(&format!("f{i}"), "float", false, None))
+            .collect();
+        vars.push(var("c", "vec4", false, None));
+        let p = program(vars.clone(), vars);
+        let i = Interface::new(&p.0, &p.1, Geometry::Terrain, 5).unwrap();
+        assert_eq!(i.slots.len(), 5);
+        assert!(
+            matches!(i.sprite, SpriteCarrier::Float(4, 3)),
+            "{:?}",
+            i.sprite
+        );
+        let (vs, fs) = translate(&p, Geometry::Terrain, 5).unwrap();
+        assert!(
+            !fs.contains("@location(5)") && fs.contains("round("),
+            "{fs}"
+        );
+        assert!(vs.contains("& 65535u"), "{vs}");
+        // With a flat piece, it goes as bits in the flat slot.
+        let mut vars: Vec<Var> = (0..16)
+            .map(|i| var(&format!("f{i}"), "float", false, None))
+            .collect();
+        vars.push(var("id", "int", true, None));
+        let p = program(vars.clone(), vars);
+        let i = Interface::new(&p.0, &p.1, Geometry::Terrain, 5).unwrap();
+        assert!(
+            matches!(i.sprite, SpriteCarrier::Bits(4, 1)),
+            "{:?}",
+            i.sprite
+        );
+        let mut write = String::new();
+        i.write_sprite(&mut write);
+        assert_eq!(write, "    hz_vp4.y = int(hz_sprite.x);\n");
+        let mut read = String::new();
+        i.read_sprite(&mut read, 4);
+        assert!(
+            read.contains("uint hz_l = uint(hz_vp4.y);") && read.contains("hz_n % 16u % 4u"),
+            "{read}"
+        );
+        translate(&p, Geometry::Terrain, 5).unwrap();
+        // Unpacked, hz_sprite keeps its own location.
+        let i = Interface::new(&p.0, &p.1, Geometry::Terrain, 28).unwrap();
+        assert_eq!(i.sprite, SpriteCarrier::Own);
     }
 
     #[test]
