@@ -61,7 +61,7 @@ impl Ctx<'_> {
             let name = t.text;
             if member {
                 // Swizzles and struct fields: only the reserved words need renaming.
-                if listed(KEYWORDS, name) {
+                if self.reserved(name) {
                     out.push_str("hz_u_");
                 }
                 out.push_str(name);
@@ -119,7 +119,10 @@ impl Ctx<'_> {
                 } else {
                     "int(gl_InstanceIndex)"
                 });
-            } else if name.starts_with("gl_") && !listed(KEPT, name) {
+            } else if name.starts_with("gl_")
+                && !listed(KEPT, name)
+                && !(self.stage == Stage::Compute && listed(COMPUTE_BUILTINS, name))
+            {
                 return Err(format!("unsupported built-in `{name}`"));
             } else if name == "ftransform" {
                 self.out.builtins.insert("hz_ftransform".into());
@@ -129,7 +132,7 @@ impl Ctx<'_> {
             } else if let Some(&n) = self.frag_outs.get(name) {
                 self.out.builtins.insert("hz_gl_FragData".into());
                 out.push_str(&format!("hz_gl_FragData[{n}]"));
-            } else if listed(KEYWORDS, name) || self.user_builtins.contains(name) {
+            } else if self.reserved(name) || self.user_builtins.contains(name) {
                 out.push_str("hz_u_");
                 out.push_str(name);
             } else {

@@ -217,9 +217,12 @@ fn required_features_refuse_and_compile_does_not() {
         &[
             (
                 "shaders/shaders.properties",
-                "iris.features.required=COMPUTE_SHADERS\n",
+                "iris.features.required=TESSELATION_SHADERS\n",
             ),
-            ("shaders/composite.csh", "#version 430\nvoid main() {}\n"),
+            (
+                "shaders/gbuffers_terrain.tcs",
+                "#version 430\nvoid main() {}\n",
+            ),
         ],
     );
     let (pack, r) = report(&files, &PackOptions::default());
@@ -227,11 +230,11 @@ fn required_features_refuse_and_compile_does_not() {
     assert_eq!(r.status, PackStatus::Refused);
     assert_eq!(
         r.refusal.as_deref(),
-        Some("This pack needs compute shaders, which Horizon does not support yet.")
+        Some("This pack needs tessellation shaders, which Horizon does not support yet.")
     );
     assert!(
         r.text("x")
-            .contains("compute shaders (required; shaders/composite.csh)")
+            .contains("tessellation shaders (required; shaders/gbuffers_terrain.tcs)")
     );
     // The old entry point still compiles what it can.
     assert!(
@@ -628,4 +631,179 @@ fn one_read_then_chosen_slots() {
     assert_eq!(r.status, PackStatus::Failed);
     assert!(outcome(&r, "composite").error.is_some());
     assert_eq!(outcome(&r, "final").file.as_deref(), Some("shaders/final"));
+}
+
+/// Two compute programs of `composite`: `_a` counts into a buffer with an
+/// atomic and a `shared` reduction, `_b` reads the count back; the pass's
+/// fragment stage reads the buffer too.
+const COUNT_A: &str = "#version 430 compatibility
+layout(local_size_x = 8, local_size_y = 8) in;
+const vec2 workGroupsRender = vec2(0.5, 0.5);
+uniform sampler2D colortex0;
+uniform float viewWidth;
+layout(std430, binding = 0) restrict buffer Counts {
+    uint total;
+    float average;
+    float values[];
+} counts;
+shared float partial[64];
+void main() {
+    vec4 c = texelFetch(colortex0, ivec2(gl_GlobalInvocationID.xy), 0);
+    partial[gl_LocalInvocationIndex] = c.r;
+    memoryBarrierShared();
+    barrier();
+    if (gl_LocalInvocationIndex == 0u) {
+        float s = 0.0;
+        for (int i = 0; i < 64; i++) s += partial[i];
+        counts.values[gl_WorkGroupID.x + gl_WorkGroupID.y * gl_NumWorkGroups.x] = s;
+        atomicAdd(counts.total, 1u);
+    }
+}
+";
+
+const COUNT_B: &str = "#version 430
+layout(local_size_x = 1) in;
+const ivec3 workGroups = ivec3(1, 1, 1);
+layout(std430, binding = 0) buffer Counts {
+    uint total;
+    float average;
+    float values[];
+} counts;
+void main() {
+    float s = 0.0;
+    for (uint i = 0u; i < counts.total; i++) s += counts.values[i];
+    counts.average = s / max(float(counts.total), 1.0);
+}
+";
+
+const READS_COUNT: &str = "#version 430
+layout(std430, binding = 0) readonly buffer Counts {
+    uint total;
+    float average;
+} counts;
+varying vec2 uv;
+void main() {
+    gl_FragData[0] = vec4(counts.average);
+}
+";
+
+fn compute_pack(required: &str, extra: &[(&str, &str)]) -> PackFiles {
+    let props = format!("{required}bufferObject.0=65536\n");
+    let mut files = vec![
+        ("shaders/shaders.properties", props.as_str()),
+        ("shaders/composite_a.csh", COUNT_A),
+        ("shaders/composite_b.csh", COUNT_B),
+    ];
+    files.extend_from_slice(extra);
+    programs(
+        &[("gbuffers_terrain", FSH), ("composite", READS_COUNT)],
+        &files,
+    )
+}
+
+#[test]
+fn compute_chain_writes_and_reads_a_buffer() {
+    use crate::compute::{ComputeSlot, Dispatch};
+    use crate::schedule::{FrameSchedule, Step};
+    let files = compute_pack(
+        "iris.features.required=COMPUTE_SHADERS SSBO\n",
+        &[(
+            "shaders/setup.csh",
+            "#version 430\nlayout(local_size_x = 1) in;\nconst ivec3 workGroups = ivec3(1, 1, 1);\nlayout(std430, binding = 0) buffer Counts { uint total; } counts;\nvoid main() { counts.total = 0u; }\n",
+        )],
+    );
+    let (pack, r) = report(&files, &PackOptions::default());
+    let pack = pack.unwrap_or_else(|| panic!("{}", r.text("x")));
+    assert_eq!(r.refusal, None);
+    assert_eq!(r.status, PackStatus::Works, "{}", r.text("x"));
+    let names: Vec<String> = pack.computes.keys().map(|s| s.name()).collect();
+    assert_eq!(names, ["setup", "composite_a", "composite_b"]);
+    let a = &pack.computes[&ComputeSlot::from_name("composite_a").unwrap()];
+    assert_eq!(a.workgroup_size, [8, 8, 1]);
+    assert_eq!(a.dispatch, Dispatch::Render([0.5, 0.5]));
+    assert!(a.wgsl.contains("atomicAdd"), "{}", a.wgsl);
+    assert!(a.wgsl.contains("var<workgroup>"));
+    assert!(a.wgsl.contains("@group(1) @binding(160)"));
+    assert_eq!(a.storage.len(), 1);
+    assert!(a.storage[0].compute && !a.storage[0].read_only);
+    assert!(
+        a.textures
+            .iter()
+            .any(|t| t.source == crate::TextureSource::Buffer(0))
+    );
+    let b = &pack.computes[&ComputeSlot::from_name("composite_b").unwrap()];
+    assert_eq!(b.dispatch, Dispatch::Fixed([1, 1, 1]));
+    // The fragment stage binds the same buffer, read only.
+    let composite = &pack.programs[&ProgramKind::Composite(0)];
+    assert_eq!(composite.storage.len(), 1);
+    assert!(composite.storage[0].fragment && composite.storage[0].read_only);
+    assert!(composite.fragment_wgsl.contains("var<storage>"));
+    // The chain runs before its pass, `_a` then `_b`; setup once, outside the frame.
+    let s = FrameSchedule::new(&pack.plan);
+    let order: Vec<String> = s
+        .steps
+        .iter()
+        .filter_map(|st| match st {
+            Step::Compute { slot, .. } => Some(slot.name()),
+            Step::Pass(p) => Some(format!("{:?}", p.kind)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(order, ["composite_a", "composite_b", "Composite(0)"]);
+    assert_eq!(s.setup, [ComputeSlot::from_name("setup").unwrap()]);
+}
+
+#[test]
+fn compute_programs_over_the_device_limits() {
+    let big = "#version 430\nlayout(local_size_x = 16, local_size_y = 16) in;\nshared vec4 tile[512];\nvoid main() { tile[gl_LocalInvocationIndex] = vec4(1.0); barrier(); }\n";
+    let wide = "#version 430\nlayout(local_size_x = 32, local_size_y = 32) in;\nvoid main() {}\n";
+    let extra = [
+        ("shaders/deferred.csh", big),
+        ("shaders/composite1_a.csh", wide),
+    ];
+    // Optional: each over-limit program is left out with its reason.
+    let files = compute_pack("", &extra);
+    let (pack, r) = report(&files, &PackOptions::default());
+    let pack = pack.unwrap();
+    let names: Vec<String> = pack.computes.keys().map(|s| s.name()).collect();
+    assert_eq!(names, ["deferred", "composite_a", "composite_b"]);
+    let text = r.text("x");
+    assert!(
+        text.contains("1024 invocations, the device allows 256"),
+        "{text}"
+    );
+    // 512 vec4 = 8 KiB: over a 4 KiB device, under WebGPU's 16 KiB default.
+    let small = HostParams {
+        max_workgroup_storage: 4096,
+        ..HostParams::default()
+    };
+    let (_, r) = compile_report(
+        &files,
+        "minecraft:overworld",
+        &PackOptions::default(),
+        &small,
+    );
+    assert!(
+        r.text("x")
+            .contains("8192 bytes of shared memory, the device allows 4096"),
+        "{}",
+        r.text("x")
+    );
+    // Required: a program that cannot run fails the pack, with that reason.
+    let files = compute_pack("iris.features.required=COMPUTE_SHADERS\n", &extra);
+    let (pack, r) = report(&files, &PackOptions::default());
+    assert!(pack.is_none());
+    assert_eq!(r.status, PackStatus::Failed);
+    assert!(r.text("x").contains("1024 invocations"), "{}", r.text("x"));
+    // A buffer block without its bufferObject.
+    let files = programs(
+        &[("gbuffers_terrain", FSH), ("composite", READS_COUNT)],
+        &[],
+    );
+    let (_, r) = report(&files, &PackOptions::default());
+    assert!(
+        r.text("x").contains("without bufferObject.0"),
+        "{}",
+        r.text("x")
+    );
 }

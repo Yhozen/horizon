@@ -9,6 +9,8 @@ use naga::valid::{Capabilities, ValidationFlags, Validator};
 pub enum Stage {
     Vertex,
     Fragment,
+    /// A compute program (`.csh`).
+    Compute,
 }
 
 /// Parses `source` as one stage, validates it, and writes it as WGSL with the
@@ -18,6 +20,7 @@ pub fn glsl_to_wgsl(source: &str, stage: Stage) -> Result<String, String> {
     let stage = match stage {
         Stage::Vertex => naga::ShaderStage::Vertex,
         Stage::Fragment => naga::ShaderStage::Fragment,
+        Stage::Compute => naga::ShaderStage::Compute,
     };
     let (mut module, floated) = parse_floating_ambiguous(source, stage)?;
     let source = floated.as_deref().unwrap_or(source);
@@ -61,6 +64,8 @@ pub fn glsl_to_wgsl(source: &str, stage: Stage) -> Result<String, String> {
     } else {
         &unordered
     };
+    crate::naga_atomics::lower(&mut module)?;
+    crate::naga_atomics::plain_barriers(&mut module);
     spill_pointer_arguments(&mut module);
     end_terminated_cases(&mut module);
     flatten_else_if_chains(&mut module);

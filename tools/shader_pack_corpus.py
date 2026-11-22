@@ -252,6 +252,7 @@ def pack_row(result: dict, dimension: str, chrome: bool) -> dict:
         "read_error": result.get("read_error"),
         "shader_sources": result.get("shader_sources"),
     }
+    row["refusal"] = dim.get("refusal", "unknown")
     row["status"] = status(row, features, bool(errors) or bool(fails))
     return row
 
@@ -262,7 +263,10 @@ def status(row: dict, features: dict, any_failure: bool) -> str:
     fails) or Works-candidate."""
     if row.get("shader_sources") == 0:
         return "Not a pack"
-    if features.get("iris_features_required"):
+    # The crate's own refusal (a required feature Horizon lacks); results from
+    # an older pack_check have none: then any required feature refuses.
+    refusal = row.get("refusal", "unknown")
+    if refusal == "unknown" and features.get("iris_features_required") or refusal not in (None, "unknown"):
         return "Refused"
     if row.get("read_error") or row.get("plan_error") or not row["found"] or row["essential_failed"]:
         return "Fails"
@@ -387,7 +391,7 @@ def run_chrome(result: dict, pack_dir: Path, web: Path) -> None:
             if p["status"] != "ok":
                 continue
             p["chrome_errors"] = {
-                stage: errors.get(str(wgsl_dir / f"{p['slot']}.{stage}.wgsl"), []) for stage in ("vs", "fs")
+                stage: errors.get(str(wgsl_dir / f"{p['slot']}.{stage}.wgsl"), []) for stage in ("vs", "fs", "cs")
             }
 
 

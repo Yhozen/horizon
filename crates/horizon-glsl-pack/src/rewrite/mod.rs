@@ -46,6 +46,8 @@ pub struct Rewritten {
     pub sample_calls: BTreeSet<String>,
     /// Each declared sampler's full GLSL type (`sampler2D`, `usampler3D`…), by name.
     pub sampler_types: BTreeMap<String, String>,
+    /// Storage buffer blocks the stage declares (kept in `body`, rebound).
+    pub buffers: Vec<BufferUse>,
 }
 
 /// Compatibility-profile built-ins the host provides as plain globals named `hz_` + name.
@@ -58,6 +60,10 @@ const LEGACY: &str = "\
 /// Built-ins GLSL 450 has under the same name.
 const KEPT: &str =
     "gl_Position gl_FragCoord gl_FrontFacing gl_PointCoord gl_FragDepth gl_PointSize";
+/// Compute built-ins, kept as they are (naga has them).
+const COMPUTE_BUILTINS: &str = "\
+    gl_GlobalInvocationID gl_LocalInvocationID gl_WorkGroupID gl_NumWorkGroups \
+    gl_LocalInvocationIndex gl_WorkGroupSize";
 /// Words GLSL 450 reserves that GLSL 120 left free: any use is the pack's own name.
 const KEYWORDS: &str = "\
     sample smooth flat noperspective centroid patch subroutine invariant precise common \
@@ -162,6 +168,7 @@ fn polyfill(text: &str) -> Option<(String, BTreeSet<String>)> {
     Some((out, used.iter().map(|(_, defs)| defs.to_string()).collect()))
 }
 
+mod buffers;
 mod compat;
 mod dead;
 mod decl;
@@ -173,6 +180,7 @@ mod scope;
 #[cfg(test)]
 mod tests;
 
+pub use buffers::{BufferUse, STORAGE_BINDING, STORAGE_BUFFERS};
 use lex::{Kind, Tok, drop_unreachable, is_type, tokenize, top_level_items};
 
 struct Ctx<'a> {
@@ -246,6 +254,9 @@ pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
         let first = sig.first().map(|&i| cx.toks[i].text);
         let is_block = sig.iter().any(|&i| cx.toks[i].text == "{");
         if first == Some("precision") {
+            continue;
+        }
+        if is_block && cx.buffer_block(&sig, end, &mut body)? {
             continue;
         }
         if is_block
