@@ -79,7 +79,7 @@ runs on a thread. Its result is the compiled pack and a `PackReport` (`report.rs
    its own fallback.
 3. **Plan** (`program.rs`, `directives.rs`, `shaders_properties.rs`, `plan.rs`): the program slots after
    the documented fallback chains (Iris's split slots such as `gbuffers_terrain_cutout` or `shadow_water`
-   run when the pack has them), `deferredN`/`compositeN` up to 99, `prepare` passes, each buffer's format
+   run when the pack has them), `deferredN`/`compositeN` up to 99, `shadowcomp` and `prepare` passes, each buffer's format
    (every format name, integer and signed ones included), size, clear and mipmaps, the shadow map's
    constants, and `shaders.properties`: `blend.*`, `alphaTest.*`, `scale.*`, `flip.*`, `size.buffer.*`,
    `program.*.enabled` (as expressions), custom textures, shadow and culling switches.
@@ -198,7 +198,7 @@ compile are logged and their slots skipped.
   the entities program. Stars are not drawn. Horizon's clouds and entity blob shadows are not drawn (the pack
   has its own sky, and a shadow map replaces the blobs).
 - No options screen: options come from `--shader-pack-option`.
-- `gbuffers_hand_water`, compute shaders, `shadowcomp` and `prepare` passes, custom uniforms (`uniform.*`
+- `gbuffers_hand_water`, compute shaders (`shadowcomp` and `prepare` run as full-screen passes), custom uniforms (`uniform.*`
   in shaders.properties), 3D and raw custom textures are not supported.
 - Item lighting stays baked into entity colours.
 - A pack whose programs need more textures per stage or more draw-buffer bytes than the device allows is

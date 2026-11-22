@@ -118,6 +118,14 @@ pub enum Step {
         sides: [Side; BUFFERS],
     },
     Pass(Pass),
+    /// A `shadowcomp` pass, right after [`Step::Shadow`]: it draws into the
+    /// `shadowcolorN` in `writes` (one texture each, no sides). The client
+    /// copies each before the pass and binds the copy for its reads, so the
+    /// pass reads what the shadow map held, as Iris's flipped buffers give.
+    ShadowComp {
+        kind: ProgramKind,
+        writes: Vec<u8>,
+    },
     /// Copy these buffers' alternate side into their main side (end of frame).
     CopyBack(Vec<u8>),
 }
@@ -176,7 +184,7 @@ impl FrameSchedule {
     pub fn new(plan: &PackPlan) -> Self {
         let mut written = BTreeSet::new();
         for &kind in plan.programs.keys() {
-            if kind.is_shadow() || kind == ProgramKind::Final {
+            if kind.writes_shadowcolor() || kind == ProgramKind::Final {
                 continue;
             }
             written.extend(draw_buffers(plan, kind));
@@ -201,9 +209,18 @@ impl FrameSchedule {
             || plan.programs.contains_key(&ProgramKind::ShadowEntities)
         {
             steps.push(Step::Shadow);
+            for &kind in plan.programs.keys() {
+                if let ProgramKind::ShadowComp(_) = kind {
+                    let mut writes = plan.draw_buffers.get(&kind).cloned().unwrap_or(vec![0]);
+                    writes.retain(|&b| b < 2);
+                    writes.dedup();
+                    steps.push(Step::ShadowComp { kind, writes });
+                }
+            }
         }
         let mut sides = [Side::Main; BUFFERS];
-        let passes = plan.fullscreen_passes();
+        let mut passes = plan.fullscreen_passes();
+        passes.retain(|k| !k.writes_shadowcolor());
         let (prepare, passes): (Vec<_>, Vec<_>) = passes
             .iter()
             .partition(|k| matches!(k, ProgramKind::Prepare(_)));
@@ -275,7 +292,7 @@ pub fn mipmapped_reads(plan: &PackPlan, kind: ProgramKind) -> [bool; BUFFERS] {
         .chain(plan.draw_buffers.keys())
         .chain(plan.mipmaps.keys())
         .copied()
-        .filter(|k| k.is_fullscreen() && *k < kind)
+        .filter(|k| k.is_fullscreen() && !k.writes_shadowcolor() && *k < kind)
         .collect();
     kinds.sort();
     kinds.dedup();
@@ -425,6 +442,9 @@ mod tests {
     fn deferred_runs_between_the_gbuffer_phases() {
         let p = plan(&[
             (ProgramKind::Shadow, &[0, 1]),
+            // shadowcomp writes shadowcolors (5 is not one), right after the shadow map.
+            (ProgramKind::ShadowComp(1), &[1, 5]),
+            (ProgramKind::ShadowComp(0), &[0]),
             (ProgramKind::Terrain, &[0, 2]),
             (ProgramKind::Deferred(0), &[0]),
             (ProgramKind::Composite(0), &[0]),
@@ -438,6 +458,7 @@ mod tests {
                 Step::Shadow => "shadow".into(),
                 Step::Gbuffers { phase, .. } => format!("{phase:?}"),
                 Step::Pass(p) => format!("{:?}", p.kind),
+                Step::ShadowComp { kind, writes } => format!("{kind:?} {writes:?}"),
                 Step::CopyBack(_) => "copy".into(),
             })
             .collect();
@@ -446,17 +467,19 @@ mod tests {
             [
                 "clear",
                 "shadow",
+                "ShadowComp(0) [0]",
+                "ShadowComp(1) [1]",
                 "Opaque",
                 "Deferred(0)",
                 "Translucent",
                 "Composite(0)"
             ]
         );
-        let Step::Gbuffers { sides: after, .. } = &s.steps[4] else {
+        let Step::Gbuffers { sides: after, .. } = &s.steps[6] else {
             panic!()
         };
         assert_eq!(*after, sides(&[0]));
-        // Shadow draw buffers are shadowcolors, not colortex.
+        // Shadow and shadowcomp draw buffers are shadowcolors, not colortex.
         assert_eq!(s.written, BTreeSet::from([0, 2]));
         // Two flips of colortex0: back on main.
         assert_eq!(s.latest, sides(&[]));

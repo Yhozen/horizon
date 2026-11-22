@@ -272,11 +272,10 @@ fn custom_applies(stage: TextureStage, sampler: &str, spec: &ProgramSpec) -> boo
         TextureStage::Deferred => matches!(kind, ProgramKind::Deferred(_)),
         TextureStage::Composite => matches!(kind, ProgramKind::Composite(_) | ProgramKind::Final),
         TextureStage::All => true,
+        TextureStage::Shadowcomp => matches!(kind, ProgramKind::ShadowComp(_)),
+        TextureStage::Prepare => matches!(kind, ProgramKind::Prepare(_)),
         // Passes Horizon does not run.
-        TextureStage::Prepare
-        | TextureStage::Shadowcomp
-        | TextureStage::Begin
-        | TextureStage::Setup => false,
+        TextureStage::Begin | TextureStage::Setup => false,
     };
     if !applies {
         return false;
@@ -289,7 +288,8 @@ fn custom_applies(stage: TextureStage, sampler: &str, spec: &ProgramSpec) -> boo
         return true;
     };
     let earlier = |k: &ProgramKind| match (kind, k) {
-        (ProgramKind::Deferred(a), ProgramKind::Deferred(b))
+        (ProgramKind::Prepare(a), ProgramKind::Prepare(b))
+        | (ProgramKind::Deferred(a), ProgramKind::Deferred(b))
         | (ProgramKind::Composite(a), ProgramKind::Composite(b)) => b < &a,
         (ProgramKind::Final, ProgramKind::Composite(_)) => true,
         _ => false,

@@ -280,7 +280,7 @@ pub(super) fn build(
         .map(|&i| {
             let format = if kind == ProgramKind::Final {
                 layouts.screen
-            } else if kind.is_shadow() {
+            } else if kind.writes_shadowcolor() {
                 (layouts.shadow_color)(i)
             } else {
                 (layouts.color)(i)
