@@ -567,12 +567,17 @@ pub(super) struct Sampling {
 /// hand program (so the two hold the same) and the stage reads both, which
 /// saves a binding.
 fn depth2_is_1(calls: &BTreeSet<String>, spec: &ProgramSpec, watershadow: bool) -> bool {
+    // Only reads of the depth buffers themselves: a 2D read with no custom
+    // texture in its place (`texture.deferred.depthtex1=` a 3D noise volume).
     let reads = |want: &str| {
-        calls.iter().any(|c| {
-            split_sampling_call(c)
-                .and_then(|(_, n)| canonical(n, watershadow))
-                .is_some_and(|n| n == want)
-        })
+        calls
+            .iter()
+            .filter_map(|c| parse_sampling_call(c))
+            .any(|c| {
+                c.dim == TexDim::D2
+                    && canonical(c.name, watershadow).is_some_and(|n| n == want)
+                    && custom_entry(want, c.dim, None, spec).is_none()
+            })
     };
     !spec.plan.programs.contains_key(&ProgramKind::Hand) && reads("depthtex1") && reads("depthtex2")
 }

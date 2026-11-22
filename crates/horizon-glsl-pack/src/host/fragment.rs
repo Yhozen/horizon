@@ -247,7 +247,14 @@ pub(super) fn fragment_source(
     }
     out += "vec4 hz_gl_FragData[8];\n";
     out += OUTPUT_HELPERS;
-    let mut body = fragment.body.clone();
+    // Atomics on storage buffers (naga_atomics), and GLSL's memory barriers.
+    let (mut body, atomics) = crate::naga_atomics::rename_calls(&fragment.body)?;
+    if !fragment.buffers.is_empty() {
+        out += super::compute::MEMORY_BARRIERS;
+    }
+    if atomics {
+        out += &crate::naga_atomics::atomic_stubs();
+    }
     for o in outputs {
         glsl_type(&o.ty)?;
         writeln!(out, "{} hz_o_{};", o.ty, o.index).unwrap();

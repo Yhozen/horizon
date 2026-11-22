@@ -18,8 +18,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use horizon_glsl_pack::{
-    HostParams, PackFiles, PackOptions, ProgramKind, compile_kinds, find_program, read_plan,
-    world_folder,
+    HostParams, PackFiles, PackOptions, ProgramKind, compile_kinds, compile_report, find_program,
+    read_plan, world_folder,
 };
 use serde_json::{Value, json};
 
@@ -282,9 +282,61 @@ fn check_pack(
             }
             programs.push(entry);
         }
+        // The whole pack as the game compiles it: the refusal (a required
+        // feature Horizon lacks), the status, and the compute programs, which
+        // run only with the whole frame.
+        let (pack, report) = compile_report(files, dimension, options, &host);
+        let compute_required = report
+            .features
+            .iter()
+            .any(|f| f.name == "compute shaders" && f.required);
+        for outcome in &report.programs {
+            let Some(slot) = horizon_glsl_pack::compute::ComputeSlot::from_name(&outcome.slot)
+            else {
+                continue;
+            };
+            let mut entry = json!({
+                "slot": outcome.slot,
+                "essential": compute_required,
+                "compute": true,
+                "source": outcome.file.clone().or_else(|| outcome.failed.first().map(|f| f.0.clone())),
+            });
+            match (
+                &outcome.error,
+                pack.as_ref().and_then(|p| p.computes.get(&slot)),
+            ) {
+                (Some(e), _) => {
+                    entry["status"] = json!("error");
+                    entry["error"] = json!(e);
+                }
+                (None, Some(c)) => {
+                    fs::create_dir_all(&wgsl_dir).expect("create the WGSL folder");
+                    let file = wgsl_dir.join(format!("{}.cs.wgsl", outcome.slot));
+                    fs::write(&file, &c.wgsl).expect("write WGSL");
+                    let mut spirv = serde_json::Map::new();
+                    spirv.insert(
+                        "cs".into(),
+                        json!(write_spirv(&c.wgsl, naga::ShaderStage::Compute).err()),
+                    );
+                    entry["status"] = json!("ok");
+                    entry["unknown_uniforms"] = json!(c.unknown_uniforms);
+                    entry["textures"] = json!(c.textures.len());
+                    entry["spirv_errors"] = Value::Object(spirv);
+                }
+                // The pack failed elsewhere before this program's turn.
+                (None, None) => entry["status"] = json!("unchecked"),
+            }
+            programs.push(entry);
+        }
         dims.insert(
             dimension.clone(),
-            json!({ "folder": folder, "plan_error": plan_error, "programs": programs }),
+            json!({
+                "folder": folder,
+                "plan_error": plan_error,
+                "programs": programs,
+                "refusal": report.refusal,
+                "pack_status": format!("{:?}", report.status),
+            }),
         );
     }
     json!({

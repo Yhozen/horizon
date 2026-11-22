@@ -47,6 +47,9 @@ impl Ctx<'_> {
     ) -> Result<(), String> {
         let mut i = start;
         let mut after_dot = false;
+        // A struct body's names are its members' (`struct R { float depth; }` beside an
+        // `out float depth`): renamed like fields, not like the globals they shadow.
+        let (mut struct_head, mut struct_depth) = (false, 0u32);
         while i < end {
             let t = self.toks[i];
             i += 1;
@@ -55,13 +58,23 @@ impl Ctx<'_> {
                 if t.kind != Kind::Space {
                     after_dot = t.text == ".";
                 }
+                match t.text {
+                    "{" if struct_head => (struct_head, struct_depth) = (false, 1),
+                    "{" if struct_depth > 0 => struct_depth += 1,
+                    "}" if struct_depth > 0 => struct_depth -= 1,
+                    ";" => struct_head = false,
+                    _ => {}
+                }
                 continue;
             }
-            let member = std::mem::take(&mut after_dot);
+            let member = std::mem::take(&mut after_dot) || struct_depth > 0;
             let name = t.text;
+            if name == "struct" {
+                struct_head = true;
+            }
             if member {
                 // Swizzles and struct fields: only the reserved words need renaming.
-                if listed(KEYWORDS, name) {
+                if self.reserved(name) {
                     out.push_str("hz_u_");
                 }
                 out.push_str(name);
@@ -121,7 +134,10 @@ impl Ctx<'_> {
                 } else {
                     "int(gl_InstanceIndex)"
                 });
-            } else if name.starts_with("gl_") && !listed(KEPT, name) {
+            } else if name.starts_with("gl_")
+                && !listed(KEPT, name)
+                && !(self.stage == Stage::Compute && listed(COMPUTE_BUILTINS, name))
+            {
                 return Err(format!("unsupported built-in `{name}`"));
             } else if name == "ftransform" {
                 self.out.builtins.insert("hz_ftransform".into());
@@ -131,7 +147,7 @@ impl Ctx<'_> {
             } else if let Some(&n) = self.frag_outs.get(name) {
                 self.out.builtins.insert("hz_gl_FragData".into());
                 out.push_str(&format!("hz_gl_FragData[{n}]"));
-            } else if listed(KEYWORDS, name) || self.user_builtins.contains(name) {
+            } else if self.reserved(name) || self.user_builtins.contains(name) {
                 out.push_str("hz_u_");
                 out.push_str(name);
             } else {

@@ -18,10 +18,14 @@ use crate::shaders_properties::ShadersProperties;
 /// `IRIS_FEATURE_<flag>` for the pack's sources and properties.
 /// `BLOCK_EMISSION_ATTRIBUTE` is `at_midBlock.w` (the terrain vertex stream).
 /// `SEPARATE_HARDWARE_SAMPLERS` is `shadowtex0HW` / `shadowtex1HW` (host/sampling.rs).
+/// `COMPUTE_SHADERS` and `SSBO` are `.csh` programs and `bufferObject.*`
+/// storage buffers (compute.rs).
 pub const SUPPORTED_FLAGS: &[&str] = &[
     "BLOCK_EMISSION_ATTRIBUTE",
+    "COMPUTE_SHADERS",
     "CUSTOM_IMAGES",
     "SEPARATE_HARDWARE_SAMPLERS",
+    "SSBO",
 ];
 /// `image.*` declarations and `uniform image*` (custom images, `crate::images`).
 pub const CUSTOM_IMAGES: bool = true;
@@ -34,6 +38,10 @@ pub const CUSTOM_TEXTURES: bool = true;
 pub const RAW_TEXTURES: bool = true;
 /// 3D textures (`TEXTURE_3D` raw textures).
 pub const TEXTURES_3D: bool = true;
+/// Compute programs (`.csh`) of setup, begin, shadowcomp, prepare, deferred and composite.
+pub const COMPUTE_SHADERS: bool = true;
+/// `bufferObject.*` storage buffers and `buffer` blocks.
+pub const STORAGE_BUFFERS: bool = true;
 /// `prepare*` full-screen passes (vertex and fragment stages).
 pub const PREPARE_PASSES: bool = true;
 
@@ -165,7 +173,7 @@ pub fn detect(files: &PackFiles, folder: &str, props: &ShadersProperties) -> Vec
     if !compute.is_empty() || needs("COMPUTE_SHADERS") {
         out.push(feature(
             "compute shaders",
-            false,
+            COMPUTE_SHADERS,
             needs("COMPUTE_SHADERS"),
             &compute,
         ));
@@ -217,7 +225,7 @@ pub fn detect(files: &PackFiles, folder: &str, props: &ShadersProperties) -> Vec
     if !buffers.is_empty() || needs("SSBO") {
         out.push(feature(
             "storage buffers (SSBO)",
-            false,
+            STORAGE_BUFFERS,
             needs("SSBO"),
             &buffers,
         ));
@@ -379,7 +387,7 @@ mod tests {
         assert_eq!(
             names(&f),
             [
-                ("compute shaders", false, false),
+                ("compute shaders", true, false),
                 ("geometry shaders", false, false),
                 ("tessellation shaders", false, false),
                 ("prepare passes", true, false),
@@ -389,7 +397,7 @@ mod tests {
                     false
                 ),
                 ("custom images", true, false),
-                ("storage buffers (SSBO)", false, false),
+                ("storage buffers (SSBO)", true, false),
                 ("custom uniforms", true, false),
                 ("raw textures", true, false),
                 ("3D textures", true, false),
@@ -422,13 +430,10 @@ mod tests {
             names(&f),
             [
                 ("custom images", true, true),
-                ("storage buffers (SSBO)", false, true)
+                ("storage buffers (SSBO)", true, true)
             ]
         );
-        assert_eq!(
-            refusal(&f).as_deref(),
-            Some("This pack needs storage buffers (SSBO), which Horizon does not support yet.")
-        );
+        assert_eq!(refusal(&f), None);
         let p = props(&[("iris.features.required", "BLOCK_EMISSION_ATTRIBUTE")]);
         assert_eq!(refusal(&detect(&PackFiles::default(), "", &p)), None);
         let p = props(&[("iris.features.required", "HIGHER_SHADOWCOLOR")]);

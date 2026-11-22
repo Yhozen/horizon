@@ -27,6 +27,7 @@
 use std::collections::BTreeSet;
 
 use crate::ProgramKind;
+use crate::compute::{ComputePass, ComputeSlot};
 use crate::plan::{BufferSize, PackPlan, Scale};
 
 /// Number of `colortexN` buffers.
@@ -118,6 +119,15 @@ pub enum Step {
         sides: [Side; BUFFERS],
     },
     Pass(Pass),
+    /// A compute program (`plan.computes`), dispatched where the format
+    /// runs it: `begin*` before the shadow map, `shadowcomp*` after it, and
+    /// a pass's own (`composite2`, `composite2_a` …) just before that pass's
+    /// full-screen program, or where it would run when the pack has none.
+    /// `reads[N]` is the side of `colortexN` it samples.
+    Compute {
+        slot: ComputeSlot,
+        reads: [Side; BUFFERS],
+    },
     /// Copy these buffers' alternate side into their main side (end of frame).
     CopyBack(Vec<u8>),
 }
@@ -138,6 +148,9 @@ pub struct FrameSchedule {
     /// Buffers some program writes (gbuffers or full-screen; shadow programs
     /// write shadowcolor, not colortex). Others are only ever cleared.
     pub written: BTreeSet<u8>,
+    /// `setup*` compute programs, run once before the first frame (after
+    /// the targets are created), in order.
+    pub setup: Vec<ComputeSlot>,
 }
 
 /// The colour `buffer` is cleared to under `plan`.
@@ -197,12 +210,51 @@ impl FrameSchedule {
         if !per_frame.is_empty() {
             steps.push(Step::Clear(per_frame));
         }
+        let mut sides = [Side::Main; BUFFERS];
+        let computes = |pass: ComputePass, n: Option<u8>| -> Vec<ComputeSlot> {
+            plan.computes
+                .keys()
+                .copied()
+                .filter(|c| c.pass == pass && n.is_none_or(|n| c.n == n))
+                .collect()
+        };
+        let dispatch = |steps: &mut Vec<Step>, slots: Vec<ComputeSlot>, sides: &[Side; BUFFERS]| {
+            for slot in slots {
+                steps.push(Step::Compute {
+                    slot,
+                    reads: *sides,
+                });
+            }
+        };
+        dispatch(&mut steps, computes(ComputePass::Begin, None), &sides);
         if plan.programs.contains_key(&ProgramKind::Shadow)
             || plan.programs.contains_key(&ProgramKind::ShadowEntities)
         {
             steps.push(Step::Shadow);
         }
-        let mut sides = [Side::Main; BUFFERS];
+        dispatch(&mut steps, computes(ComputePass::ShadowComp, None), &sides);
+        // Each pass number in order: its compute programs, then its full-screen program.
+        let phase = |steps: &mut Vec<Step>,
+                     sides: &mut [Side; BUFFERS],
+                     kinds: Vec<ProgramKind>,
+                     compute_pass: ComputePass| {
+            let mut numbers: BTreeSet<u8> =
+                computes(compute_pass, None).iter().map(|c| c.n).collect();
+            numbers.extend(kinds.iter().map(|k| match k {
+                ProgramKind::Prepare(n) | ProgramKind::Deferred(n) | ProgramKind::Composite(n) => {
+                    *n
+                }
+                _ => u8::MAX,
+            }));
+            for n in numbers {
+                dispatch(steps, computes(compute_pass, Some(n)), sides);
+                if let Some(kind) = kinds.iter().find(|k| {
+                    matches!(k, ProgramKind::Prepare(m) | ProgramKind::Deferred(m) | ProgramKind::Composite(m) if *m == n)
+                }) {
+                    steps.push(Step::Pass(pass(plan, *kind, sides)));
+                }
+            }
+        };
         let passes = plan.fullscreen_passes();
         let (prepare, passes): (Vec<_>, Vec<_>) = passes
             .iter()
@@ -210,21 +262,21 @@ impl FrameSchedule {
         let (deferred, rest): (Vec<_>, Vec<_>) = passes
             .into_iter()
             .partition(|k| matches!(k, ProgramKind::Deferred(_)));
-        for kind in prepare {
-            steps.push(Step::Pass(pass(plan, kind, &mut sides)));
-        }
+        phase(&mut steps, &mut sides, prepare, ComputePass::Prepare);
         steps.push(Step::Gbuffers {
             phase: GbufferPhase::Opaque,
             sides,
         });
-        for kind in deferred {
-            steps.push(Step::Pass(pass(plan, kind, &mut sides)));
-        }
+        phase(&mut steps, &mut sides, deferred, ComputePass::Deferred);
         steps.push(Step::Gbuffers {
             phase: GbufferPhase::Translucent,
             sides,
         });
-        for kind in rest {
+        let (composite, last): (Vec<_>, Vec<_>) = rest
+            .into_iter()
+            .partition(|k| matches!(k, ProgramKind::Composite(_)));
+        phase(&mut steps, &mut sides, composite, ComputePass::Composite);
+        for kind in last {
             steps.push(Step::Pass(pass(plan, kind, &mut sides)));
         }
         let copy_back: Vec<u8> = (0..BUFFERS as u8)
@@ -238,6 +290,7 @@ impl FrameSchedule {
             initial_clears,
             latest: sides,
             written,
+            setup: computes(ComputePass::Setup, None),
         }
     }
 
@@ -438,6 +491,7 @@ mod tests {
                 Step::Shadow => "shadow".into(),
                 Step::Gbuffers { phase, .. } => format!("{phase:?}"),
                 Step::Pass(p) => format!("{:?}", p.kind),
+                Step::Compute { slot, .. } => slot.name(),
                 Step::CopyBack(_) => "copy".into(),
             })
             .collect();

@@ -203,6 +203,27 @@ fn type_fits(ty: &str, spec: &ImageSpec) -> bool {
     ty == format!("{kind}image{}", dim_suffix(spec.size.dim()))
 }
 
+/// The custom images (not `colorimgN`) of a compute program, as
+/// [`program_images`] checks a fragment stage's.
+pub(super) fn compute_images(
+    stage: &Rewritten,
+    spec: &ProgramSpec,
+) -> Result<ProgramImages, String> {
+    let mut only = stage.clone();
+    only.images.retain(|u| {
+        u.name
+            .strip_prefix("colorimg")
+            .and_then(|n| n.parse::<u8>().ok())
+            .is_none_or(|n| n >= 16)
+    });
+    let mut images = program_images(&Rewritten::default(), &only, spec)?;
+    for b in &mut images.bindings {
+        b.fragment = false;
+        b.compute = true;
+    }
+    Ok(images)
+}
+
 /// The images a program declares, checked against the plan's declarations
 /// and the device's limits.
 pub(super) fn program_images(

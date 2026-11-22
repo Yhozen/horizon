@@ -233,6 +233,18 @@ impl Images {
                 }
             }
         }
+        // Compute dispatches are their own usage scopes: no conflicts.
+        for c in pack.computes.values() {
+            for b in &c.images {
+                let ImageSource::Custom(i) = b.source;
+                used[i] = true;
+            }
+            for t in &c.textures {
+                if let TextureSource::Image(i) = t.source {
+                    used[i] = true;
+                }
+            }
+        }
         let mut conflicts: BTreeMap<ProgramKind, BTreeSet<u32>> = BTreeMap::new();
         for ((_, i), (writers, readers)) in &uses {
             if writers.is_empty() {
@@ -338,10 +350,14 @@ impl Images {
 
     /// The view `program` binds at `binding` for image `i`: the image, or
     /// its stand-in when that read conflicts with a write in the same pass.
-    pub fn view(&self, kind: ProgramKind, binding: u32, i: usize) -> Option<&wgpu::TextureView> {
-        let conflict = self
-            .conflicts
-            .get(&kind)
+    pub fn view(
+        &self,
+        kind: Option<ProgramKind>,
+        binding: u32,
+        i: usize,
+    ) -> Option<&wgpu::TextureView> {
+        let conflict = kind
+            .and_then(|k| self.conflicts.get(&k))
             .is_some_and(|b| b.contains(&binding));
         let stand_in = self.stand_ins.get(i)?.as_ref();
         let image = if conflict {

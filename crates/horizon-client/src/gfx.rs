@@ -3300,6 +3300,16 @@ impl Renderer {
             max_textures: limits.max_sampled_textures_per_shader_stage,
             max_draw_buffers: limits.max_color_attachments,
             max_attachment_bytes: limits.max_color_attachment_bytes_per_sample,
+            max_storage_buffers: limits.max_storage_buffers_per_shader_stage,
+            max_storage_buffer_bytes: limits.max_storage_buffer_binding_size,
+            max_workgroup_storage: limits.max_compute_workgroup_storage_size,
+            max_invocations: limits.max_compute_invocations_per_workgroup,
+            max_workgroup_size: [
+                limits.max_compute_workgroup_size_x,
+                limits.max_compute_workgroup_size_y,
+                limits.max_compute_workgroup_size_z,
+            ],
+            max_workgroups: limits.max_compute_workgroups_per_dimension,
             terrain_textures: self.sprite_host.sprite_arrays.clamp(1, 8) + 1,
             max_storage_textures: limits.max_storage_textures_per_shader_stage,
             vertex_storage_writes: self

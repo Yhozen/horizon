@@ -89,6 +89,18 @@ pub struct HostParams {
     /// Every image storage format may be read and written in one binding
     /// (adapter-specific format features). Without it, only the `r32` ones.
     pub read_write_storage: bool,
+    /// Storage buffers one stage may bind (`maxStorageBuffersPerShaderStage`, 8 in WebGPU).
+    pub max_storage_buffers: u32,
+    /// The largest storage buffer binding (`maxStorageBufferBindingSize`, 128 MiB in WebGPU).
+    pub max_storage_buffer_bytes: u64,
+    /// `shared` memory of one compute program (`maxComputeWorkgroupStorageSize`, 16 KiB).
+    pub max_workgroup_storage: u32,
+    /// Invocations of one workgroup (`maxComputeInvocationsPerWorkgroup`, 256).
+    pub max_invocations: u32,
+    /// Each dimension of a workgroup (`maxComputeWorkgroupSize{X,Y,Z}`: 256, 256, 64).
+    pub max_workgroup_size: [u32; 3],
+    /// Workgroups per dimension of one dispatch (`maxComputeWorkgroupsPerDimension`, 65535).
+    pub max_workgroups: u32,
 }
 
 impl Default for HostParams {
@@ -105,6 +117,12 @@ impl Default for HostParams {
             max_storage_textures: 4,
             vertex_storage_writes: false,
             read_write_storage: false,
+            max_storage_buffers: 8,
+            max_storage_buffer_bytes: 128 << 20,
+            max_workgroup_storage: 16 << 10,
+            max_invocations: 256,
+            max_workgroup_size: [256, 256, 64],
+            max_workgroups: 65535,
         }
     }
 }
@@ -230,6 +248,54 @@ pub struct TextureBinding {
     pub fragment: bool,
 }
 
+/// A storage buffer (`bufferObject.N`) a program binds at group 1, binding
+/// [`crate::rewrite::STORAGE_BINDING`] + N.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StorageBinding {
+    pub binding: u32,
+    /// `N` of `bufferObject.N`.
+    pub buffer: u32,
+    /// Every stage that declares it only reads it (the vertex stage always does).
+    pub read_only: bool,
+    pub vertex: bool,
+    pub fragment: bool,
+    pub compute: bool,
+}
+
+/// `colorimgN`: colortexN as a storage image of a compute program, at group
+/// 1, binding [`crate::host::COLOR_IMAGE_BINDING`] + N, on the side the
+/// program reads `colortexN` from (format notes §18).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColorImageBinding {
+    pub binding: u32,
+    pub buffer: u8,
+    /// The colortex's texture format (the image's must be the same).
+    pub format: crate::plan::StorageFormat,
+    pub read: bool,
+    pub write: bool,
+}
+
+/// One compute program as WGSL (entry point `main`), with group 1 laid out
+/// as a full-screen pass's: the uniform block, textures, samplers, and its
+/// storage buffers.
+#[derive(Clone, Debug)]
+pub struct CompiledCompute {
+    /// The pack file, e.g. `shaders/world0/composite2_a`.
+    pub source: String,
+    pub wgsl: String,
+    pub textures: Vec<TextureBinding>,
+    pub storage: Vec<StorageBinding>,
+    /// `colorimgN` images.
+    pub color_images: Vec<ColorImageBinding>,
+    /// Custom images (`image.*`), by binding.
+    pub images: Vec<ImageBinding>,
+    /// `local_size_x/y/z`.
+    pub workgroup_size: [u32; 3],
+    pub dispatch: crate::compute::Dispatch,
+    pub unknown_uniforms: BTreeSet<String>,
+    pub notes: Vec<String>,
+}
+
 /// One program as WGSL: one module per stage, entry point `main` in each.
 ///
 /// Bind groups: group 0 is Horizon's own (terrain: the terrain group;
@@ -252,6 +318,8 @@ pub struct CompiledProgram {
     pub textures: Vec<TextureBinding>,
     /// Group 1 storage images, by binding.
     pub images: Vec<ImageBinding>,
+    /// Storage buffers either stage declares, by binding.
+    pub storage: Vec<StorageBinding>,
     /// Uniforms the pack declares that Horizon does not provide (read as zero).
     pub unknown_uniforms: BTreeSet<String>,
     /// Things that translated but may not look as in Iris (a sampler nothing
@@ -271,6 +339,9 @@ pub struct CompiledPack {
     /// Slots whose program exists but did not compile, with the reason; the
     /// frame runs without them (only non-essential slots: see [`compile`]).
     pub skipped: Vec<(ProgramKind, String)>,
+    /// Every compute program that compiled, by slot, in the order they run
+    /// (`plan.computes` lists exactly these).
+    pub computes: BTreeMap<crate::compute::ComputeSlot, CompiledCompute>,
     /// `block.properties`: block names to `mc_Entity.x` ids.
     pub blocks: BlockIds,
     /// `entity.properties`: entity names to `entityId` ids.

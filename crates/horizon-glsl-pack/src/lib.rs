@@ -11,6 +11,7 @@
 //! the pack's results out) → [`naga_out`] (naga: GLSL → validated module →
 //! WGSL text). Nothing here touches wgpu or the file system.
 
+pub mod compute;
 pub mod custom_uniforms;
 pub mod directives;
 pub mod features;
@@ -18,6 +19,7 @@ pub mod frame_math;
 pub mod host;
 pub mod images;
 pub mod legacy_ids;
+pub mod naga_atomics;
 pub mod naga_out;
 pub mod noise;
 pub mod options;

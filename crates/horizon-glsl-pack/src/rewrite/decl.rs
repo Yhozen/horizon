@@ -22,27 +22,33 @@ impl Ctx<'_> {
             words.pop();
         }
         // `layout(...)` is skipped (locations come from declaration order) but
-        // for an image's format: a word not followed by `=`.
+        // for an image's format: a word not followed by `=`. It may come
+        // before or among the qualifiers (`uniform layout(rg8) writeonly image2D`).
         let mut k = 0;
         let mut format = None;
-        if words.first() == Some(&"layout") {
-            k = words
-                .iter()
-                .position(|w| *w == ")")
-                .map_or(words.len(), |p| p + 1);
-            format = words[..k]
-                .windows(2)
-                .find(|w| {
-                    w[0].starts_with(|c: char| c.is_ascii_alphabetic())
-                        && matches!(w[1], "," | ")")
-                        && !matches!(w[0], "std140" | "std430" | "shared" | "packed")
-                })
-                .map(|w| w[0].to_ascii_lowercase());
-        }
         let mut quals = Vec::new();
-        while k + 2 < words.len() && (listed(QUALIFIERS, words[k]) || listed(MEMORY, words[k])) {
-            quals.push(words[k]);
-            k += 1;
+        while k + 2 < words.len() {
+            if words[k] == "layout" {
+                let close = words[k..]
+                    .iter()
+                    .position(|w| *w == ")")
+                    .map_or(words.len(), |p| k + p + 1);
+                format = words[k..close]
+                    .windows(2)
+                    .find(|w| {
+                        w[0].starts_with(|c: char| c.is_ascii_alphabetic())
+                            && matches!(w[1], "," | ")")
+                            && !matches!(w[0], "std140" | "std430" | "shared" | "packed")
+                    })
+                    .map(|w| w[0].to_ascii_lowercase())
+                    .or(format);
+                k = close;
+            } else if listed(QUALIFIERS, words[k]) || listed(MEMORY, words[k]) {
+                quals.push(words[k]);
+                k += 1;
+            } else {
+                break;
+            }
         }
         let storage = quals
             .iter()

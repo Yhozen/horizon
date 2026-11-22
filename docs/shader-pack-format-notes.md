@@ -30,8 +30,8 @@ Terms: *gbuffers* are the programs that draw world geometry; *composite-style* p
 
 - The docs do not fix the order inside the gbuffers steps (medium for steps 3–7). What packs rely on: weather,
   water and translucent held items draw after `deferred`.
-- Compute programs (`_a`…`_z`) run before their pass's vertex stage; gbuffers cannot have them. A missing or
-  disabled program uses its fallback (section 2); with no fallback it draws nothing.
+- Compute programs (`<pass>.csh`, then `_a`…`_z`) run before their pass's vertex stage; gbuffers cannot have them
+  (section 18). A missing or disabled program uses its fallback (section 2); with no fallback it draws nothing.
 
 ## 2. Programs and fallbacks
 
@@ -445,8 +445,10 @@ Sodium 0.9.2 on Minecraft 26.3 (Mesa llvmpipe, OpenGL 4.5 core, Linux, 854×480)
   they are unknown or unsupported in that build. (measured)
 - `iris.features.required` gets the same macros. A required flag the loader lacks refuses the whole pack.
   (public docs; the required case was not probed)
-- Horizon defines a flag's macro only for the flags it has: today only `BLOCK_EMISSION_ATTRIBUTE`
-  (`features::SUPPORTED_FLAGS`). A pack that requires any other flag is reported as Not supported.
+- Horizon defines a flag's macro only for the flags it has: `BLOCK_EMISSION_ATTRIBUTE`, `COMPUTE_SHADERS`,
+  `SSBO` (section 18), `CUSTOM_IMAGES` and `SEPARATE_HARDWARE_SAMPLERS` (section 19)
+  (`features::SUPPORTED_FLAGS`). A pack that requires any other flag is reported as Not
+  supported.
 
 **Option files** (measured)
 - A folder pack's options are read from `shaderpacks/<folder>.txt`; a zip's from `shaderpacks/<file>.zip.txt`.
@@ -518,7 +520,64 @@ unverified against Iris)
 - The pack never fails because of a custom uniform; Horizon lists such lines in its report.
 
 
-## 18. Custom images
+## 18. Compute programs and storage buffers
+
+Sources: "(docs)" is the public Iris documentation of compute shaders and buffer objects; "(corpus)" is what
+the corpus packs rely on; "(inferred)" is Horizon's own reading, not probed in Iris.
+
+**Programs** (docs)
+- A compute program is a `.csh` file. These passes may have them: `setup`, `begin`, `shadowcomp`, `prepare`,
+  `deferred` and `composite`, each numbered like its full-screen programs (`composite`, `composite1` …
+  `composite99`). gbuffers and `final` cannot.
+- Each pass number has one unlettered program (`composite2.csh`), then up to 26 more, `composite2_a.csh` to
+  `composite2_z.csh`. They run in that order, all of them before the pass's own vertex and fragment programs.
+  A pass may have compute programs and no full-screen program; they still run at that pass's place (Noble's
+  `composite99.csh`).
+- `setup*` is compute only and runs once, when the pack loads. `begin*` runs at the start of every frame,
+  before the shadow map. `shadowcomp*` runs after the shadow map.
+- Like the other programs, a program in the world folder replaces the one of the same name in `shaders/`, and
+  `program.<name>.enabled` applies to it.
+
+**Workgroups** (docs)
+- `layout(local_size_x = X, local_size_y = Y, local_size_z = Z) in;` sets the workgroup size. Omitted
+  dimensions are 1.
+- `const ivec3 workGroups = ivec3(x, y, z);` dispatches that many workgroups.
+- `const vec2 workGroupsRender = vec2(sx, sy);` dispatches enough workgroups to cover the render size scaled by
+  (sx, sy): `ceil(ceil(width × sx) / X)` by `ceil(ceil(height × sy) / Y)` by 1.
+- With neither constant, Horizon dispatches as `workGroupsRender = vec2(1.0, 1.0)`. (inferred: every corpus
+  program declares one)
+- Built-ins: `gl_GlobalInvocationID`, `gl_LocalInvocationID`, `gl_LocalInvocationIndex`, `gl_WorkGroupID`,
+  `gl_NumWorkGroups`, `gl_WorkGroupSize`; `shared` variables; `barrier()`, `memoryBarrier*()`,
+  `groupMemoryBarrier()`; the `atomic*` functions on buffer and shared members.
+- Samplers read like a vertex stage (no implicit level). `colortexN` reads the side the pass would read at that
+  point. (inferred)
+
+**Buffer objects** (docs)
+- `bufferObject.<N> = <bytes>` declares storage buffer N. It is zeroed when created and kept across frames.
+- `bufferObject.<N> = <bytes per pixel> true <sx> <sy>` makes it relative to the render size (scaled by sx,
+  sy), so it is made again, zeroed, on a resize. No corpus pack uses this form. (docs; the per-pixel
+  reading is inferred)
+- Any stage binds buffer N with `layout(std430, binding = N) buffer Name { … } name;`. The last member may be
+  an unsized array. `readonly`, `writeonly`, `coherent`, `volatile` and `restrict` may qualify it.
+- `iris.features.required/optional` lists `COMPUTE_SHADERS` and `SSBO`.
+
+**How Horizon runs them** (inferred)
+- Every buffer object is a WebGPU storage buffer at group 1, binding 160 + N, in every program that declares it.
+  A vertex stage reads it only, because WebGPU vertex stages cannot write storage.
+- GLSL's memory barriers alone have no WebGPU equivalent. They become nothing: within one invocation, order
+  already holds. `barrier()` becomes a storage barrier plus a workgroup barrier.
+- naga's GLSL front end has no atomics. Each `atomicAdd`/`Min`/`Max`/`And`/`Or`/`Xor`/`Exchange` call becomes
+  a WebGPU atomic on the member, and that member's type becomes `atomic<u32>`/`atomic<i32>`. Plain reads and
+  writes of it then become `atomicLoad`/`atomicStore`. `atomicCompSwap` and atomics on floats are not
+  supported (no corpus pack uses them).
+- WebGPU's default limits are lower than desktop GL's: 16 KiB of `shared` memory, 256 invocations per
+  workgroup, 8 storage buffers per stage, 128 MiB per storage binding. Horizon checks each program against
+  the device's actual limits. A program over a limit is left out, and the report gives the reason. If the pack
+  lists `COMPUTE_SHADERS` in `iris.features.required`, that fails the pack. (corpus: Photon's sky light
+  program without subgroups wants 36 KiB of shared memory)
+- `setup` programs run once, before the pack's first frame, and not again on a resize.
+
+## 19. Custom images
 
 **Source:** the public format documentation for Iris's custom images and the GLSL image functions, read
 against the corpus packs that declare them (Pegasus, Visual Vibrance, Shrimple, Clarity, FastPBR,
@@ -586,3 +645,9 @@ settle.
   them is left out with the reason.
 - `<sampler>` reads of a 32-bit float image are filtered in the shader, as for colour targets that the
   device cannot filter.
+- Compute programs bind images the same way, each dispatch its own usage scope, so nothing is replaced there.
+
+**Separate hardware shadow samplers** (`SEPARATE_HARDWARE_SAMPLERS`, from the format docs)
+- `shadowtex0HW` / `shadowtex1HW`, declared `sampler2DShadow`, read the shadow map with a depth compare and
+  hardware filtering whatever `shadowHardwareFiltering` says, while `shadowtex0` / `shadowtex1` keep their
+  own setting. Read without a compare, they are the map itself. (Horizon's reading, unverified against Iris.)

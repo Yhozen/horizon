@@ -475,6 +475,35 @@ void main() { gl_FragColor = vec4(helper(1.0) + helper(vec2(0.0))); }
 }
 
 #[test]
+fn struct_members_named_like_outputs_stay_members() {
+    let fs = "in vec2 uv;
+layout(location = 0) out vec4 color;
+layout(location = 1) out vec4 depth;
+struct Hit { vec3 color; float depth; };
+Hit nearer(Hit a, Hit b) { return a.depth < b.depth ? a : b; }
+void main() {
+    Hit h = nearer(Hit(vec3(uv, 0.0), 1.0), Hit(vec3(0.0), 2.0));
+    color = vec4(h.color, 1.0);
+    depth = vec4(h.depth);
+}
+";
+    let rw = rewrite(fs, Stage::Fragment).unwrap();
+    for needle in [
+        "struct Hit { vec3 color; float depth; };",
+        "a.depth < b.depth",
+        "hz_gl_FragData[0] = vec4(h.color, 1.0);",
+        "hz_gl_FragData[1] = vec4(h.depth);",
+    ] {
+        assert!(
+            rw.body.contains(needle),
+            "{needle} missing from\n{}",
+            rw.body
+        );
+    }
+    naga(&rw, Stage::Fragment);
+}
+
+#[test]
 fn shadowing_locals_are_renamed() {
     let fs = "uniform sampler2D tex;
 uniform float frameTimeCounter;
@@ -792,6 +821,7 @@ fn image_uniforms_become_host_functions() {
     let fs = "layout(r32ui) uniform uimage3D voxels;
 writeonly uniform image2D lighting;
 layout (rgba16f) readonly restrict uniform image2D history, other;
+uniform layout(rg8) restrict writeonly image2D edges;
 void main() {
     ivec3 size = imageSize(voxels);
     uint old = imageAtomicMax(voxels, ivec3(0), 5u);
@@ -801,7 +831,9 @@ void main() {
 ";
     let rw = rewrite(fs, Stage::Fragment).unwrap();
     let img = |n: &str| rw.images.iter().find(|i| i.name == n).unwrap();
-    assert_eq!(rw.images.len(), 4);
+    assert_eq!(rw.images.len(), 5);
+    assert_eq!(img("edges").format.as_deref(), Some("rg8"));
+    assert_eq!(img("edges").access, ImageAccess::WriteOnly);
     assert_eq!(img("voxels").ty, "uimage3D");
     assert_eq!(img("voxels").format.as_deref(), Some("r32ui"));
     assert_eq!(img("voxels").access, ImageAccess::ReadWrite);
