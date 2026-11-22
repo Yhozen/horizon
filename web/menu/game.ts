@@ -130,9 +130,10 @@ export async function* boot(edition: Edition, world: WorldId, name: string, cust
       console.warn("The saved shader packs could not be read", error);
       return [] as string[];
     });
+    const emptied: string[] = [];
     if (stored.length) {
       yield step(2, "Loading your shader packs");
-      await mirrorAtBoot(installFile, stored);
+      await mirrorAtBoot(installFile, stored, (path) => emptied.push(path));
     }
     hooks?.dispose();
     hooks = installHooks({
@@ -141,6 +142,9 @@ export async function* boot(edition: Edition, world: WorldId, name: string, cust
       notice: (line: string) => game.shader_pack_notice?.(line),
       acceptsDrop: () => game.shader_pack_page_open?.() ?? true,
     });
+    for (const path of emptied) {
+      game.shader_pack_notice?.(`Shader pack ${path.split("/").pop()} was stored empty by this browser and was removed: add it again.`);
+    }
 
     yield step(2, edition.id === "open" ? "Loading the artwork" : "Loading resources");
     const report = (state: string) =>
