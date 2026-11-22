@@ -48,8 +48,9 @@ class WorldInputCaptureTests(unittest.TestCase):
 use std::cell::Cell;
 #[derive(Clone, Copy, PartialEq)]
 enum Screen { Playing, Paused, Inventory, Chat }
-enum CursorGrabMode { Locked, Confined, None }
+pub(crate) enum CursorGrabMode { Locked, Confined, None }
 mod winit {
+    pub mod window { pub(crate) use crate::CursorGrabMode; }
     pub mod dpi {
         #[derive(Clone, Copy)]
         pub struct PhysicalPosition<T> { pub x: T, pub y: T }
@@ -200,7 +201,9 @@ fn main() {
     assert!(game.window.as_ref().unwrap().visible.get());
 }
 '''
-        fixture = fixture.replace("METHODS", method(source, "capture") + "\n" +
+        # `grab_cursor` (the native one, first in the file) holds the grab attempts.
+        fixture = fixture.replace("METHODS", method(source, "grab_cursor") + "\n" +
+                                  method(source, "capture") + "\n" +
                                   method(source, "capture_loaded_world"))
         with tempfile.TemporaryDirectory(prefix="horizon-input-") as folder:
             folder = Path(folder)
