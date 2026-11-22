@@ -203,6 +203,7 @@ impl Renderer {
             bytemuck::cast_slice(&sky_vertices(frame.sky.sky_color)),
         );
         pack.frames = pack.frames.wrapping_add(1);
+        pack.images.clear(&self.device, encoder);
         if fresh {
             let initial = pack.schedule.initial_clears.clone();
             pack.clear(encoder, &initial, counts.fog_color);

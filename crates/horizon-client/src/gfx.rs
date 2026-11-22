@@ -3301,6 +3301,12 @@ impl Renderer {
             max_draw_buffers: limits.max_color_attachments,
             max_attachment_bytes: limits.max_color_attachment_bytes_per_sample,
             terrain_textures: self.sprite_host.sprite_arrays.clamp(1, 8) + 1,
+            max_storage_textures: limits.max_storage_textures_per_shader_stage,
+            vertex_storage_writes: self
+                .device
+                .features()
+                .contains(wgpu::Features::VERTEX_WRITABLE_STORAGE),
+            read_write_storage: glsl_pack::read_write_storage(&self.adapter, &self.device),
             ..self.sprite_host
         }
     }
