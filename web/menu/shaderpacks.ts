@@ -304,7 +304,7 @@ export function installHooks({ installFile, onChanged, notice, acceptsDrop }: Ho
   const addFiles = async (files: Iterable<File>) => {
     let added = 0;
     for (const file of files) {
-      if (!isZip(file)) { console.info(`Ignored ${file.name}: shader packs are .zip files`); continue; }
+      if (!isZip(file)) { say(`Not added: ${file.name} is not a .zip file.`); continue; }
       if (file.size > MAX_PACK_BYTES) {
         say(`Not added: ${file.name} is larger than ${MAX_PACK_BYTES >> 20} MB.`);
         continue;
@@ -319,7 +319,7 @@ export function installHooks({ installFile, onChanged, notice, acceptsDrop }: Ho
       }
       installFile(path, bytes);
       added++;
-      await writeFile(path, bytes).catch((error: unknown) => {
+      await writeFile(path, bytes).then(() => say(`Added shader pack ${sanitizeName(file.name)}.`), (error: unknown) => {
         console.warn(`Keeping ${path} failed`, error);
         say(`${file.name} could not be stored in this browser (${message(error)}): it will be gone after a reload.`);
       });
@@ -373,7 +373,10 @@ export function installHooks({ installFile, onChanged, notice, acceptsDrop }: Ho
     if (!hasFiles(event)) return;
     // Never opened by the browser; taken only on the game's Shader Packs page.
     event.preventDefault();
-    if (acceptsDrop && !acceptsDrop()) { console.info("Ignored a drop: open Shader Packs to add a pack"); return; }
+    if (acceptsDrop && !acceptsDrop()) {
+      say("Not added: drop shader packs on Options > Horizon Settings > Shader Packs.");
+      return;
+    }
     void addFiles([...event.dataTransfer!.files]);
   };
   addEventListener("dragover", dragover);
