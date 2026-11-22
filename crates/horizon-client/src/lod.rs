@@ -1671,6 +1671,7 @@ mod tests {
             assets: assets.clone(),
             render,
             biomes: biomes.clone(),
+            pack: None,
         });
         let source = Arc::new(TestTerrain::new(assets.registry, &biomes)?);
         let mut lod = Lod::new(source, context);

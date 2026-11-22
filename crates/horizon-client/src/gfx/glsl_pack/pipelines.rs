@@ -3,7 +3,9 @@
 //! fixed-function state of its slot (blending, depth, culling).
 
 use horizon_glsl_pack::host::Geometry;
-use horizon_glsl_pack::{CompiledProgram, ProgramKind, SamplerKind, TextureBinding, TextureSource};
+use horizon_glsl_pack::{
+    CompiledProgram, ProgramKind, SampleKind, SamplerKind, TexDim, TextureBinding, TextureSource,
+};
 
 /// A pipeline and what its bind group 1 must hold.
 pub(super) struct Program {
@@ -27,11 +29,14 @@ pub(super) struct Layouts<'a> {
     pub shadow_color: &'a dyn Fn(u8) -> wgpu::TextureFormat,
     /// The world view's format (`final` draws into it).
     pub screen: wgpu::TextureFormat,
+    /// The pack has custom uniforms: every group 1 has their block at
+    /// binding 1.
+    pub custom_uniforms: bool,
 }
 
-fn uniform_entry() -> wgpu::BindGroupLayoutEntry {
+fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
-        binding: 0,
+        binding,
         visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
         ty: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
@@ -48,6 +53,21 @@ pub(super) fn is_depth(source: &TextureSource) -> bool {
         source,
         TextureSource::Depth(_) | TextureSource::ShadowTex(_) | TextureSource::ShadowTexMips(_)
     )
+}
+
+/// A binding's texel type: depth for compared reads, integers as they are,
+/// floats filterable only when sampled with a filtering sampler (depth
+/// textures and 32-bit float formats are read with point samplers).
+fn sample_type(t: &TextureBinding) -> wgpu::TextureSampleType {
+    match t.sample {
+        SampleKind::Depth => wgpu::TextureSampleType::Depth,
+        SampleKind::Sint => wgpu::TextureSampleType::Sint,
+        SampleKind::Uint => wgpu::TextureSampleType::Uint,
+        SampleKind::Float => wgpu::TextureSampleType::Float {
+            filterable: !is_depth(&t.source)
+                && !matches!(t.sampler, SamplerKind::Point | SamplerKind::PointRepeat),
+        },
+    }
 }
 
 fn stages(vertex: bool, fragment: bool) -> wgpu::ShaderStages {
@@ -73,12 +93,12 @@ fn blend(kind: ProgramKind) -> Option<wgpu::BlendState> {
         alpha: BlendComponent::OVER,
     };
     match kind {
-        ProgramKind::Shadow
-        | ProgramKind::ShadowEntities
-        | ProgramKind::Terrain
-        | ProgramKind::Deferred(_)
-        | ProgramKind::Composite(_)
-        | ProgramKind::Final => None,
+        // Full-screen passes (`prepare`, `deferred`, `composite`, `final`)
+        // write their outputs as they are: a pass that stores alpha 0 (Bloop's
+        // `prepare2` keeps last frame's cloud alpha there) must still write
+        // its colour.
+        k if k.is_fullscreen() => None,
+        ProgramKind::Shadow | ProgramKind::ShadowEntities | ProgramKind::Terrain => None,
         ProgramKind::SkyTextured | ProgramKind::ArmorGlint => Some(additive),
         ProgramKind::DamagedBlock => Some(BlendState {
             color: BlendComponent {
@@ -92,38 +112,90 @@ fn blend(kind: ProgramKind) -> Option<wgpu::BlendState> {
     }
 }
 
-fn blendable(format: wgpu::TextureFormat) -> bool {
-    !matches!(
+/// A `blend.<program>[.<buffer>]` setting as wgpu state (`None`: off).
+fn pack_blend(blend: horizon_glsl_pack::plan::Blend) -> Option<wgpu::BlendState> {
+    use horizon_glsl_pack::plan::{Blend, BlendFactor as P};
+    use wgpu::{BlendComponent, BlendFactor as F, BlendOperation as Op};
+    let factor = |f: P| match f {
+        P::Zero => F::Zero,
+        P::One => F::One,
+        P::SrcColor => F::Src,
+        P::OneMinusSrcColor => F::OneMinusSrc,
+        P::DstColor => F::Dst,
+        P::OneMinusDstColor => F::OneMinusDst,
+        P::SrcAlpha => F::SrcAlpha,
+        P::OneMinusSrcAlpha => F::OneMinusSrcAlpha,
+        P::DstAlpha => F::DstAlpha,
+        P::OneMinusDstAlpha => F::OneMinusDstAlpha,
+        P::SrcAlphaSaturate => F::SrcAlphaSaturated,
+    };
+    match blend {
+        Blend::Off => None,
+        Blend::On {
+            src,
+            dst,
+            src_alpha,
+            dst_alpha,
+        } => Some(wgpu::BlendState {
+            color: BlendComponent {
+                src_factor: factor(src),
+                dst_factor: factor(dst),
+                operation: Op::Add,
+            },
+            alpha: BlendComponent {
+                src_factor: factor(src_alpha),
+                dst_factor: factor(dst_alpha),
+                operation: Op::Add,
+            },
+        }),
+    }
+}
+
+/// Whether pipelines may blend into `format`: never into integer targets, and
+/// into 32-bit float targets in the browser only with `FLOAT32_BLENDABLE`
+/// (WebGPU rejects the pipeline otherwise).
+fn blendable(format: wgpu::TextureFormat, features: wgpu::Features) -> bool {
+    if cfg!(not(target_arch = "wasm32")) {
+        return true;
+    }
+    let integer = matches!(
+        format.sample_type(None, None),
+        Some(wgpu::TextureSampleType::Sint | wgpu::TextureSampleType::Uint)
+    );
+    let float32 = matches!(
         format,
         wgpu::TextureFormat::R32Float
             | wgpu::TextureFormat::Rg32Float
             | wgpu::TextureFormat::Rgba32Float
-    ) || cfg!(not(target_arch = "wasm32"))
+    );
+    !integer && (!float32 || features.contains(wgpu::Features::FLOAT32_BLENDABLE))
 }
 
 pub(super) fn build(
     device: &wgpu::Device,
     kind: ProgramKind,
     program: &CompiledProgram,
+    state: &horizon_glsl_pack::plan::ProgramState,
     layouts: &Layouts,
 ) -> Result<Program, String> {
     let geometry = kind.geometry();
-    let mut entries = vec![uniform_entry()];
+    let mut entries = vec![uniform_entry(0)];
+    if layouts.custom_uniforms {
+        entries.push(uniform_entry(
+            horizon_glsl_pack::custom_uniforms::CUSTOM_BINDING,
+        ));
+    }
     let mut samplers: Vec<SamplerKind> = Vec::new();
     for t in &program.textures {
-        let compare = t.sampler == SamplerKind::Compare;
-        let filterable = !is_depth(&t.source)
-            && !matches!(t.sampler, SamplerKind::Point | SamplerKind::PointRepeat);
         entries.push(wgpu::BindGroupLayoutEntry {
             binding: t.binding,
             visibility: stages(t.vertex, t.fragment),
             ty: wgpu::BindingType::Texture {
-                sample_type: if compare {
-                    wgpu::TextureSampleType::Depth
-                } else {
-                    wgpu::TextureSampleType::Float { filterable }
+                sample_type: sample_type(t),
+                view_dimension: match t.dimension {
+                    TexDim::D2 => wgpu::TextureViewDimension::D2,
+                    TexDim::D3 => wgpu::TextureViewDimension::D3,
                 },
-                view_dimension: wgpu::TextureViewDimension::D2,
                 multisampled: false,
             },
             count: None,
@@ -167,6 +239,8 @@ pub(super) fn build(
         ..Default::default()
     });
     let instance_attributes = wgpu::vertex_attr_array![5=>Float32x4];
+    // mid_uv, (block, cell), normal with emission: the host's `TERRAIN_INPUTS`.
+    let pack_attributes = wgpu::vertex_attr_array![6=>Uint16x2,7=>Uint16x2,8=>Snorm8x4];
     let entity_attributes = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Uint32,3=>Unorm8x4,4=>Uint8x4,5=>Snorm8x4];
     let buffers: Vec<Option<wgpu::VertexBufferLayout>> = match geometry {
         Geometry::Terrain => vec![
@@ -179,6 +253,12 @@ pub(super) fn build(
                 array_stride: 16,
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: &instance_attributes,
+            }),
+            // The arena's `PackVertex` stream (`Renderer::set_pack_vertex_stream`).
+            Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<crate::mesher::PackVertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &pack_attributes,
             }),
         ],
         Geometry::Entity => vec![Some(wgpu::VertexBufferLayout {
@@ -205,9 +285,11 @@ pub(super) fn build(
             } else {
                 (layouts.color)(i)
             };
+            // `blend.<program>[.<buffer>]` wins over the slot's default.
+            let blend = state.blend_of(i).map_or(blend, pack_blend);
             Some(wgpu::ColorTargetState {
                 format,
-                blend: blend.filter(|_| blendable(format)),
+                blend: blend.filter(|_| blendable(format, device.features())),
                 write_mask: wgpu::ColorWrites::ALL,
             })
         })
@@ -277,6 +359,13 @@ pub(super) fn build(
             },
             cull_mode: (kind == ProgramKind::Terrain || kind == ProgramKind::Water)
                 .then_some(wgpu::Face::Back),
+            // The host negates clip y (targets are stored bottom row first), which
+            // mirrors the winding; `final` alone draws upright.
+            front_face: if kind == ProgramKind::Final {
+                wgpu::FrontFace::Ccw
+            } else {
+                wgpu::FrontFace::Cw
+            },
             ..Default::default()
         },
         depth_stencil,
@@ -337,4 +426,26 @@ pub(super) fn samplers(device: &wgpu::Device) -> Vec<wgpu::Sampler> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_screen_passes_do_not_blend() {
+        for kind in [
+            ProgramKind::Prepare(0),
+            ProgramKind::Prepare(2),
+            ProgramKind::Deferred(0),
+            ProgramKind::Composite(5),
+            ProgramKind::Final,
+        ] {
+            assert_eq!(blend(kind), None, "{kind:?}");
+        }
+        assert_eq!(
+            blend(ProgramKind::Water),
+            Some(wgpu::BlendState::ALPHA_BLENDING)
+        );
+    }
 }

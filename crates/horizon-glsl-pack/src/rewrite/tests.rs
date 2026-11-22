@@ -45,6 +45,10 @@ fn naga(rw: &Rewritten, stage: Stage) -> String {
         };
         s += &format!("{ty} {f}({sig}) {{ return {ret}; }}\n");
     }
+    if rw.body.contains("hz_dFdy") {
+        // The real host declares it per program (fragment.rs).
+        s += "const float hz_dFdy_sign = 1.0;\n";
+    }
     let write_out = stage == Stage::Fragment && rw.builtins.contains("hz_gl_FragData");
     if write_out {
         s += "layout(location = 0) out vec4 hz_out0;\n";
@@ -254,6 +258,35 @@ fn sampler_parameters_are_monomorphised() {
     naga(&rw, Stage::Fragment);
 }
 
+/// BSL Classic: `f(sampler2D, vec3)` beside `f(sampler2DShadow, vec3)`; a
+/// shadow sampler takes the shadow overload only.
+#[test]
+fn sampler_overloads_by_sampler_type() {
+    let src = "uniform sampler2DShadow shadowtex0;
+uniform sampler2D colortex0;
+float get(sampler2D t, vec2 p, float z) { return clamp((texture2D(t, p).x - z) * 64.0, 0.0, 1.0); }
+float soft(sampler2D t, vec3 p) { return get(t, p.xy, p.z); }
+float soft(sampler2DShadow t, vec3 p) { return shadow2D(t, p).x; }
+varying vec3 pos;
+void main() { gl_FragColor = vec4(soft(shadowtex0, pos) + soft(colortex0, pos)); }
+";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert_eq!(
+        rw.body.matches("float soft_hz_shadowtex0(").count(),
+        1,
+        "{}",
+        rw.body
+    );
+    assert_eq!(
+        rw.body.matches("float soft_hz_colortex0(").count(),
+        1,
+        "{}",
+        rw.body
+    );
+    assert!(!rw.body.contains("get_hz_shadowtex0"), "{}", rw.body);
+    naga(&rw, Stage::Fragment);
+}
+
 const FORMS: &str = "uniform sampler2D normals;
 uniform sampler2DShadow shadow;
 varying vec4 uv;
@@ -356,7 +389,11 @@ fn unsupported_input_is_an_error() {
             "uniform sampler2D s;\nvoid main() { texture3D(s, vec3(0.0)); }",
             "passed to `texture3D`",
         ),
-        ("void main() { gl_TexCoord[0] = vec4(0.0); }", "gl_TexCoord"),
+        // Literal indices are supported (compat.rs), computed ones are not.
+        (
+            "void main() { int i = 0; gl_TexCoord[i] = vec4(0.0); }",
+            "gl_TexCoord",
+        ),
         ("uniform sampler2D s[2];", "sampler array"),
         ("void main() { {", "unbalanced"),
     ];
@@ -524,7 +561,7 @@ void main() {
 }
 
 #[test]
-fn dfdy_is_negated_in_fragment_shaders() {
+fn dfdy_follows_gl_window_y() {
     let fs = "varying vec3 viewPos;\nvoid main() {\n    vec3 n = normalize(cross(dFdx(viewPos), dFdy(viewPos)));\n    \
               float w = 1.0-dFdy(viewPos.x);\n    gl_FragData[0] = vec4(n, w);\n}\n";
     let rw = rewrite(fs, Stage::Fragment).unwrap();
@@ -535,7 +572,7 @@ fn dfdy_is_negated_in_fragment_shaders() {
     );
     assert!(
         rw.body
-            .contains("vec3 hz_dFdy(vec3 v) { return -dFdy(v); }"),
+            .contains("vec3 hz_dFdy(vec3 v) { return hz_dFdy_sign * dFdy(v); }"),
         "{}",
         rw.body
     );
@@ -543,4 +580,209 @@ fn dfdy_is_negated_in_fragment_shaders() {
     // Vertex shaders have no derivatives to fix.
     let vs = "void main() { gl_Position = vec4(0.0); }\n";
     assert!(!rewrite(vs, Stage::Vertex).unwrap().body.contains("hz_dFdy"));
+}
+
+#[test]
+fn sampler_types_and_tagged_calls() {
+    let src = "uniform sampler3D vol;\nuniform usampler2D ids;\nuniform sampler2DShadow sh;\nuniform samplerCube sky;\n\
+               void main() {\n    vec4 a = texture3D(vol, vec3(0.5)) + texelFetchOffset(vol, ivec3(1), 0, ivec3(1));\n    \
+               uvec4 b = texture(ids, vec2(0.5));\n    float s = texture(sh, vec3(0.5));\n    \
+               vec4 t = shadow2D(sh, vec3(0.5));\n    float u = texture(sh, vec3(0.5)).x;\n}\n";
+    let out = rewrite(src, Stage::Fragment).unwrap();
+    assert_eq!(out.sampler_types["vol"], "sampler3D");
+    assert_eq!(out.sampler_types["sky"], "samplerCube");
+    assert_eq!(
+        out.sample_calls,
+        set(&[
+            "hz_fetch_3_vol",
+            "hz_sample_2u_ids",
+            "hz_sample_3_vol",
+            "hz_shadow_sh"
+        ])
+    );
+    // The fetch offset is added to the coordinate; modern shadow reads are scalars.
+    assert!(
+        out.body
+            .contains("hz_fetch_3_vol((( ivec3(1)) + ( ivec3(1))), 0)"),
+        "{}",
+        out.body
+    );
+    assert!(
+        out.body.contains("float s = hz_shadow_sh( vec3(0.5)).x;"),
+        "{}",
+        out.body
+    );
+    assert!(
+        out.body.contains("vec4 t = hz_shadow_sh( vec3(0.5));"),
+        "{}",
+        out.body
+    );
+    assert!(
+        out.body.contains("float u = hz_shadow_sh( vec3(0.5)).x;"),
+        "{}",
+        out.body
+    );
+    let parsed = crate::host::parse_sampling_call("hz_sample_2u_ids").unwrap();
+    assert_eq!(
+        (parsed.op, parsed.dim, parsed.sample, parsed.name),
+        (
+            "hz_sample_",
+            crate::TexDim::D2,
+            crate::SampleKind::Uint,
+            "ids"
+        )
+    );
+}
+
+#[test]
+fn a_plain_overload_beside_a_sampler_one() {
+    let src = "uniform sampler2D colortex9;\nvec3 f(vec3 p, bool lod) { return p; }\n\
+               vec3 f(vec3 p, sampler2D v) { return texelFetch(v, ivec2(p.xy), 0).xyz + f(p, false); }\n\
+               void main() { gl_FragData[0] = vec4(f(vec3(0.5), colortex9) + f(vec3(0.5), true), 1.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(rw.body.contains("f_hz_colortex9("), "{}", rw.body);
+    assert!(rw.body.contains("f(vec3(0.5), true)"), "{}", rw.body);
+}
+
+#[test]
+fn uniform_initializers() {
+    // GLSL 330: Horizon's value wins for its own uniforms; others keep the pack's value.
+    let src = "uniform float viewWidth = 1.0, heavyFog = max(0.25, 0.5);\n\
+               uniform vec2 offset = vec2(1.0, -2.0);\n\
+               out vec4 color;\n\
+               void main() { color = vec4(viewWidth, heavyFog, offset); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    let names: Vec<_> = rw.uniforms.iter().map(|u| u.name.as_str()).collect();
+    assert_eq!(names, ["viewWidth"], "{}", rw.body);
+    assert!(
+        rw.body.contains("float heavyFog = max ( 0.25 , 0.5 );"),
+        "{}",
+        rw.body
+    );
+    assert!(
+        rw.body.contains("vec2 offset = vec2 ( 1.0 , - 2.0 );"),
+        "{}",
+        rw.body
+    );
+    naga(&rw, Stage::Fragment);
+}
+
+#[test]
+fn modf_and_frexp_are_polyfilled() {
+    let src = "varying vec2 uv;\n\
+               void main() { float i, f = modf(uv.x, i); vec2 w; vec2 g = modf(uv, w); ivec3 e;\n\
+               vec3 m = frexp(vec3(uv, 1.0), e); gl_FragData[0] = vec4(f + i, g + w, 0.0) + vec4(m, e.x); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(rw.body.contains("hz_modf(uv.x, i)"), "{}", rw.body);
+    naga(&rw, Stage::Fragment);
+    // A pack's own `modf` stays.
+    let own = "float modf(float x, float y) { return x; }\nvoid main() { gl_FragData[0] = vec4(modf(1.0, 2.0)); }\n";
+    assert!(
+        !rewrite(own, Stage::Fragment)
+            .unwrap()
+            .body
+            .contains("hz_modf")
+    );
+}
+
+#[test]
+fn not_equal_is_polyfilled() {
+    // `notEqual` as `not(equal(...))`: true for NaN components, as in GLSL.
+    let src = "varying vec2 uv;\n\
+               void main() { bvec2 a = notEqual(uv, vec2(0.5)); bvec3 b = notEqual(ivec3(uv, 1), ivec3(0));\n\
+               gl_FragData[0] = vec4(any(a) ? 1.0 : 0.0, b.z ? 1.0 : 0.0, 0.0, 1.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(
+        rw.body.contains("hz_notEqual(uv, vec2(0.5))"),
+        "{}",
+        rw.body
+    );
+    let wgsl = naga(&rw, Stage::Fragment);
+    assert!(!wgsl.contains("!="), "{wgsl}");
+}
+
+#[test]
+fn isnan_and_isinf_are_polyfilled() {
+    let src = "varying vec3 c;\n\
+               void main() { bool a = isnan(c.x) || isinf(c.y); bvec3 b = isnan(c);\n\
+               gl_FragData[0] = vec4(a || any(b) || any(isinf(vec2(c))) ? 1.0 : 0.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(
+        rw.body.contains("hz_isnan(c.x) || hz_isinf(c.y)"),
+        "{}",
+        rw.body
+    );
+    // The WGSL writer, which has no `isnan`, takes it.
+    naga(&rw, Stage::Fragment);
+}
+
+#[test]
+fn struct_varyings_are_declared_after_their_struct() {
+    let src = "struct Fog { vec3 color; float density; };\nflat varying Fog fog;\n\
+               void main() { gl_FragData[0] = vec4(fog.color, fog.density); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert_eq!(rw.varyings[0].ty, "Fog");
+    assert!(
+        rw.body
+            .contains("struct Fog { vec3 color; float density; }; Fog fog;"),
+        "{}",
+        rw.body
+    );
+}
+
+#[test]
+fn functions_returning_arrays() {
+    let src = "vec3[2] f(vec3[2] a, vec3 k) { vec3 m = k; return vec3[2](a[0] * m, a[1]); }\n\
+               void main() { if (true) { } { } vec3[2] q = f(vec3[2](vec3(0.0), vec3(1.0)), vec3(1.0)); \
+               gl_FragData[0] = vec4(q[0], 1.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(
+        rw.body.contains("vec3[2] f(vec3[2] a, vec3 k)"),
+        "{}",
+        rw.body
+    );
+    naga(&rw, Stage::Fragment);
+}
+
+#[test]
+fn vertex_id_is_an_int() {
+    let src = "int f(int i) { return i % 2; }\nvoid main() { gl_Position = vec4(float(f(gl_VertexID)), 0.0, 0.0, 1.0); }\n";
+    let rw = rewrite(src, Stage::Vertex).unwrap();
+    assert!(rw.body.contains("f(int(gl_VertexIndex))"), "{}", rw.body);
+}
+/// Arc: GLSL 4.30's `textureQueryLevels` on a pack buffer, and the
+/// pack's own fallback of the same name (with no `MC_GL_ARB_texture_query_levels`).
+#[test]
+fn texture_query_levels() {
+    let src = "uniform sampler2D colortex5;
+varying vec2 uv;
+void main() { gl_FragColor = vec4(float(textureQueryLevels(colortex5) - 1)); }
+";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(rw.body.contains("hz_levels_colortex5()"), "{}", rw.body);
+    let fallback = "uniform sampler2D colortex5;
+int textureQueryLevels(sampler2D s) { ivec2 t = textureSize(s, 0); return int(log2(float(min(t.x, t.y))) + 1.0); }
+varying vec2 uv;
+void main() { gl_FragColor = vec4(float(textureQueryLevels(colortex5) - 1)); }
+";
+    let rw = rewrite(fallback, Stage::Fragment).unwrap();
+    assert!(
+        rw.body.contains("textureQueryLevels_hz_colortex5()"),
+        "{}",
+        rw.body
+    );
+}
+
+#[test]
+fn a_sampler_declared_below_its_first_use() {
+    let src = "vec3 sky(sampler2D s) { return texture2D(s, vec2(0.5)).rgb; }\n\
+               vec3 g() { return sky(colortex4); }\n\
+               uniform sampler2D colortex4;\n\
+               void main() { gl_FragData[0] = vec4(g(), 1.0); }\n";
+    let rw = rewrite(src, Stage::Fragment).unwrap();
+    assert!(
+        rw.sample_calls.contains("hz_sample_colortex4"),
+        "{}",
+        rw.body
+    );
 }

@@ -76,6 +76,7 @@ void hz_pack_main() {
             "hz_gl_FogFragCoord",
         ]),
         sample_calls: set(&["hz_sample_gtexture", "hz_sample_lightmap", "hz_fetch_lightmap", "hz_size_lightmap"]),
+        ..Default::default()
     };
     // The fragment stage skips `level`; `weights` has an array.
     varyings.retain(|v| v.name != "level");
@@ -248,6 +249,15 @@ fn locations_are_sorted_and_limited() {
             ..vertex
         },
         Rewritten {
+            // The fragment stage reads them all (unread varyings get no location).
+            body: format!(
+                "{}\nfloat hz_sum() {{ return {}; }}\n",
+                fragment.body,
+                (0..16)
+                    .map(|i| format!("v{i}"))
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            ),
             varyings: many,
             builtins: set(&[]),
             ..fragment
@@ -300,7 +310,7 @@ fn unknown_uniforms_are_zero_and_mistyped_ones_fail() {
     assert!(out.fragment.contains("vec3 hz_test_unknown;"));
     glsl_to_wgsl(&out.fragment, Stage::Fragment)
         .unwrap_or_else(|e| panic!("{e}\n{}", out.fragment));
-    let err = sources(&vertex, &with(&[("worldTime", "float")]), &spec).unwrap_err();
+    let err = sources(&vertex, &with(&[("worldTime", "mat4")]), &spec).unwrap_err();
     assert!(err.contains("worldTime"), "{err}");
 }
 
@@ -384,10 +394,10 @@ fn gl_convention_round_trips() {
         [0.0, 0.0, near / (far - near), -1.0],
         [0.0, 0.0, near * far / (far - near), 0.0],
     ];
-    // hz_to_gl as a matrix: (x, -y, w - 2z, w).
+    // hz_to_gl as a matrix: (x, y, w - 2z, w).
     let m: Mat = [
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, -1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
         [0.0, 0.0, -2.0, 0.0],
         [0.0, 0.0, 1.0, 1.0],
     ];
@@ -395,7 +405,9 @@ fn gl_convention_round_trips() {
     for view in [[0.3, -1.2, -4.0], [-20.0, 7.5, -300.0], [0.0, 0.0, -0.06]] {
         let clip = apply(&p, [view[0], view[1], view[2], 1.0]);
         let ndc = [clip[0] / clip[3], clip[1] / clip[3], clip[2] / clip[3]];
-        let uv_down = [0.5 * ndc[0] + 0.5, 0.5 - 0.5 * ndc[1]];
+        // The host draws with y negated, so the pixel's row from the target's
+        // first row is GL's t, as GL stores images (bottom row first).
+        let uv_down = [0.5 * ndc[0] + 0.5, 0.5 + 0.5 * ndc[1]];
         let d = ndc[2];
         assert!((0.0..=1.0).contains(&d));
         // The pack's screen2view on what the host hands it.
@@ -524,6 +536,7 @@ fn entity_geometry_reads_horizon_s_entity_vertex() {
         stage: crate::plan::TextureStage::Gbuffers,
         sampler: "colortex4".into(),
         path: "shaders/textures/a.png".into(),
+        ..Default::default()
     });
     plan.buffers[2].format = crate::plan::BufferFormat::Rgba16F;
     let (out, vs, fs) = run(ProgramKind::Entities, &plan, &[0, 2], &entity_program());
@@ -558,6 +571,8 @@ fn entity_geometry_reads_horizon_s_entity_vertex() {
             binding: 6,
             source: TextureSource::Custom(0),
             sampler: SamplerKind::PointRepeat,
+            dimension: crate::TexDim::D2,
+            sample: crate::SampleKind::Float,
             vertex: false,
             fragment: true,
         }]
@@ -566,7 +581,8 @@ fn entity_geometry_reads_horizon_s_entity_vertex() {
     // Entities' alpha test, unorm output 0 and float output 1.
     assert!(out.fragment.contains("a > 0.1)"));
     assert!(out.fragment.contains("hz_out_0 = hz_unorm("));
-    assert!(out.fragment.contains("hz_out_1 = hz_finite("));
+    // A float target keeps NaN and infinities, as GL's do.
+    assert!(out.fragment.contains("hz_out_1 = hz_gl_FragData[1];"));
     assert!(out.fragment.contains("1.0 - gl_FragCoord.z"));
     // Projection per pass.
     assert!(
@@ -623,6 +639,7 @@ fn sampling_kinds_follow_the_plan() {
         stage: crate::plan::TextureStage::Composite,
         sampler: "colortex4".into(),
         path: "shaders/textures/a.png".into(),
+        ..Default::default()
     });
     let calls = [
         "hz_shadow_shadow",
@@ -656,7 +673,7 @@ fn sampling_kinds_follow_the_plan() {
     assert_eq!(
         got,
         vec![
-            (2, Buffer(0), SamplerKind::Linear),
+            // `mysteryTexture` reads a 1×1 default, not colortex0.
             (3, Buffer(1), SamplerKind::Point),
             (4, Buffer(2), SamplerKind::Linear),
             // An earlier composite wrote colortex4: the custom texture no longer applies.
@@ -682,8 +699,8 @@ fn sampling_kinds_follow_the_plan() {
     assert!(out.fragment.contains("hz_bilinear_3("));
     assert!(out.fragment.contains("hz_trilinear_31("));
     assert!(out.fragment.contains("hz_lod_8(dFdx(uv), dFdy(uv)) + bias"));
-    // Output 1 is the R11G11B10F colortex5: a float target.
-    assert!(out.fragment.contains("hz_out_1 = hz_finite("));
+    // Output 1 is the R11G11B10F colortex5: a float target, written as is.
+    assert!(out.fragment.contains("hz_out_1 = hz_gl_FragData[1];"));
     assert!(!out.fragment.contains("discard"));
 
     // Before the pass that turns them on, colortex6 has no mip sampling; the custom texture applies.
@@ -791,4 +808,275 @@ fn sprite_grad_and_bias() {
         program.1.sample_calls.insert("hz_sampleBias_tex".into());
         compile(ProgramKind::Terrain, &host, &program);
     }
+}
+
+/// A terrain vertex stage reading every attribute of the pack stream.
+fn pack_stream_program() -> (Rewritten, Rewritten) {
+    let (mut vertex, fragment) = terrain_program();
+    vertex.attributes = vec![
+        var("mc_Entity", "vec2", false),
+        var("mc_midTexCoord", "vec2", false),
+        var("at_midBlock", "vec4", false),
+        var("at_tangent", "vec4", false),
+    ];
+    vertex.body = vertex.body.replace(
+        "    level = int(at_midBlock.w);",
+        "    level = int(at_midBlock.w + at_midBlock.x + mc_Entity.y);
+    normal += at_tangent.xyz + vec3(mc_midTexCoord, 0.0);",
+    );
+    (vertex, fragment)
+}
+
+#[test]
+fn terrain_reads_the_pack_vertex_stream() {
+    for kind in [ProgramKind::Terrain, ProgramKind::Shadow] {
+        let (out, vs, _) = run(kind, &PackPlan::default(), &[0], &pack_stream_program());
+        // Slot 2's attributes, as the client's pipelines lay them out.
+        for input in [
+            "@location(6) hz_in_mid_uv: vec2<u32>",
+            "@location(7) hz_in_block: vec2<u32>",
+            "@location(8) hz_in_normal: vec4<f32>",
+        ] {
+            assert!(vs.contains(input), "{kind:?} {input}\n{vs}");
+        }
+        for line in [
+            // block.properties' unlisted id is 0; the fluid bit is mc_Entity.y.
+            "mc_Entity = vec2(vec4(hz_in_block.x == 65535u ? 0.0 : float(hz_in_block.x), \
+             (hz_in_block.y & 4096u) != 0u ? 1.0 : 0.0, 0.0, 1.0).xy);",
+            // The same transform as gl_MultiTexCoord0's.
+            "mc_midTexCoord = vec2(vec4(vec2(hz_in_mid_uv) * hz_in_origin.w, 0.0, 1.0).xy);",
+            "round(hz_in_normal.w * 127.0)",
+            "(hz_in_block.y & 8192u) != 0u ? vec3(0.0)",
+            "at_tangent = vec4(hz_terrain_tangent(",
+            "hz_gl_Normal = dot(hz_in_normal.xyz, hz_in_normal.xyz) > 0.01 ? normalize(hz_in_normal.xyz)",
+        ] {
+            assert!(out.vertex.contains(line), "{kind:?} {line}\n{}", out.vertex);
+        }
+        // No alpha tag is read any more.
+        assert!(!out.vertex.contains("hz_in_color.a"), "{}", out.vertex);
+    }
+}
+
+#[test]
+fn converted_and_custom_uniforms() {
+    let blocks = BlockIds::default();
+    let entries: Vec<(String, String)> = [
+        ("uniform.float.sunHeight", "sin(sunAngle)"),
+        ("uniform.bool.flag", "true"),
+        ("uniform.vec3.tint", "vec3(1, 0.5, 0.25)"),
+        ("uniform.float.asInt", "2.0"),
+        ("variable.float.hidden", "1"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let plan = PackPlan {
+        custom_uniforms: crate::custom_uniforms::CustomUniforms::parse(&entries),
+        ..PackPlan::default()
+    };
+    let spec = ProgramSpec {
+        kind: ProgramKind::Final,
+        geometry: Geometry::Fullscreen,
+        draw_buffers: &[0],
+        host: &HostParams::default(),
+        blocks: &blocks,
+        plan: &plan,
+    };
+    let (vertex, mut fragment) = final_program();
+    fragment.uniforms = uniforms(&[
+        ("worldTime", "float"),
+        ("is_sneaking", "bool"),
+        ("cameraPosition", "ivec3"),
+        ("sunHeight", "float"),
+        ("flag", "bool"),
+        ("tint", "vec3"),
+        ("asInt", "int"),
+        ("hidden", "float"),
+        ("notThere", "float"),
+    ]);
+    fragment.body = fragment.body.replace(
+        "hz_gl_FragData[0] = color",
+        "float k = worldTime / 24000.0 + float(cameraPosition.y) + sunHeight + float(asInt) + hidden + notThere;\n    \
+         if (is_sneaking && flag) { k += 1.0; }\n    hz_gl_FragData[0] = vec4(tint * k, 1.0) + color",
+    );
+    let out = program_sources(&vertex, &fragment, &spec).unwrap();
+    // Variables are not uploaded: `hidden` reads 0 like any unknown name.
+    assert_eq!(out.unknown_uniforms, set(&["hidden", "notThere"]));
+    let fs = &out.fragment;
+    for line in [
+        "int hz_b_worldTime;",
+        "#define worldTime float(hz_b_worldTime)",
+        "#define is_sneaking bool(hz_b_is_sneaking)",
+        "#define cameraPosition ivec3(hz_b_cameraPosition)",
+        "layout(std140, set = 1, binding = 1) uniform HzCustomUniforms",
+        "#define sunHeight hz_c_sunHeight",
+        "#define flag bool(hz_c_flag)",
+        "#define asInt int(hz_c_asInt)",
+        "float notThere;",
+    ] {
+        assert!(fs.contains(line), "{line}\n{fs}");
+    }
+    let wgsl = glsl_to_wgsl(fs, Stage::Fragment).unwrap_or_else(|e| panic!("{e}\n{fs}"));
+    assert!(wgsl.contains("@group(1) @binding(1)"), "{wgsl}");
+    glsl_to_wgsl(&out.vertex, Stage::Vertex).unwrap();
+}
+
+#[test]
+fn entity_geometry_reads_the_atlas_size() {
+    let blocks = BlockIds::default();
+    let plan = PackPlan::default();
+    let host = HostParams::default();
+    let spec = |geometry| ProgramSpec {
+        kind: ProgramKind::Entities,
+        geometry,
+        draw_buffers: &[0],
+        host: &host,
+        blocks: &blocks,
+        plan: &plan,
+    };
+    let (vertex, mut fragment) = final_program();
+    fragment.body = fragment.body.replace(
+        "hz_gl_FragData[0] = color",
+        "hz_gl_FragData[0] = vec4(vec2(atlasSize), vec2(gtextureSize)) + color",
+    );
+    for (ty, geometry) in [
+        ("ivec2", Geometry::Entity),
+        ("vec2", Geometry::Entity),
+        ("ivec2", Geometry::Fullscreen),
+    ] {
+        fragment.uniforms = uniforms(&[("atlasSize", ty), ("gtextureSize", ty)]);
+        let out = program_sources(&vertex, &fragment, &spec(geometry)).unwrap();
+        let entity = geometry == Geometry::Entity;
+        assert_eq!(
+            out.fragment.contains("hz_entityAtlasSize)"),
+            entity && ty == "vec2"
+        );
+        assert_eq!(
+            out.fragment
+                .contains("#define atlasSize hz_entityAtlasSize"),
+            entity
+        );
+        if geometry == Geometry::Fullscreen {
+            glsl_to_wgsl(&out.fragment, Stage::Fragment)
+                .unwrap_or_else(|e| panic!("{e}\n{}", out.fragment));
+        }
+    }
+}
+
+#[test]
+fn targets_are_stored_bottom_up_and_final_is_upright() {
+    let (vertex, fragment) = final_program();
+    let blocks = BlockIds::legacy();
+    let plan = PackPlan::default();
+    let host = HostParams::default();
+    let spec = |kind| ProgramSpec {
+        kind,
+        geometry: kind.geometry(),
+        draw_buffers: &[0],
+        host: &host,
+        blocks: &blocks,
+        plan: &plan,
+    };
+    let composite = program_sources(&vertex, &fragment, &spec(ProgramKind::Composite(0))).unwrap();
+    let last = program_sources(&vertex, &fragment, &spec(ProgramKind::Final)).unwrap();
+    assert!(
+        composite.vertex.contains("vec4(hz_p.x, -hz_p.y,"),
+        "{}",
+        composite.vertex
+    );
+    // Composite passes draw y-negated (bottom row first); `final` draws the upright screen.
+    assert!(
+        last.vertex.contains("vec4(hz_p.x, hz_p.y,"),
+        "{}",
+        last.vertex
+    );
+}
+
+#[test]
+fn gcolor_is_the_atlas_in_gbuffers_programs() {
+    let blocks = BlockIds::default();
+    let plan = PackPlan::default();
+    let host = HostParams::default();
+    let spec = |kind: ProgramKind| ProgramSpec {
+        kind,
+        geometry: kind.geometry(),
+        draw_buffers: &[0],
+        host: &host,
+        blocks: &blocks,
+        plan: &plan,
+    };
+    let (vertex, fragment) = final_program();
+    // `final_program` samples colortex0, gcolor, colortex6 and depthtex0.
+    let entities = program_sources(&vertex, &fragment, &spec(ProgramKind::Entities)).unwrap();
+    assert!(
+        entities.fragment.contains("hz_atlas"),
+        "{}",
+        entities.fragment
+    );
+    let composite = program_sources(&vertex, &fragment, &spec(ProgramKind::Composite(0))).unwrap();
+    assert!(!composite.fragment.contains("hz_atlas"));
+    glsl_to_wgsl(&entities.fragment, Stage::Fragment)
+        .unwrap_or_else(|e| panic!("{e}\n{}", entities.fragment));
+}
+
+#[test]
+fn sixteen_bit_unorm_outputs_keep_whole_steps() {
+    let mut plan = PackPlan::default();
+    plan.buffers[2].format = crate::plan::BufferFormat::Rgb16;
+    let (out, _, fs) = run(ProgramKind::Entities, &plan, &[0, 2], &entity_program());
+    assert!(
+        out.fragment.contains("hz_out_0 = hz_unorm("),
+        "{}",
+        out.fragment
+    );
+    assert!(
+        out.fragment.contains("hz_out_1 = hz_unorm16("),
+        "{}",
+        out.fragment
+    );
+    assert!(fs.contains("fn hz_unorm16"), "{fs}");
+}
+
+/// The nearest half float to a non-negative `x` (round to nearest even is not
+/// needed: no tested value falls on a tie).
+fn to_half(x: f32) -> f32 {
+    if x == 0.0 {
+        return 0.0;
+    }
+    let exponent = x.log2().floor().max(-14.0);
+    let step = (exponent - 10.0).exp2();
+    (x / step).round() * step
+}
+
+/// What `hz_unorm16` writes for step `k` (the GLSL helper, in f32).
+fn unorm16_written(k: u32) -> f32 {
+    if k == 0 {
+        0.0
+    } else {
+        ((k as f32 + 0.25) / 65535.0).min(1.0)
+    }
+}
+
+#[test]
+fn unorm16_writes_decode_to_their_step_on_both_storages() {
+    for k in 0..=65535u32 {
+        let v = unorm16_written(k);
+        // A real 16-bit unorm target rounds to the nearest step.
+        assert_eq!((v * 65535.0).round() as u32, k, "unorm16 {k}");
+    }
+    for k in 0..=512u32 {
+        let read = to_half(unorm16_written(k)) * 65535.0;
+        // Packs decode ids by truncating or by rounding; both give k.
+        assert_eq!(read as u32, k, "half float, int(): {k} read {read}");
+        assert_eq!(
+            read.round() as u32,
+            k,
+            "half float, round(): {k} read {read}"
+        );
+        // Without the quarter step, the half float reads under k.
+        if k > 0 {
+            assert!(to_half(k as f32 / 65535.0) * 65535.0 < k as f32 + 1e-9);
+        }
+    }
+    assert_eq!(to_half(unorm16_written(65535)), 1.0);
 }

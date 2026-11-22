@@ -10,7 +10,7 @@
 
 use super::*;
 use crate::plan::{BufferFormat, TextureStage};
-use crate::{SamplerKind, TextureBinding, TextureSource};
+use crate::{SampleKind, SamplerKind, TexDim, TextureBinding, TextureSource};
 
 /// Group 1 binding of a pack sampler's texture (`colortex0` …), if supported:
 /// `colortex0..15` → 2..17, `depthtex0..2` → 18..20, `shadowtex0..1` → 21..22,
@@ -53,8 +53,9 @@ pub const COMPARE_BINDING: u32 = 28;
 /// `shadowtexN`'s `R32Float` copy with a full mip chain (`shadowtexNMipmap`).
 pub const MIPS_BINDING: u32 = 30;
 
-/// The host sampling operations the rewriter emits, as `<op><sampler>`.
-pub const SAMPLING_OPS: [&str; 8] = [
+/// The host sampling operations the rewriter emits, as `<op>[<tag>]<sampler>`
+/// (see [`sampling_call`]).
+pub const SAMPLING_OPS: [&str; 11] = [
     "hz_sampleLod_",
     "hz_sampleGrad_",
     "hz_sampleBias_",
@@ -63,13 +64,82 @@ pub const SAMPLING_OPS: [&str; 8] = [
     "hz_size_",
     "hz_shadowLod_",
     "hz_shadow_",
+    "hz_gather_",
+    "hz_queryLod_",
+    "hz_levels_",
 ];
 
-/// `hz_sampleLod_colortex0` → `("hz_sampleLod_", "colortex0")`.
-pub fn split_sampling_call(call: &str) -> Option<(&'static str, &str)> {
-    SAMPLING_OPS
+/// A parsed host sampling call: the operation, the sampler's declared
+/// dimension and texel type, and its name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SamplingCall<'a> {
+    pub op: &'static str,
+    pub dim: TexDim,
+    /// `Float` for `sampler2D`, `sampler3D` and `sampler2DShadow`.
+    pub sample: SampleKind,
+    pub name: &'a str,
+}
+
+/// The dimension and texel type of a GLSL sampler type; `None` for the ones
+/// Horizon does not bind (`samplerCube`, `sampler2DArray`, `sampler1D`…).
+pub fn sampler_type(ty: &str) -> Option<(TexDim, SampleKind)> {
+    Some(match ty {
+        "sampler2D" | "sampler2DShadow" => (TexDim::D2, SampleKind::Float),
+        "sampler3D" => (TexDim::D3, SampleKind::Float),
+        "isampler2D" => (TexDim::D2, SampleKind::Sint),
+        "usampler2D" => (TexDim::D2, SampleKind::Uint),
+        "isampler3D" => (TexDim::D3, SampleKind::Sint),
+        "usampler3D" => (TexDim::D3, SampleKind::Uint),
+        _ => return None,
+    })
+}
+
+/// The call's tag between the operation and the name: none for 2D float
+/// samplers, else a tag that starts with a digit (so it cannot be part of a
+/// sampler name): `3_`, `2i_`, `2u_`, `3i_`, `3u_`.
+fn tag(dim: TexDim, sample: SampleKind) -> &'static str {
+    match (dim, sample) {
+        (TexDim::D2, SampleKind::Float | SampleKind::Depth) => "",
+        (TexDim::D3, SampleKind::Float | SampleKind::Depth) => "3_",
+        (TexDim::D2, SampleKind::Sint) => "2i_",
+        (TexDim::D2, SampleKind::Uint) => "2u_",
+        (TexDim::D3, SampleKind::Sint) => "3i_",
+        (TexDim::D3, SampleKind::Uint) => "3u_",
+    }
+}
+
+/// `hz_fetch_` on a `usampler3D ids` → `hz_fetch_3u_ids`.
+pub fn sampling_call(op: &str, dim: TexDim, sample: SampleKind, name: &str) -> String {
+    format!("{op}{}{name}", tag(dim, sample))
+}
+
+/// The inverse of [`sampling_call`].
+pub fn parse_sampling_call(call: &str) -> Option<SamplingCall<'_>> {
+    let (op, rest) = SAMPLING_OPS
         .iter()
-        .find_map(|op| call.strip_prefix(op).map(|name| (*op, name)))
+        .find_map(|op| call.strip_prefix(op).map(|rest| (*op, rest)))?;
+    let tagged = [
+        ("3_", TexDim::D3, SampleKind::Float),
+        ("2i_", TexDim::D2, SampleKind::Sint),
+        ("2u_", TexDim::D2, SampleKind::Uint),
+        ("3i_", TexDim::D3, SampleKind::Sint),
+        ("3u_", TexDim::D3, SampleKind::Uint),
+    ];
+    let (dim, sample, name) = tagged
+        .iter()
+        .find_map(|(t, d, k)| rest.strip_prefix(t).map(|n| (*d, *k, n)))
+        .unwrap_or((TexDim::D2, SampleKind::Float, rest));
+    Some(SamplingCall {
+        op,
+        dim,
+        sample,
+        name,
+    })
+}
+
+/// `hz_sampleLod_colortex0` → `("hz_sampleLod_", "colortex0")` (the tag dropped).
+pub fn split_sampling_call(call: &str) -> Option<(&'static str, &str)> {
+    parse_sampling_call(call).map(|c| (c.op, c.name))
 }
 
 /// The canonical name of a sampler (`gaux1` → `colortex4`, `tex` → `gtexture`).
@@ -107,6 +177,9 @@ pub(super) struct Entry {
     binding: u32,
     source: TextureSource,
     kind: SamplerKind,
+    dim: TexDim,
+    /// The bound texture's texels (`Depth` only for compare reads).
+    sample: SampleKind,
     /// Reads `1 - stored` (reversed Z) as `(d, d, d, 1)`.
     depth: bool,
     /// Sampled through `sampler2DShadow` (a `texture_depth_2d`).
@@ -123,12 +196,44 @@ pub(super) struct Entry {
     snap8: bool,
 }
 
+impl Entry {
+    fn new(binding: u32, source: TextureSource, kind: SamplerKind) -> Self {
+        Self {
+            binding,
+            source,
+            kind,
+            dim: TexDim::D2,
+            sample: SampleKind::Float,
+            depth: false,
+            compare: false,
+            mips: false,
+            manual: false,
+            channels: 4,
+            snap8: false,
+        }
+    }
+
+    fn repeat(&self) -> bool {
+        matches!(
+            self.kind,
+            SamplerKind::LinearRepeat | SamplerKind::PointRepeat
+        )
+    }
+
+    fn filtered(&self) -> bool {
+        !matches!(self.kind, SamplerKind::Point | SamplerKind::PointRepeat)
+    }
+}
+
 /// Where a pack sampler's texture comes from.
 pub(super) enum Source {
     Sprites,
     Atlas,
     Lightmap,
     Constant(&'static str),
+    /// Nothing provides the sampler: a 1×1 texel of (0, 0, 0, 1), as GL reads
+    /// an incomplete texture, without spending a binding.
+    Default,
     Pack(Entry),
 }
 
@@ -141,10 +246,21 @@ fn is_8bit(format: BufferFormat) -> bool {
 
 /// Whether WebGPU can filter the client's texture for this format.
 fn filterable(format: BufferFormat) -> bool {
-    !matches!(
-        format,
-        BufferFormat::R32F | BufferFormat::Rg32F | BufferFormat::Rgb32F | BufferFormat::Rgba32F
-    )
+    use crate::plan::StorageFormat as S;
+    !format.is_integer()
+        && !matches!(
+            format.storage(),
+            S::R32Float | S::Rg32Float | S::Rgba32Float
+        )
+}
+
+/// The texel type of a buffer format.
+fn buffer_sample(format: BufferFormat) -> SampleKind {
+    match format.kind() {
+        crate::plan::FormatKind::Sint => SampleKind::Sint,
+        crate::plan::FormatKind::Uint => SampleKind::Uint,
+        _ => SampleKind::Float,
+    }
 }
 
 /// Whether a `texture.<stage>.<sampler>` override applies to this program.
@@ -154,7 +270,13 @@ fn custom_applies(stage: TextureStage, sampler: &str, spec: &ProgramSpec) -> boo
         TextureStage::Gbuffers => !kind.is_fullscreen(),
         TextureStage::Shadow => kind.is_shadow(),
         TextureStage::Deferred => matches!(kind, ProgramKind::Deferred(_)),
-        TextureStage::Composite => matches!(kind, ProgramKind::Composite(_)),
+        TextureStage::Composite => matches!(kind, ProgramKind::Composite(_) | ProgramKind::Final),
+        TextureStage::All => true,
+        // Passes Horizon does not run.
+        TextureStage::Prepare
+        | TextureStage::Shadowcomp
+        | TextureStage::Begin
+        | TextureStage::Setup => false,
     };
     if !applies {
         return false;
@@ -169,6 +291,7 @@ fn custom_applies(stage: TextureStage, sampler: &str, spec: &ProgramSpec) -> boo
     let earlier = |k: &ProgramKind| match (kind, k) {
         (ProgramKind::Deferred(a), ProgramKind::Deferred(b))
         | (ProgramKind::Composite(a), ProgramKind::Composite(b)) => b < &a,
+        (ProgramKind::Final, ProgramKind::Composite(_)) => true,
         _ => false,
     };
     !spec
@@ -178,50 +301,78 @@ fn custom_applies(stage: TextureStage, sampler: &str, spec: &ProgramSpec) -> boo
         .any(|(k, buffers)| earlier(k) && buffers.contains(&n))
 }
 
-/// What `name` reads for the operation `op` in this program.
+/// Group 1 binding of custom texture `index` bound under its own name.
+pub const CUSTOM_BINDING: u32 = 64;
+
+/// The plan's custom texture for `sampler` in this program, as an entry at `binding`
+/// (`None`: at [`CUSTOM_BINDING`] + its index).
+/// Only a texture of the declared dimension: GL binds 2D and 3D textures to
+/// separate targets of a unit, so a 3D override leaves the 2D buffer in place.
+fn custom_entry(
+    sampler: &str,
+    dim: TexDim,
+    binding: Option<u32>,
+    spec: &ProgramSpec,
+) -> Option<Entry> {
+    let (i, c) = spec
+        .plan
+        .custom_textures
+        .iter()
+        .enumerate()
+        .find(|(_, c)| {
+            c.sampler == sampler && c.dim() == dim && custom_applies(c.stage, sampler, spec)
+        })?;
+    let binding = binding.unwrap_or(CUSTOM_BINDING + i as u32);
+    let float = c.sample() == SampleKind::Float;
+    Some(Entry {
+        dim: c.dim(),
+        sample: c.sample(),
+        // A blurred 2D float texture the hardware cannot filter: bilinear in the shader.
+        manual: float && c.dim() == TexDim::D2 && c.blur && !c.filterable(),
+        ..Entry::new(binding, TextureSource::Custom(i), c.sampler())
+    })
+}
+
+/// What `name` (declared with dimension `dim`) reads for the operation `op`
+/// in this program. `depth2_is_1`: `depthtex2` reads `depthtex1` (they hold
+/// the same without a hand program).
 pub(super) fn resolve(
     name: &str,
+    dim: TexDim,
     op: &str,
     spec: &ProgramSpec,
     watershadow: bool,
+    depth2_is_1: bool,
 ) -> Result<Source, String> {
     let fullscreen = spec.geometry == Geometry::Fullscreen;
-    let canon = match canonical(name, watershadow) {
-        Some(c) => c,
-        // Full-screen passes read colortex0 through samplers they do not know.
-        None if fullscreen => "colortex0".into(),
-        None => return Err(format!("unknown sampler {name}")),
+    // `gcolor` names texture unit 0, which in gbuffers programs is the
+    // albedo atlas (packs read their blocks' colour through it there).
+    let name = if !fullscreen && name == "gcolor" {
+        "gtexture"
+    } else {
+        name
+    };
+    let Some(canon) = canonical(name, watershadow) else {
+        // The pack's own name: a custom texture, else the 1×1 default.
+        return Ok(custom_entry(name, dim, None, spec).map_or(Source::Default, Source::Pack));
     };
     let canon = match canon.as_str() {
         "gtexture" | "lightmap" if fullscreen => "colortex0".to_string(),
         "gtexture" if spec.geometry == Geometry::Terrain => return Ok(Source::Sprites),
         "gtexture" => return Ok(Source::Atlas),
         "lightmap" => return Ok(Source::Lightmap),
+        "depthtex2" if depth2_is_1 => "depthtex1".to_string(),
         _ => canon,
     };
     let base = sampler_binding(&canon).ok_or_else(|| format!("unknown sampler {name}"))?;
-    let custom = spec
-        .plan
-        .custom_textures
-        .iter()
-        .position(|c| c.sampler == canon && custom_applies(c.stage, &canon, spec));
-    let entry = |source, kind| Entry {
-        binding: base,
-        source,
-        kind,
-        depth: false,
-        compare: false,
-        mips: false,
-        manual: false,
-        channels: 4,
-        snap8: false,
-    };
-    if let Some(i) = custom {
-        return Ok(Source::Pack(entry(
-            TextureSource::Custom(i),
-            SamplerKind::PointRepeat,
-        )));
+    if let Some(entry) = custom_entry(&canon, dim, Some(base), spec) {
+        return Ok(Source::Pack(entry));
     }
+    if dim == TexDim::D3 {
+        // Every built-in texture is 2D: nothing is bound to the unit's 3D target.
+        return Ok(Source::Default);
+    }
+    let entry = Entry::new;
     let shadow = spec.plan.shadow;
     let index = |prefix: &str| {
         canon
@@ -230,13 +381,12 @@ pub(super) fn resolve(
     };
     if let Some(n) = index("colortex") {
         let format = spec.plan.buffers[usize::from(n)].format;
-        // Mip sampling lasts from the first pass that regenerates the buffer's mips to the frame's end.
+        let sample = buffer_sample(format);
+        // Mips are sampled on the side whose chain was rebuilt this frame (see `mipmapped_reads`).
         let mips = fullscreen
-            && spec
-                .plan
-                .mipmaps
-                .iter()
-                .any(|(k, set)| k.is_fullscreen() && *k <= spec.kind && set.contains(&n));
+            && sample == SampleKind::Float
+            && usize::from(n) < crate::schedule::BUFFERS
+            && crate::schedule::mipmapped_reads(spec.plan, spec.kind)[usize::from(n)];
         let hardware = filterable(format);
         let kind = match (hardware, mips) {
             (false, _) => SamplerKind::Point,
@@ -245,16 +395,17 @@ pub(super) fn resolve(
         };
         return Ok(Source::Pack(Entry {
             mips,
-            manual: !hardware,
+            sample,
+            manual: !hardware && sample == SampleKind::Float,
             channels: format.channels(),
             snap8: is_8bit(format),
-            ..entry(TextureSource::Buffer(n), kind)
+            ..entry(base, TextureSource::Buffer(n), kind)
         }));
     }
     if let Some(n) = index("depthtex") {
         return Ok(Source::Pack(Entry {
             depth: true,
-            ..entry(TextureSource::Depth(n), SamplerKind::Point)
+            ..entry(base, TextureSource::Depth(n), SamplerKind::Point)
         }));
     }
     if let Some(n) = index("shadowtex") {
@@ -262,26 +413,33 @@ pub(super) fn resolve(
         let compared = matches!(op, "hz_shadow_" | "hz_shadowLod_");
         if compared && shadow.hardware_filtering[i] {
             return Ok(Source::Pack(Entry {
-                binding: COMPARE_BINDING + u32::from(n),
                 depth: true,
                 compare: true,
-                ..entry(TextureSource::ShadowTex(n), SamplerKind::Compare)
+                sample: SampleKind::Depth,
+                ..entry(
+                    COMPARE_BINDING + u32::from(n),
+                    TextureSource::ShadowTex(n),
+                    SamplerKind::Compare,
+                )
             }));
         }
         let linear = !shadow.tex_nearest[i];
         if shadow.tex_mipmap[i] {
             return Ok(Source::Pack(Entry {
-                binding: MIPS_BINDING + u32::from(n),
                 depth: true,
                 mips: true,
                 manual: linear,
-                ..entry(TextureSource::ShadowTexMips(n), SamplerKind::Point)
+                ..entry(
+                    MIPS_BINDING + u32::from(n),
+                    TextureSource::ShadowTexMips(n),
+                    SamplerKind::Point,
+                )
             }));
         }
         return Ok(Source::Pack(Entry {
             depth: true,
             manual: linear,
-            ..entry(TextureSource::ShadowTex(n), SamplerKind::Point)
+            ..entry(base, TextureSource::ShadowTex(n), SamplerKind::Point)
         }));
     }
     if let Some(n) = index("shadowcolor") {
@@ -293,15 +451,18 @@ pub(super) fn resolve(
         } else {
             SamplerKind::Point
         };
+        let sample = buffer_sample(format);
         return Ok(Source::Pack(Entry {
-            manual: !hardware,
+            sample,
+            manual: !hardware && sample == SampleKind::Float,
             channels: format.channels(),
             snap8: is_8bit(format),
-            ..entry(TextureSource::ShadowColor(n), kind)
+            ..entry(base, TextureSource::ShadowColor(n), kind)
         }));
     }
     match canon.as_str() {
         "noisetex" => Ok(Source::Pack(entry(
+            base,
             TextureSource::Noise,
             SamplerKind::LinearRepeat,
         ))),
@@ -327,6 +488,69 @@ pub(super) struct Sampling {
     pub(super) textures: Vec<TextureBinding>,
 }
 
+/// Whether `depthtex2` reads go to `depthtex1` in this stage: the pack has no
+/// hand program (so the two hold the same) and the stage reads both, which
+/// saves a binding.
+fn depth2_is_1(calls: &BTreeSet<String>, spec: &ProgramSpec, watershadow: bool) -> bool {
+    let reads = |want: &str| {
+        calls.iter().any(|c| {
+            split_sampling_call(c)
+                .and_then(|(_, n)| canonical(n, watershadow))
+                .is_some_and(|n| n == want)
+        })
+    };
+    !spec.plan.programs.contains_key(&ProgramKind::Hand) && reads("depthtex1") && reads("depthtex2")
+}
+
+/// Textures of Horizon's own group 0 that every stage of this geometry's
+/// layout counts: terrain's sprite arrays and lightmap (as many as its layout
+/// declares), the entity atlas and lightmap.
+fn horizon_textures(spec: &ProgramSpec) -> u32 {
+    match spec.geometry {
+        Geometry::Terrain => spec.host.terrain_textures.max(spec.host.sprite_arrays + 1),
+        Geometry::Entity => 2,
+        Geometry::Fullscreen => 0,
+    }
+}
+
+/// Things worth a line in the pack report about a stage's sampling: samplers
+/// nothing provides.
+pub(super) fn sampling_notes(
+    calls: &BTreeSet<String>,
+    spec: &ProgramSpec,
+    watershadow: bool,
+) -> BTreeSet<String> {
+    let alias = depth2_is_1(calls, spec, watershadow);
+    calls
+        .iter()
+        .filter_map(|c| parse_sampling_call(c))
+        .filter(|c| {
+            matches!(
+                resolve(c.name, c.dim, c.op, spec, watershadow, alias),
+                Ok(Source::Default)
+            )
+        })
+        .map(|c| {
+            format!(
+                "sampler `{}` has no texture (not a built-in name, no customTexture): reads a 1×1 (0, 0, 0, 1)",
+                c.name
+            )
+        })
+        .collect()
+}
+
+/// The WGSL-side GLSL texture type of an entry.
+fn texture_type(e: &Entry) -> &'static str {
+    match (e.dim, e.sample) {
+        (TexDim::D2, SampleKind::Float | SampleKind::Depth) => "texture2D",
+        (TexDim::D3, SampleKind::Float | SampleKind::Depth) => "texture3D",
+        (TexDim::D2, SampleKind::Sint) => "itexture2D",
+        (TexDim::D2, SampleKind::Uint) => "utexture2D",
+        (TexDim::D3, SampleKind::Sint) => "itexture3D",
+        (TexDim::D3, SampleKind::Uint) => "utexture3D",
+    }
+}
+
 /// Bindings and functions for a stage's sampling calls.
 pub(super) fn sampling(
     calls: &BTreeSet<String>,
@@ -335,15 +559,28 @@ pub(super) fn sampling(
     extras: &Extras,
 ) -> Result<Sampling, String> {
     let watershadow = extras.watershadow;
+    let alias = depth2_is_1(calls, spec, watershadow);
     let mut bindings = BTreeMap::new();
     let mut functions = String::new();
     let mut entries: BTreeMap<u32, Entry> = BTreeMap::new();
+    let mut names: BTreeMap<u32, BTreeSet<String>> = BTreeMap::new();
     let fragment = stage == Stage::Fragment;
     for call in calls {
-        let (op, name) =
-            split_sampling_call(call).ok_or_else(|| format!("unknown sampling call {call}"))?;
+        let c = parse_sampling_call(call).ok_or_else(|| format!("unknown sampling call {call}"))?;
+        let (op, name) = (c.op, c.name);
         let unsupported = || format!("{call}: unsupported on {name}");
-        let (signature, body) = match resolve(name, op, spec, watershadow)? {
+        let declared_2d_float = c.dim == TexDim::D2 && c.sample == SampleKind::Float;
+        let group0 = |what: &str| {
+            format!(
+                "{name} is {what}, a 2D float texture, but the pack declares it {}",
+                declared_type(c.dim, c.sample)
+            )
+        };
+        let (signature, body) = match resolve(name, c.dim, op, spec, watershadow, alias)? {
+            Source::Sprites if !declared_2d_float => return Err(group0("the block atlas")),
+            Source::Atlas | Source::Lightmap if !declared_2d_float => {
+                return Err(group0("Horizon's own texture"));
+            }
             Source::Sprites => {
                 sprite_function(call, op, stage, spec.host, &mut bindings, &mut functions)
                     .ok_or_else(unsupported)?
@@ -352,8 +589,8 @@ pub(super) fn sampling(
                 bindings.insert((0, 1), "uniform texture2D hz_atlas;".to_string());
                 bindings.insert((0, 2), "uniform sampler hz_atlas_sampler;".to_string());
                 let t = "sampler2D(hz_atlas, hz_atlas_sampler)";
-                let (signature, body) =
-                    plain_function(call, op, t, fragment).ok_or_else(unsupported)?;
+                let (signature, body) = plain_function(call, op, t, fragment, &mut functions)
+                    .ok_or_else(unsupported)?;
                 if fragment && extras.uv_wrap {
                     if !functions.contains("hz_atlas_uv") {
                         // entity.wgsl's per-fragment wrap: (origin, size) per axis, size 0 = none.
@@ -376,14 +613,26 @@ pub(super) fn sampling(
                     op,
                     "sampler2D(hz_lightmap, hz_lightmap_sampler)",
                     false,
+                    &mut functions,
                 )
                 .ok_or_else(unsupported)?
             }
             Source::Constant(value) => {
-                constant_function(call, op, value).ok_or_else(unsupported)?
+                constant_function(&c, call, value).ok_or_else(unsupported)?
+            }
+            Source::Default => {
+                constant_function(&c, call, "vec4(0.0, 0.0, 0.0, 1.0)").ok_or_else(unsupported)?
             }
             Source::Pack(entry) => {
                 let b = entry.binding;
+                if entry.dim != c.dim {
+                    return Err(format!(
+                        "{name} is a {} texture, but the pack declares it {}",
+                        if entry.dim == TexDim::D3 { "3D" } else { "2D" },
+                        declared_type(c.dim, c.sample)
+                    ));
+                }
+                names.entry(b).or_default().insert(name.to_string());
                 match entries.entry(b) {
                     std::collections::btree_map::Entry::Occupied(old) => {
                         let old = old.get();
@@ -393,7 +642,8 @@ pub(super) fn sampling(
                     }
                     std::collections::btree_map::Entry::Vacant(slot) => {
                         // Compare reads become a `texture_depth_2d` through their `sampler2DShadow` use.
-                        bindings.insert((1, b), format!("uniform texture2D hz_t{b};"));
+                        bindings
+                            .insert((1, b), format!("uniform {} hz_t{b};", texture_type(&entry)));
                         let sampler = if entry.compare {
                             "samplerShadow"
                         } else {
@@ -404,22 +654,53 @@ pub(super) fn sampling(
                             format!("uniform {sampler} {};", sampler_name(entry.kind)),
                         );
                         if !entry.compare {
+                            addressing(&mut functions);
                             functions += &entry_helpers(&entry);
                         }
                         slot.insert(entry.clone());
                     }
                 }
-                pack_function(call, op, &entry, fragment).ok_or_else(unsupported)?
+                pack_function(&c, call, &entry, fragment).ok_or_else(unsupported)?
             }
         };
         writeln!(functions, "{signature} {{\n    {body}\n}}").unwrap();
+        // GLSL converts an `int` level or bias implicitly; naga needs the overload.
+        if let Some(head) = signature
+            .strip_suffix(", float lod)")
+            .or_else(|| signature.strip_suffix(", float bias)"))
+        {
+            let ret = if signature.starts_with("void") {
+                ""
+            } else {
+                "return "
+            };
+            let arg = if signature.ends_with("lod)") {
+                "lod"
+            } else {
+                "bias"
+            };
+            let first = head.rsplit_once('(').map_or("", |(_, a)| a);
+            let first = first.split_whitespace().last().unwrap_or("uv");
+            writeln!(
+                functions,
+                "{head}, int {arg}) {{\n    {ret}{call}({first}, float({arg}));\n}}"
+            )
+            .unwrap();
+        }
     }
-    let sampled = bindings
-        .values()
-        .filter(|d| d.contains("texture2D"))
-        .count();
-    if sampled > 16 {
-        return Err(format!("{sampled} textures in one stage, WebGPU allows 16"));
+    let own = horizon_textures(spec);
+    let total = entries.len() as u32 + own;
+    if total > spec.host.max_textures {
+        let list: Vec<String> = names
+            .values()
+            .map(|n| n.iter().cloned().collect::<Vec<_>>().join("/"))
+            .collect();
+        let stage = if fragment { "fragment" } else { "vertex" };
+        return Err(format!(
+            "{total} textures in the {stage} stage, the device allows {}: {} and {own} of Horizon's",
+            spec.host.max_textures,
+            list.join(", ")
+        ));
     }
     let mut decls = String::new();
     for ((set, binding), decl) in bindings {
@@ -431,6 +712,8 @@ pub(super) fn sampling(
             binding: e.binding,
             source: e.source,
             sampler: e.kind,
+            dimension: e.dim,
+            sample: e.sample,
             vertex: !fragment,
             fragment,
         })
@@ -442,39 +725,179 @@ pub(super) fn sampling(
     })
 }
 
-/// The combined sampler expression of a group 1 entry.
-fn combined(e: &Entry) -> String {
-    let name = sampler_name(e.kind);
-    if e.compare {
-        format!("sampler2DShadow(hz_t{}, {name})", e.binding)
-    } else {
-        format!("sampler2D(hz_t{}, {name})", e.binding)
+/// The GLSL sampler type a call was declared with, for messages.
+fn declared_type(dim: TexDim, sample: SampleKind) -> &'static str {
+    match (dim, sample) {
+        (TexDim::D2, SampleKind::Sint) => "isampler2D",
+        (TexDim::D2, SampleKind::Uint) => "usampler2D",
+        (TexDim::D3, SampleKind::Sint) => "isampler3D",
+        (TexDim::D3, SampleKind::Uint) => "usampler3D",
+        (TexDim::D3, _) => "sampler3D",
+        (TexDim::D2, _) => "sampler2D",
     }
 }
 
+/// The combined sampler expression of a group 1 entry.
+fn combined(e: &Entry) -> String {
+    let name = sampler_name(e.kind);
+    let ty = match (e.compare, e.dim, e.sample) {
+        (true, _, _) => "sampler2DShadow",
+        (_, TexDim::D2, SampleKind::Sint) => "isampler2D",
+        (_, TexDim::D2, SampleKind::Uint) => "usampler2D",
+        (_, TexDim::D3, SampleKind::Sint) => "isampler3D",
+        (_, TexDim::D3, SampleKind::Uint) => "usampler3D",
+        (_, TexDim::D3, _) => "sampler3D",
+        (_, TexDim::D2, _) => "sampler2D",
+    };
+    format!("{ty}(hz_t{}, {name})", e.binding)
+}
+
+/// GLSL vector types of a sampler: (texel, float coordinate, integer coordinate).
+fn vector_types(dim: TexDim, sample: SampleKind) -> (&'static str, &'static str, &'static str) {
+    let texel = match sample {
+        SampleKind::Sint => "ivec4",
+        SampleKind::Uint => "uvec4",
+        _ => "vec4",
+    };
+    match dim {
+        TexDim::D2 => (texel, "vec2", "ivec2"),
+        TexDim::D3 => (texel, "vec3", "ivec3"),
+    }
+}
+
+/// `expr` (texels of `from`) as the texel type of `to`.
+fn convert(expr: String, from: SampleKind, to: SampleKind) -> String {
+    let int = |k| matches!(k, SampleKind::Sint | SampleKind::Uint);
+    if from == to || (!int(from) && !int(to)) {
+        expr
+    } else {
+        format!("{}({expr})", vector_types(TexDim::D2, to).0)
+    }
+}
+
+/// The signature of a host sampling function, by its declared sampler type.
+fn signature(c: &SamplingCall, call: &str) -> Option<String> {
+    let (r, v, i) = vector_types(c.dim, c.sample);
+    Some(match c.op {
+        "hz_sample_" => format!("{r} {call}({v} uv)"),
+        "hz_sampleLod_" => format!("{r} {call}({v} uv, float lod)"),
+        "hz_sampleBias_" => format!("{r} {call}({v} uv, float bias)"),
+        "hz_sampleGrad_" => format!("{r} {call}({v} uv, {v} dx, {v} dy)"),
+        "hz_fetch_" => format!("{r} {call}({i} p, int lod)"),
+        "hz_size_" => format!("{i} {call}(int lod)"),
+        "hz_gather_" if c.dim == TexDim::D2 => format!("{r} {call}(vec2 uv, int comp)"),
+        "hz_queryLod_" => format!("vec2 {call}({v} uv)"),
+        "hz_levels_" => format!("int {call}()"),
+        "hz_shadow_" if c.dim == TexDim::D2 => format!("vec4 {call}(vec3 p)"),
+        "hz_shadowLod_" if c.dim == TexDim::D2 => format!("vec4 {call}(vec3 p, float lod)"),
+        _ => return None,
+    })
+}
+
+/// `textureGather` from four texels at level 0: `texel(p)` reads the texel at
+/// `ivec2 p`, in range. GL's order: (i0, j1), (i1, j1), (i1, j0), (i0, j0).
+fn gather_body(ty: &str, size: &str, wrap: &str, texel: &dyn Fn(&str) -> String) -> String {
+    format!(
+        "ivec2 size = max({size}, ivec2(1));\n    vec2 f = uv * vec2(size) - 0.5;\n    \
+         ivec2 i = ivec2(floor(f));\n    \
+         ivec2 a = {wrap}(i, size);\n    ivec2 b = {wrap}(i + ivec2(1), size);\n    \
+         {ty} t00 = {};\n    {ty} t10 = {};\n    {ty} t01 = {};\n    {ty} t11 = {};\n    \
+         return {ty}(t01[comp], t11[comp], t10[comp], t00[comp]);",
+        texel("a"),
+        texel("ivec2(b.x, a.y)"),
+        texel("ivec2(a.x, b.y)"),
+        texel("b"),
+    )
+}
+
+/// Integer texel addressing: `hz_wrap(i, size)` (repeat) and `hz_clamp(i, size)`, 2D and 3D.
+const ADDRESSING: &str = "ivec2 hz_wrap(ivec2 i, ivec2 s) { return ((i % s) + s) % s; }\n\
+    ivec3 hz_wrap(ivec3 i, ivec3 s) { return ((i % s) + s) % s; }\n\
+    ivec2 hz_clamp(ivec2 i, ivec2 s) { return clamp(i, ivec2(0), max(s - 1, ivec2(0))); }\n\
+    ivec3 hz_clamp(ivec3 i, ivec3 s) { return clamp(i, ivec3(0), max(s - 1, ivec3(0))); }\n";
+
+fn addressing(functions: &mut String) {
+    if !functions.contains("ivec2 hz_wrap(") {
+        functions.insert_str(0, ADDRESSING);
+    }
+}
+
+/// `textureQueryLod` from derivatives: (the level read, the computed level).
+/// `size` is the texture's level-0 size as a float vector, `top` its last level.
+fn query_lod_body(fragment: bool, size: &str, top: &str) -> String {
+    if !fragment {
+        return "return vec2(0.0);".into();
+    }
+    format!(
+        "float l = 0.5 * log2(max(dot(dFdx(uv) * {size}, dFdx(uv) * {size}), \
+         dot(dFdy(uv) * {size}, dFdy(uv) * {size})));\n    \
+         return vec2(clamp(l, 0.0, {top}), l);"
+    )
+}
+
 /// Per entry: `hz_post_<b>` (what the pack sees of a texel), `hz_read_<b>`
-/// (a filtered read at an explicit level) and `hz_lod_<b>` (the level for
-/// derivatives).
+/// (a filtered read at an explicit level), `hz_fetch_<b>` (one texel),
+/// `hz_texel_<b>` (one level-0 texel, addressed as the sampler would) and,
+/// for 2D float entries, `hz_lod_<b>` (the level for derivatives).
 fn entry_helpers(e: &Entry) -> String {
     let b = e.binding;
     let t = combined(e);
-    let post = if e.depth {
-        "float d = 1.0 - c.x;\n    return vec4(d, d, d, 1.0);"
-    } else {
-        match e.channels {
-            1 => "return vec4(c.r, 0.0, 0.0, 1.0);",
-            2 => "return vec4(c.rg, 0.0, 1.0);",
-            3 => "return vec4(c.rgb, 1.0);",
-            _ => "return c;",
-        }
-    };
-    // A true division: the multiply by a reciprocal is what goes wrong.
+    let (r, v, i) = vector_types(e.dim, e.sample);
+    let wrap = if e.repeat() { "hz_wrap" } else { "hz_clamp" };
+    let mut s = String::new();
     let snap = if e.snap8 {
+        // A true division: the multiply by a reciprocal is what goes wrong.
         "c = round(c * 255.0) / 255.0;\n    "
     } else {
         ""
     };
-    let mut s = format!("vec4 hz_post_{b}(vec4 c) {{\n    {snap}{post}\n}}\n");
+    let post = if e.depth {
+        "float d = 1.0 - c.x;\n    return vec4(d, d, d, 1.0);".to_string()
+    } else {
+        let one = if r == "vec4" { "1.0" } else { "1" };
+        let zero = if r == "vec4" { "0.0" } else { "0" };
+        match e.channels {
+            1 => format!("return {r}(c.r, {zero}, {zero}, {one});"),
+            2 => format!("return {r}(c.rg, {zero}, {one});"),
+            3 => format!("return {r}(c.rgb, {one});"),
+            _ => "return c;".into(),
+        }
+    };
+    let snap = if r == "vec4" { snap } else { "" };
+    writeln!(s, "{r} hz_post_{b}({r} c) {{\n    {snap}{post}\n}}").unwrap();
+    writeln!(
+        s,
+        "{r} hz_fetch_{b}({i} p, int lod) {{\n    return hz_post_{b}(texelFetch({t}, p, lod));\n}}"
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "{r} hz_texel_{b}({i} p) {{\n    return hz_fetch_{b}({wrap}(p, textureSize({t}, 0)), 0);\n}}"
+    )
+    .unwrap();
+    // The nearest texel at a level, as a Point sampler reads.
+    writeln!(
+        s,
+        "{r} hz_nearest_{b}({v} uv, int level) {{\n    {i} size = max(textureSize({t}, level), {i}(1));\n    \
+         return hz_fetch_{b}({wrap}({i}(floor(uv * {v}(size))), size), level);\n}}"
+    )
+    .unwrap();
+    if r != "vec4" || e.dim == TexDim::D3 {
+        // Integer textures: nearest only; 3D textures have no mips.
+        let read = if r == "vec4" && e.filtered() {
+            format!("hz_post_{b}(textureLod({t}, uv, 0.0))")
+        } else if r == "vec4" {
+            format!("hz_nearest_{b}(uv, 0)")
+        } else {
+            format!("hz_nearest_{b}(uv, int(lod))")
+        };
+        writeln!(
+            s,
+            "{r} hz_read_{b}({v} uv, float lod) {{\n    return {read};\n}}"
+        )
+        .unwrap();
+        return s;
+    }
     writeln!(
         s,
         "float hz_lod_{b}(vec2 dx, vec2 dy) {{\n    vec2 size = vec2(textureSize({t}, 0));\n    \
@@ -525,123 +948,149 @@ fn entry_helpers(e: &Entry) -> String {
 }
 
 /// A sampling function on a group 1 entry.
-fn pack_function(call: &str, op: &str, e: &Entry, fragment: bool) -> Option<(String, String)> {
+fn pack_function(
+    c: &SamplingCall,
+    call: &str,
+    e: &Entry,
+    fragment: bool,
+) -> Option<(String, String)> {
     let b = e.binding;
     let t = combined(e);
-    // Implicit levels need derivatives, which only the fragment stage has.
-    let derivatives = fragment && e.mips;
+    let sig = signature(c, call)?;
+    let op = c.op;
+    if op == "hz_levels_" {
+        // `textureQueryLevels`: a full chain when the pack mipmaps the texture, else one level.
+        let body = if e.mips {
+            let size = format!("textureSize({t}, 0)");
+            let mut largest = format!("max({size}.x, {size}.y)");
+            if e.dim == TexDim::D3 {
+                largest = format!("max({largest}, {size}.z)");
+            }
+            format!("return int(floor(log2(float(max({largest}, 1))))) + 1;")
+        } else {
+            "return 1;".into()
+        };
+        return Some((sig, body));
+    }
     if e.compare {
         // GL's LEQUAL on GL depth is GreaterEqual against `1 - ref` on Horizon's reversed depth.
         let compare = format!("return vec4(textureLod({t}, vec3(p.xy, 1.0 - p.z), 0.0));");
-        return Some(match op {
-            "hz_shadow_" => (format!("vec4 {call}(vec3 p)"), compare),
-            "hz_shadowLod_" => (format!("vec4 {call}(vec3 p, float lod)"), compare),
-            _ => return None,
-        });
+        return matches!(op, "hz_shadow_" | "hz_shadowLod_").then_some((sig, compare));
     }
-    Some(match op {
-        "hz_sample_" => (
-            format!("vec4 {call}(vec2 uv)"),
-            if derivatives {
-                format!("return hz_read_{b}(uv, hz_lod_{b}(dFdx(uv), dFdy(uv)));")
+    let float2 = e.dim == TexDim::D2 && e.sample == SampleKind::Float;
+    // Implicit levels need derivatives, which only the fragment stage has.
+    let derivatives = fragment && e.mips && float2;
+    let ret = |expr: String| format!("return {};", convert(expr, e.sample, c.sample));
+    let (_, v, _) = vector_types(e.dim, e.sample);
+    let body = match op {
+        "hz_sample_" if derivatives => {
+            ret(format!("hz_read_{b}(uv, hz_lod_{b}(dFdx(uv), dFdy(uv)))"))
+        }
+        "hz_sampleBias_" if derivatives => ret(format!(
+            "hz_read_{b}(uv, hz_lod_{b}(dFdx(uv), dFdy(uv)) + bias)"
+        )),
+        "hz_sample_" | "hz_sampleBias_" => ret(format!("hz_read_{b}(uv, 0.0)")),
+        "hz_sampleLod_" => ret(format!("hz_read_{b}(uv, lod)")),
+        "hz_sampleGrad_" if e.mips && float2 => ret(format!("hz_read_{b}(uv, hz_lod_{b}(dx, dy))")),
+        "hz_sampleGrad_" => ret(format!("hz_read_{b}(uv, 0.0)")),
+        "hz_fetch_" => ret(format!("hz_fetch_{b}(p, lod)")),
+        "hz_size_" => format!("return textureSize({t}, lod);"),
+        "hz_gather_" => {
+            let (texel, ..) = vector_types(e.dim, e.sample);
+            let body = gather_body(texel, &format!("textureSize({t}, 0)"), "hz_clamp", &|p| {
+                format!("hz_texel_{b}({p})")
+            });
+            if texel == vector_types(c.dim, c.sample).0 {
+                body
             } else {
-                format!("return hz_read_{b}(uv, 0.0);")
-            },
-        ),
-        "hz_sampleLod_" => (
-            format!("vec4 {call}(vec2 uv, float lod)"),
-            format!("return hz_read_{b}(uv, lod);"),
-        ),
-        "hz_sampleBias_" => (
-            format!("vec4 {call}(vec2 uv, float bias)"),
-            if derivatives {
-                format!("return hz_read_{b}(uv, hz_lod_{b}(dFdx(uv), dFdy(uv)) + bias);")
+                // The texels are converted once gathered.
+                body.replacen(
+                    "return ",
+                    &format!("return {}(", vector_types(c.dim, c.sample).0),
+                    1,
+                )
+                .replacen("[comp]);", "[comp]));", 1)
+            }
+        }
+        "hz_queryLod_" => {
+            let top = if e.mips {
+                format!(
+                    "floor(log2(float(max(max(textureSize({t}, 0).x, textureSize({t}, 0).y), 1))))"
+                )
             } else {
-                format!("return hz_read_{b}(uv, 0.0);")
-            },
-        ),
-        "hz_sampleGrad_" => (
-            format!("vec4 {call}(vec2 uv, vec2 dx, vec2 dy)"),
-            if e.mips {
-                format!("return hz_read_{b}(uv, hz_lod_{b}(dx, dy));")
-            } else {
-                format!("return hz_read_{b}(uv, 0.0);")
-            },
-        ),
-        "hz_fetch_" => (
-            format!("vec4 {call}(ivec2 p, int lod)"),
-            format!("return hz_post_{b}(texelFetch({t}, p, lod));"),
-        ),
-        "hz_size_" => (
-            format!("ivec2 {call}(int lod)"),
-            format!("return textureSize({t}, lod);"),
-        ),
-        // shadow2D without hardware filtering: GL's LEQUAL on the read depth.
-        "hz_shadow_" if e.depth => (
-            format!("vec4 {call}(vec3 p)"),
-            format!("return vec4(step(p.z, hz_read_{b}(p.xy, 0.0).x));"),
-        ),
-        "hz_shadowLod_" if e.depth => (
-            format!("vec4 {call}(vec3 p, float lod)"),
-            format!("return vec4(step(p.z, hz_read_{b}(p.xy, lod).x));"),
-        ),
+                "0.0".into()
+            };
+            query_lod_body(fragment, &format!("{v}(textureSize({t}, 0))"), &top)
+        }
+        // shadow2D without hardware filtering: GL's LEQUAL on the read value.
+        "hz_shadow_" if e.sample == SampleKind::Float => {
+            format!("return vec4(step(p.z, hz_read_{b}(p.xy, 0.0).x));")
+        }
+        "hz_shadowLod_" if e.sample == SampleKind::Float => {
+            format!("return vec4(step(p.z, hz_read_{b}(p.xy, lod).x));")
+        }
         _ => return None,
-    })
+    };
+    Some((sig, body))
 }
 
 /// A sampling function on a group 0 texture the hardware filters as it is
 /// configured (the entity atlas, the lightmap); `implicit`: the fragment
 /// stage, where `texture()` takes its level from derivatives.
-fn plain_function(call: &str, op: &str, t: &str, implicit: bool) -> Option<(String, String)> {
-    Some(match op {
-        "hz_sample_" => (
-            format!("vec4 {call}(vec2 uv)"),
-            if implicit {
-                format!("return texture({t}, uv);")
-            } else {
-                format!("return textureLod({t}, uv, 0.0);")
-            },
-        ),
-        "hz_sampleLod_" => (
-            format!("vec4 {call}(vec2 uv, float lod)"),
-            format!("return textureLod({t}, uv, lod);"),
-        ),
-        "hz_sampleBias_" => (
-            format!("vec4 {call}(vec2 uv, float bias)"),
-            if implicit {
-                format!("return texture({t}, uv, bias);")
-            } else {
-                format!("return textureLod({t}, uv, 0.0);")
-            },
-        ),
-        "hz_sampleGrad_" => (
-            format!("vec4 {call}(vec2 uv, vec2 dx, vec2 dy)"),
-            format!("return textureGrad({t}, uv, dx, dy);"),
-        ),
-        "hz_fetch_" => (
-            format!("vec4 {call}(ivec2 p, int lod)"),
-            format!("return texelFetch({t}, p, lod);"),
-        ),
-        "hz_size_" => (
-            format!("ivec2 {call}(int lod)"),
-            format!("return textureSize({t}, lod);"),
-        ),
+fn plain_function(
+    call: &str,
+    op: &str,
+    t: &str,
+    implicit: bool,
+    functions: &mut String,
+) -> Option<(String, String)> {
+    let c = SamplingCall {
+        op: SAMPLING_OPS.iter().copied().find(|o| *o == op)?,
+        dim: TexDim::D2,
+        sample: SampleKind::Float,
+        name: "",
+    };
+    let sig = signature(&c, call)?;
+    let body = match op {
+        "hz_sample_" if implicit => format!("return texture({t}, uv);"),
+        "hz_sampleBias_" if implicit => format!("return texture({t}, uv, bias);"),
+        "hz_sample_" | "hz_sampleBias_" => format!("return textureLod({t}, uv, 0.0);"),
+        "hz_sampleLod_" => format!("return textureLod({t}, uv, lod);"),
+        "hz_sampleGrad_" => format!("return textureGrad({t}, uv, dx, dy);"),
+        "hz_fetch_" => format!("return texelFetch({t}, p, lod);"),
+        "hz_size_" => format!("return textureSize({t}, lod);"),
+        "hz_gather_" => {
+            addressing(functions);
+            gather_body("vec4", &format!("textureSize({t}, 0)"), "hz_clamp", &|p| {
+                format!("texelFetch({t}, {p}, 0)")
+            })
+        }
+        "hz_queryLod_" => {
+            let top = format!("float(textureQueryLevels({t}) - 1)");
+            query_lod_body(implicit, &format!("vec2(textureSize({t}, 0))"), &top)
+        }
+        "hz_levels_" => format!("return textureQueryLevels({t});"),
         _ => return None,
-    })
+    };
+    Some((sig, body))
 }
 
-/// A sampling function on a 1×1 default texture.
-fn constant_function(call: &str, op: &str, value: &str) -> Option<(String, String)> {
-    let ret = format!("return {value};");
-    Some(match op {
-        "hz_sample_" => (format!("vec4 {call}(vec2 uv)"), ret),
-        "hz_sampleLod_" => (format!("vec4 {call}(vec2 uv, float lod)"), ret),
-        "hz_sampleBias_" => (format!("vec4 {call}(vec2 uv, float bias)"), ret),
-        "hz_sampleGrad_" => (format!("vec4 {call}(vec2 uv, vec2 dx, vec2 dy)"), ret),
-        "hz_fetch_" => (format!("vec4 {call}(ivec2 p, int lod)"), ret),
-        "hz_size_" => (format!("ivec2 {call}(int lod)"), "return ivec2(1);".into()),
-        _ => return None,
-    })
+/// A sampling function on a 1×1 texture that reads `value` (a `vec4`
+/// expression) everywhere.
+fn constant_function(c: &SamplingCall, call: &str, value: &str) -> Option<(String, String)> {
+    let sig = signature(c, call)?;
+    let (r, _, i) = vector_types(c.dim, c.sample);
+    let texel = convert(value.to_string(), SampleKind::Float, c.sample);
+    let body = match c.op {
+        "hz_size_" => format!("return {i}(1);"),
+        "hz_queryLod_" => "return vec2(0.0);".into(),
+        "hz_levels_" => "return 1;".into(),
+        "hz_gather_" => format!("return {r}({texel}[comp]);"),
+        // A depth of the texel's red channel, compared as GL's LEQUAL.
+        "hz_shadow_" | "hz_shadowLod_" => format!("return vec4(step(p.z, {value}.x));"),
+        _ => format!("return {texel};"),
+    };
+    Some((sig, body))
 }
 
 /// A sampling function on terrain's sprite arrays (group 0).
@@ -668,6 +1117,21 @@ fn sprite_function(
         "hz_sampleLod_" => "vec2 uv, float lod",
         "hz_sampleBias_" => "vec2 uv, float bias",
         "hz_sampleGrad_" => "vec2 uv, vec2 dx, vec2 dy",
+        "hz_fetch_" => "ivec2 p, int lod",
+        "hz_gather_" => "vec2 uv, int comp",
+        "hz_queryLod_" if !fragment => {
+            return Some((format!("vec2 {call}(vec2 uv)"), "return vec2(0.0);".into()));
+        }
+        // The atlas's levels as `hz_queryLod_` sees them (a top level of 4).
+        "hz_levels_" => return Some((format!("int {call}()"), "return 5;".into())),
+        "hz_queryLod_" => {
+            // The sprite's own size, as the pack's mip level of the atlas would follow it.
+            let size = format!("vec2(textureSize({}, 0).xy / {})", array(0), p.sprite_grid);
+            return Some((
+                format!("vec2 {call}(vec2 uv)"),
+                query_lod_body(true, &size, "4.0"),
+            ));
+        }
         "hz_size_" => {
             return Some((
                 format!("ivec2 {call}(int lod)"),
@@ -687,7 +1151,19 @@ fn sprite_function(
     if !functions.contains("hz_sprite_lod") {
         *functions += &sprite_helpers(p, &array);
     }
+    if matches!(op, "hz_fetch_" | "hz_gather_") && !functions.contains("hz_sprite_fetch") {
+        addressing(functions);
+        *functions += &sprite_fetch(p, &array);
+    }
+    if op == "hz_gather_" {
+        let size = format!("textureSize({}, 0).xy / {}", array(0), p.sprite_grid);
+        let body = gather_body("vec4", &size, "hz_wrap", &|q| {
+            format!("hz_sprite_fetch({q}, 0)")
+        });
+        return Some((signature(args), body));
+    }
     let body = match op {
+        "hz_fetch_" => "return hz_sprite_fetch(p, lod);",
         "hz_sample_" => "return hz_sprite_grad(uv, dFdx(uv), dFdy(uv));",
         "hz_sampleLod_" => "return hz_sprite_lod(uv, lod);",
         "hz_sampleBias_" => {
@@ -747,4 +1223,46 @@ fn sprite_helpers(p: &HostParams, array: &dyn Fn(u32) -> String) -> String {
         switch(&|a| format!("textureLod({a}, vec3(uv, l), lod)")),
         switch(&|a| format!("textureGrad({a}, vec3(uv, l), dx, dy)")),
     )
+}
+
+/// `hz_sprite_fetch(p, lod)`: `texelFetch` on terrain's `gtexture`, a texel of
+/// the fragment's sprite (`p` wraps within it, as the pack's atlas coordinate
+/// would stay inside the sprite).
+fn sprite_fetch(p: &HostParams, array: &dyn Fn(u32) -> String) -> String {
+    let grid = p.sprite_grid;
+    let a = array(0);
+    let head = format!(
+        "vec4 hz_sprite_fetch(ivec2 p, int lod) {{\n    \
+         ivec2 tile = max(textureSize({a}, lod).xy / {grid}, ivec2(1));\n    \
+         ivec2 q = hz_wrap(p, tile);\n    "
+    );
+    if grid > 1 {
+        return format!(
+            "{head}return texelFetch({a}, ivec3(q + ivec2(hz_sprite.yz) * tile, int(hz_sprite.w)), lod);\n}}\n"
+        );
+    }
+    if p.sprite_arrays == 1 {
+        return format!(
+            "{head}return texelFetch({a}, ivec3(q, int(hz_sprite.x & 0x7fffu)), lod);\n}}\n"
+        );
+    }
+    let mut s = format!(
+        "{head}uint layer = hz_sprite.x & 0x7fffu;\n    int l = int(layer % {}u);\n    vec4 c;\n    \
+         switch (int(layer / {}u)) {{\n",
+        p.sprite_split, p.sprite_split
+    );
+    for k in 0..p.sprite_arrays {
+        let label = if k + 1 == p.sprite_arrays {
+            "default:".to_string()
+        } else {
+            format!("case {k}:")
+        };
+        writeln!(
+            s,
+            "    {label} c = texelFetch({}, ivec3(q, l), lod); break;",
+            array(k)
+        )
+        .unwrap();
+    }
+    s + "    }\n    return c;\n}\n"
 }

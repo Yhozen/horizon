@@ -1,21 +1,29 @@
 //! Pack options (the user-facing settings a pack exposes) found in its
 //! sources, and overrides applied by rewriting the source text before
-//! preprocessing, as the format does:
+//! preprocessing, as the format does. Every shader source and include under
+//! `shaders/` (`.vsh .fsh .gsh .csh .glsl .inc .h`…, any folder) is read:
 //!
 //! - boolean: a `#define X` line, or `//#define X` when off, is an option when
-//!   some `#ifdef X` / `#ifndef X` in the same program (includes expanded)
-//!   tests X (`#if` references do not count). Toggling adds or removes the `//`.
+//!   some conditional anywhere in the pack tests X (`#ifdef X`, `#ifndef X`,
+//!   `#if defined(X)`, `#if X`, `#elif … X`). Include guards (`#ifndef X`
+//!   right before `#define X`) and host macros (`MC_*`, `IRIS_*`) are not.
+//!   Toggling adds or removes the `//`.
 //! - value: `#define X v // [a b c]` (the trailing bracket list is required);
-//!   the value is replaced.
-//! - `const`: `const int shadowMapResolution = 2048; // [1024 2048]` for a
-//!   fixed list of names the renderer reads ([`CONST_OPTIONS`]); the value
+//!   the value is replaced. Only booleans can be commented out.
+//! - `const`: `const int|float|bool X = v; // [a b c]` for any name, and for
+//!   the names the renderer reads ([`CONST_OPTIONS`]) of any type; the value
 //!   after `=` is replaced.
+//!
+//! A name defined with different defaults keeps the first (files by path) and
+//! is noted once ([`Scan::notes`]). Definitions that are not options by these
+//! rules are kept as [`Scan::candidates`]: `shaders.properties` can still
+//! show them (see [`crate::screens`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
+use crate::PackFiles;
 use crate::plan::PackOption;
-use crate::{PackFiles, preprocess};
 
 /// The `const` names a pack can expose as options (and an override can set).
 pub const CONST_OPTIONS: &[&str] = &[
@@ -69,6 +77,8 @@ enum OptionLine {
     /// `const TYPE NAME = value;`
     Const {
         name: String,
+        /// The type (`int`, `float`, `bool`…).
+        ty: String,
         value: Range<usize>,
         allowed: Vec<String>,
     },
@@ -166,36 +176,62 @@ fn parse_line(line: &str) -> Option<OptionLine> {
     let value_end = value_at + line[value_at..semi].trim_end().len();
     Some(OptionLine::Const {
         name: line[name_at..name_end].to_string(),
+        ty: line[ty..ty_end].to_string(),
         value: value_at..value_end,
         allowed: allowed_values(&line[semi..]),
     })
 }
 
-/// The names tested by `#ifdef` / `#ifndef` lines of `text`.
-fn ifdef_names(text: &str) -> BTreeSet<&str> {
-    text.lines()
-        .filter_map(|line| {
-            let d = line.trim_start().strip_prefix('#')?.trim_start();
-            let rest = d
-                .strip_prefix("ifdef")
-                .or_else(|| d.strip_prefix("ifndef"))?;
-            let name = rest.trim_start();
-            let end = name.find(|c: char| !is_ident(c)).unwrap_or(name.len());
-            (rest.starts_with([' ', '\t']) && end > 0).then(|| &name[..end])
-        })
-        .collect()
+/// The names a conditional line tests: `#ifdef X`, `#ifndef X`, and every
+/// identifier of an `#if` / `#elif` expression (`defined(X)`, `defined X`,
+/// `X > 1`), `defined` itself excepted.
+fn tested_names(line: &str) -> Vec<&str> {
+    let Some(d) = line.trim_start().strip_prefix('#') else {
+        return Vec::new();
+    };
+    let d = d.trim_start();
+    let kw_end = d
+        .find(|c: char| !c.is_ascii_alphabetic())
+        .unwrap_or(d.len());
+    if !matches!(&d[..kw_end], "ifdef" | "ifndef" | "if" | "elif") {
+        return Vec::new();
+    }
+    let rest = &d[kw_end..];
+    let rest = rest.split("//").next().unwrap_or("");
+    let rest = rest.split("/*").next().unwrap_or("");
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < rest.len() {
+        let c = rest[at..].chars().next().unwrap_or(' ');
+        if c.is_ascii_alphabetic() || c == '_' {
+            let end = ident_end(rest, at);
+            let name = &rest[at..end];
+            if name != "defined" {
+                out.push(name);
+            }
+            at = end;
+        } else if c.is_ascii_digit() {
+            // A number such as `1.0f` or `0x1F`: not a name.
+            at = ident_end(rest, at).max(at + 1);
+        } else {
+            at += c.len_utf8();
+        }
+    }
+    out
 }
 
-/// Program sources (the files a pass is compiled from).
-fn is_program(path: &str) -> bool {
-    path.starts_with("shaders/")
-        && [".vsh", ".fsh", ".gsh", ".csh"]
-            .iter()
-            .any(|e| path.ends_with(e))
+/// The name an `#ifndef X` line tests (an include guard's first line).
+fn ifndef_name(line: &str) -> Option<&str> {
+    let d = line.trim_start().strip_prefix('#')?.trim_start();
+    let rest = d.strip_prefix("ifndef")?;
+    let name = rest.trim_start();
+    let end = name.find(|c: char| !is_ident(c)).unwrap_or(name.len());
+    (rest.starts_with([' ', '\t']) && end > 0).then(|| &name[..end])
 }
 
-/// Files whose text overrides rewrite: sources and includes, not images,
-/// properties or language files.
+/// Files options are read from and overrides rewrite: every source and
+/// include under `shaders/` (`.vsh`, `.glsl`, also `.h`, `.settings`…), not
+/// images, properties or language files.
 fn is_source(path: &str) -> bool {
     let ext = path.rsplit_once('.').map_or("", |(_, e)| e);
     path.starts_with("shaders/")
@@ -205,55 +241,207 @@ fn is_source(path: &str) -> bool {
         )
 }
 
-/// The options of a pack, each once (first definition wins), sorted by name.
-pub fn discover(files: &PackFiles) -> Vec<PackOption> {
-    let mut found: BTreeMap<String, PackOption> = BTreeMap::new();
-    for path in files.0.keys().filter(|p| is_program(p)) {
-        let Ok(text) = preprocess::expand_includes(files, path) else {
-            continue;
-        };
-        let tested = ifdef_names(&text);
+/// Macros the host defines: never options.
+fn is_host_macro(name: &str) -> bool {
+    name.starts_with("MC_") || name.starts_with("IRIS_") || name == "IS_IRIS"
+}
+
+/// What kind of option a definition is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OptionKind {
+    /// `#define X` (on) or `//#define X` (off), tested by a conditional.
+    Bool,
+    /// `#define X v // [a b c]`.
+    Value,
+    /// `const TYPE X = v; // [a b c]`.
+    Const,
+}
+
+/// One option definition found in the sources.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OptionDef {
+    pub name: String,
+    pub kind: OptionKind,
+    /// The default: `true`/`false` for a boolean, else the value text.
+    pub default: String,
+    /// The values of the trailing `// [..]` list (empty for a boolean
+    /// define).
+    pub allowed: Vec<String>,
+    /// Whether the values are `true`/`false` (a boolean define or a `const
+    /// bool`).
+    pub boolean: bool,
+    /// Where it was found first: pack path and 1-based line.
+    pub file: String,
+    pub line: usize,
+}
+
+/// Everything [`scan`] finds.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Scan {
+    /// The options, in the order they were first found (files by path,
+    /// then lines).
+    pub options: Vec<OptionDef>,
+    /// Definitions that are not options by the source rules alone (a
+    /// `#define X` nothing tests, a `#define X v` with no list): they become
+    /// options when `shaders.properties` puts them on a screen or a slider.
+    pub candidates: Vec<OptionDef>,
+    /// Oddities for the report: options defined with different defaults.
+    pub notes: Vec<String>,
+}
+
+impl Scan {
+    /// The option called `name`.
+    pub fn get(&self, name: &str) -> Option<&OptionDef> {
+        self.options.iter().find(|o| o.name == name)
+    }
+}
+
+/// Reads every option of a pack from its sources (see the module docs; the
+/// tests of a boolean count from any source file of the pack). The first
+/// definition of a name wins; a later one with another default is noted.
+pub fn scan(files: &PackFiles) -> Scan {
+    let sources: Vec<(&String, String)> = files
+        .0
+        .iter()
+        .filter(|(p, _)| is_source(p))
+        .map(|(p, b)| (p, String::from_utf8_lossy(b).into_owned()))
+        .collect();
+    let mut tested: BTreeSet<&str> = BTreeSet::new();
+    for (_, text) in &sources {
         for line in text.lines() {
-            let option = match parse_line(line) {
+            tested.extend(tested_names(line));
+        }
+    }
+    let mut scan = Scan::default();
+    let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+    let mut candidates: BTreeMap<String, usize> = BTreeMap::new();
+    let mut noted: BTreeSet<String> = BTreeSet::new();
+    for (path, text) in &sources {
+        let mut guard: Option<&str> = None;
+        for (index, line) in text.lines().enumerate() {
+            let def =
+                |name: String, kind, default: String, allowed: Vec<String>, boolean| OptionDef {
+                    name,
+                    kind,
+                    default,
+                    allowed,
+                    boolean,
+                    file: path.to_string(),
+                    line: index + 1,
+                };
+            let parsed = parse_line(line);
+            let previous_guard = guard.take();
+            if line.trim().is_empty() {
+                guard = previous_guard;
+            } else if let Some(name) = ifndef_name(line) {
+                guard = Some(name);
+            }
+            let (option, is_option) = match parsed {
+                Some(OptionLine::Define { name, .. }) if is_host_macro(&name) => continue,
                 Some(OptionLine::Define {
                     name,
                     comment,
                     value: None,
                     ..
-                }) if tested.contains(name.as_str()) => PackOption {
-                    name,
-                    value: None,
-                    enabled: comment.is_none(),
-                    allowed: Vec::new(),
-                },
+                }) => {
+                    // `#ifndef X` + `#define X` is an include guard.
+                    let is_guard = previous_guard == Some(name.as_str());
+                    let is_option = tested.contains(name.as_str()) && !is_guard;
+                    let on = if comment.is_none() { "true" } else { "false" };
+                    (
+                        def(name, OptionKind::Bool, on.into(), Vec::new(), true),
+                        is_option,
+                    )
+                }
                 Some(OptionLine::Define {
                     name,
                     comment: None,
                     value: Some(v),
                     allowed,
                     ..
-                }) if !allowed.is_empty() => PackOption {
-                    name,
-                    value: Some(line[v].to_string()),
-                    enabled: true,
-                    allowed,
-                },
+                }) => {
+                    let is_option = !allowed.is_empty();
+                    let value = line[v].to_string();
+                    (
+                        def(name, OptionKind::Value, value, allowed, false),
+                        is_option,
+                    )
+                }
                 Some(OptionLine::Const {
                     name,
+                    ty,
                     value,
                     allowed,
-                }) if !allowed.is_empty() && CONST_OPTIONS.contains(&name.as_str()) => PackOption {
-                    name,
-                    value: Some(line[value].to_string()),
-                    enabled: true,
-                    allowed,
-                },
+                }) if !allowed.is_empty()
+                    && (CONST_OPTIONS.contains(&name.as_str())
+                        || matches!(ty.as_str(), "int" | "float" | "bool")) =>
+                {
+                    let boolean = ty == "bool";
+                    let value = line[value].to_string();
+                    (def(name, OptionKind::Const, value, allowed, boolean), true)
+                }
                 _ => continue,
             };
-            found.entry(option.name.clone()).or_insert(option);
+            if !is_option {
+                if !seen.contains_key(&option.name) && !candidates.contains_key(&option.name) {
+                    candidates.insert(option.name.clone(), scan.candidates.len());
+                    scan.candidates.push(option);
+                }
+                continue;
+            }
+            match seen.get(&option.name) {
+                Some(&i) => {
+                    let first = &scan.options[i];
+                    if first.default != option.default && noted.insert(option.name.clone()) {
+                        scan.notes.push(format!(
+                            "option {} has default {} in {}:{} and {} in {}:{}; using {}",
+                            option.name,
+                            first.default,
+                            first.file,
+                            first.line,
+                            option.default,
+                            option.file,
+                            option.line,
+                            first.default
+                        ));
+                    }
+                }
+                None => {
+                    if let Some(i) = candidates.remove(&option.name) {
+                        scan.candidates[i].name.clear();
+                    }
+                    seen.insert(option.name.clone(), scan.options.len());
+                    scan.options.push(option);
+                }
+            }
         }
     }
-    found.into_values().collect()
+    scan.candidates.retain(|c| !c.name.is_empty());
+    scan
+}
+
+/// The options of a pack, each once (first definition wins), sorted by name.
+pub fn discover(files: &PackFiles) -> Vec<PackOption> {
+    let mut options: Vec<PackOption> = scan(files)
+        .options
+        .into_iter()
+        .map(|o| match o.kind {
+            OptionKind::Bool => PackOption {
+                name: o.name,
+                value: None,
+                enabled: o.default == "true",
+                allowed: Vec::new(),
+            },
+            _ => PackOption {
+                name: o.name,
+                value: Some(o.default),
+                enabled: true,
+                allowed: o.allowed,
+            },
+        })
+        .collect();
+    options.sort_by(|a, b| a.name.cmp(&b.name));
+    options
 }
 
 /// The macros options define, for preprocessing `shaders.properties`: an
@@ -270,8 +458,13 @@ pub fn macros(options: &[PackOption]) -> BTreeMap<String, String> {
 fn override_line(line: &str, value: Option<&str>) -> Option<String> {
     let set = |r: Range<usize>, with: &str| format!("{}{with}{}", &line[..r.start], &line[r.end..]);
     match parse_line(line)? {
-        OptionLine::Const { name, value: r, .. } if CONST_OPTIONS.contains(&name.as_str()) => {
-            Some(set(r, value?))
+        OptionLine::Const {
+            name,
+            value: r,
+            allowed,
+            ..
+        } if CONST_OPTIONS.contains(&name.as_str()) || !allowed.is_empty() => {
+            Some(set(r, value.unwrap_or("false")))
         }
         OptionLine::Const { .. } => None,
         OptionLine::Define {
@@ -387,14 +580,22 @@ mod tests {
         let files = pack(&[
             ("shaders/lib/h.glsl", header),
             ("shaders/composite.fsh", main),
-            // Not a program: its #ifdef does not count.
+            // An include's tests count too.
             ("shaders/lib/other.glsl", "#ifdef USED_BY_IF\n#endif\n"),
         ]);
         let found = discover(&files);
         let names: Vec<_> = found.iter().map(|o| o.name.as_str()).collect();
         assert_eq!(
             names,
-            ["BLOOM", "FOG", "HIDDEN", "LEVEL", "shadowMapResolution"]
+            [
+                "BLOOM",
+                "FOG",
+                "HIDDEN",
+                "LEVEL",
+                "USED_BY_IF",
+                "other",
+                "shadowMapResolution"
+            ]
         );
         let get = |n: &str| found.iter().find(|o| o.name == n).unwrap();
         assert!(get("FOG").enabled && !get("BLOOM").enabled && !get("HIDDEN").enabled);
@@ -458,6 +659,53 @@ mod tests {
                 .unwrap()
                 .contains("//#define LEVEL 2")
         );
+    }
+
+    #[test]
+    fn tests_anywhere_guards_consts_and_conflicts() {
+        let settings = "#ifndef SETTINGS_GLSL\n\n#define SETTINGS_GLSL\n#define IF_ONLY\n//#define ELIF_ONLY\n\
+                        #define PLAIN\n#define MC_FAKE\n#define LEVEL 2 // [1 2 3]\n#define NO_LIST 5\n\
+                        const bool softShadows = true; // [true false]\nconst vec2 v = vec2(1.0); // [a b]\n\
+                        const float strength = 0.5;\n#endif\n";
+        let program =
+            "#if IF_ONLY && defined(MC_FAKE)\n#elif 1.0f > 0 || ELIF_ONLY // PLAIN\n#endif\n";
+        let other = "#define LEVEL 3 // [1 2 3]\n#define IF_ONLY\n";
+        let files = pack(&[
+            ("shaders/lib/settings.glsl", settings),
+            ("shaders/world0/composite.fsh", program),
+            ("shaders/z/other.inc", other),
+            // Not a source: its tests do not count.
+            ("shaders/shaders.properties", "#ifdef PLAIN\n#endif\n"),
+        ]);
+        let scan = scan(&files);
+        let names: Vec<_> = scan.options.iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(names, ["IF_ONLY", "ELIF_ONLY", "LEVEL", "softShadows"]);
+        let soft = scan.get("softShadows").unwrap();
+        assert!(soft.boolean && soft.kind == OptionKind::Const && soft.default == "true");
+        let level = scan.get("LEVEL").unwrap();
+        assert_eq!(
+            (level.file.as_str(), level.line),
+            ("shaders/lib/settings.glsl", 8)
+        );
+        assert_eq!(scan.notes.len(), 1, "{:?}", scan.notes);
+        assert!(scan.notes[0].contains("LEVEL") && scan.notes[0].contains("using 2"));
+        let candidates: Vec<_> = scan.candidates.iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(candidates, ["SETTINGS_GLSL", "PLAIN", "NO_LIST"]);
+
+        // A listed `const` of any name is rewritten; a bool const takes
+        // `false` for "off".
+        let out = apply(
+            &files,
+            &[
+                o("softShadows", None),
+                o("strength", Some("2.0")),
+                o("ELIF_ONLY", Some("true")),
+            ],
+        );
+        let text = out.text("shaders/lib/settings.glsl").unwrap();
+        assert!(text.contains("const bool softShadows = false; // [true false]"));
+        assert!(text.contains("const float strength = 0.5;"));
+        assert!(text.contains("\n#define ELIF_ONLY\n"));
     }
 
     #[test]

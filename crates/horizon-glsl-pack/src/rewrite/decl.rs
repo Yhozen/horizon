@@ -57,7 +57,34 @@ impl Ctx<'_> {
                 next = 4;
             }
             if rest.get(next) == Some(&"=") {
-                return Err(format!("initializer on `{storage} {name}`"));
+                // GLSL 330 allows `uniform T x = v;`: Horizon's value wins for a uniform it
+                // provides; any other keeps `v` as a plain global instead of the zero fallback.
+                if storage != "uniform" || array_len.is_some() {
+                    return Err(format!("initializer on `{storage} {name}`"));
+                }
+                let mut depth = 0i32;
+                let len = rest[next + 1..]
+                    .iter()
+                    .position(|w| {
+                        match *w {
+                            "(" | "[" => depth += 1,
+                            ")" | "]" => depth -= 1,
+                            _ => {}
+                        }
+                        depth == 0 && *w == ","
+                    })
+                    .unwrap_or(rest.len() - next - 1);
+                let init = rest[next + 1..next + 1 + len].join(" ");
+                if crate::uniforms::uniform_type(name).is_none() {
+                    self.prelude.insert(format!("{ty} {name} = {init};"));
+                } else {
+                    self.record(storage, &ty, name, flat, array_len)?;
+                }
+                match rest.get(next + 1 + len) {
+                    None => break,
+                    _ => rest = &rest[next + 2 + len..],
+                }
+                continue;
             }
             self.record(storage, &ty, name, flat, array_len)?;
             match rest.get(next) {
@@ -69,6 +96,37 @@ impl Ctx<'_> {
             }
         }
         Ok(true)
+    }
+
+    /// Records the samplers of a top-level `uniform sampler… a, b;` ahead of
+    /// the pass that emits the body (errors are left to that pass).
+    pub(super) fn sampler_declaration(&mut self, sig: &[usize]) {
+        let words: Vec<&str> = sig.iter().map(|&i| self.toks[i].text).collect();
+        let Some(u) = words.iter().position(|w| *w == "uniform") else {
+            return;
+        };
+        if words.contains(&"{") || words.contains(&"(") && words.first() != Some(&"layout") {
+            return;
+        }
+        let Some(t) = words[u..]
+            .iter()
+            .position(|w| w.trim_start_matches(['i', 'u']).starts_with("sampler"))
+            .map(|t| t + u)
+        else {
+            return;
+        };
+        let ty = words[t];
+        for w in words[t + 1..].windows(2) {
+            if matches!(w[1], "," | ";")
+                && w[0].starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            {
+                self.sampler_shadow
+                    .insert(w[0].into(), ty.ends_with("Shadow"));
+                self.out
+                    .sampler_types
+                    .insert(emit::sampler_alias(w[0]).into(), ty.into());
+            }
+        }
     }
 
     pub(super) fn record(
@@ -94,6 +152,9 @@ impl Ctx<'_> {
                 self.sampler_shadow
                     .insert(name.into(), ty.ends_with("Shadow"));
                 self.out.samplers.insert(emit::sampler_alias(name).into());
+                self.out
+                    .sampler_types
+                    .insert(emit::sampler_alias(name).into(), ty.into());
             }
             "uniform" if len.is_some() => return Err(format!("uniform array `{name}`")),
             "uniform" => self.out.uniforms.push(Uniform {

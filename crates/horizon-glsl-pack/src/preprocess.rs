@@ -10,20 +10,116 @@ mod expr;
 
 use expr::{K, lex};
 
-/// The macros OptiFine defines before a pack's sources (`MC_VERSION`, …).
+/// Iris's render stages (`MC_RENDER_STAGE_<name>`), numbered in the order of
+/// the public docs from `NONE` = 0; the `renderStage` uniform uses the same
+/// numbers.
+pub const RENDER_STAGES: [&str; 24] = [
+    "NONE",
+    "SKY",
+    "SUNSET",
+    "CUSTOM_SKY",
+    "SUN",
+    "MOON",
+    "STARS",
+    "VOID",
+    "TERRAIN_SOLID",
+    "TERRAIN_CUTOUT_MIPPED",
+    "TERRAIN_CUTOUT",
+    "ENTITIES",
+    "BLOCK_ENTITIES",
+    "DESTROY",
+    "OUTLINE",
+    "DEBUG",
+    "HAND_SOLID",
+    "TERRAIN_TRANSLUCENT",
+    "TRIPWIRE",
+    "PARTICLES",
+    "CLOUDS",
+    "RAIN_SNOW",
+    "WORLD_BORDER",
+    "HAND_TRANSLUCENT",
+];
+
+/// The vanilla biomes, alphabetical: `BIOME_<NAME>` is the index, and the
+/// `biome` uniform uses the same numbers (one table, in `custom_uniforms`).
+pub use crate::custom_uniforms::BIOMES;
+
+/// Biome categories (`CAT_<NAME>`), numbered in the docs' order from `NONE` = 0
+/// (the `biome_category` uniform).
+pub const BIOME_CATEGORIES: [&str; 17] = [
+    "NONE",
+    "TAIGA",
+    "EXTREME_HILLS",
+    "JUNGLE",
+    "MESA",
+    "PLAINS",
+    "SAVANNA",
+    "ICY",
+    "THE_END",
+    "BEACH",
+    "FOREST",
+    "OCEAN",
+    "DESERT",
+    "RIVER",
+    "SWAMP",
+    "MUSHROOM",
+    "NETHER",
+];
+
+/// The macros the host defines before a pack's own (the "who Horizon says it
+/// is" contract): Iris 1.11.7's, as measured, except the GL and GLSL versions
+/// (4.1, a host without compute or SSBOs) and no vendor or GPU named.
+/// `IRIS_FEATURE_*` come from the pack's `iris.features.*` (`features.rs`).
 pub fn predefined(mc_version: u32) -> BTreeMap<String, String> {
-    [
+    let os = if cfg!(target_os = "linux") {
+        "MC_OS_LINUX"
+    } else if cfg!(target_os = "macos") {
+        "MC_OS_MAC"
+    } else if cfg!(target_os = "windows") {
+        "MC_OS_WINDOWS"
+    } else {
+        "MC_OS_OTHER"
+    };
+    let mut macros: BTreeMap<String, String> = [
         ("MC_VERSION", mc_version.to_string()),
-        ("MC_GL_VERSION", "320".into()),
-        ("MC_GLSL_VERSION", "150".into()),
-        ("MC_OS_LINUX", "1".into()),
+        ("MC_GL_VERSION", "410".into()),
+        ("MC_GLSL_VERSION", "410".into()),
+        (os, "1".into()),
+        ("MC_GL_VENDOR_OTHER", "1".into()),
+        ("MC_GL_RENDERER_OTHER", "1".into()),
+        ("IS_IRIS", "1".into()),
+        ("IRIS_VERSION", "11107".into()),
+        ("IRIS_TAG_SUPPORT", "2".into()),
+        // Iris defines both even for packs without normal or specular settings (measured).
+        ("MC_NORMAL_MAP", "1".into()),
+        ("MC_SPECULAR_MAP", "1".into()),
         ("MC_RENDER_QUALITY", "1.0".into()),
         ("MC_SHADOW_QUALITY", "1.0".into()),
         ("MC_HAND_DEPTH", "0.125".into()),
+        ("MC_MIPMAP_LEVEL", "4".into()),
+        ("PPT_NONE", "0".into()),
+        ("PPT_RAIN", "1".into()),
+        ("PPT_SNOW", "2".into()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
-    .collect()
+    .collect();
+    let numbered = [
+        ("MC_RENDER_STAGE_", &RENDER_STAGES[..], false),
+        ("BIOME_", BIOMES, true),
+        ("CAT_", &BIOME_CATEGORIES[..], false),
+    ];
+    for (prefix, names, upper) in numbered {
+        for (i, name) in names.iter().enumerate() {
+            let name = if upper {
+                name.to_ascii_uppercase()
+            } else {
+                name.to_string()
+            };
+            macros.insert(format!("{prefix}{name}"), i.to_string());
+        }
+    }
+    macros
 }
 
 /// The file at `path` with includes expanded, comments removed, conditionals
@@ -71,10 +167,9 @@ pub fn preprocess_text(
         including: vec![file.to_string()],
         out: String::new(),
     };
+    // A conditional still open at the end of the file closes there, as Iris's
+    // preprocessor takes it (Bloop's `taa.fsh` leaves its `#ifdef TAA` open).
     pp.run(text, file)?;
-    if !pp.conds.is_empty() {
-        return Err(PackError::new(file, "`#if` without `#endif`"));
-    }
     Ok(pp.out)
 }
 
@@ -143,7 +238,17 @@ impl Pp<'_> {
     }
 
     fn run(&mut self, text: &str, file: &str) -> Result<(), PackError> {
+        // A code line whose macro call continues on the next lines, joined.
+        let mut pending = String::new();
         for (n, line) in strip_comments(text).lines().enumerate() {
+            let joined;
+            let line = if pending.is_empty() || line.trim_start().starts_with('#') {
+                self.flush(&mut pending);
+                line
+            } else {
+                joined = format!("{} {}", std::mem::take(&mut pending), line.trim());
+                joined.as_str()
+            };
             let at = |m: String| PackError::new(file, format!("line {}: {m}", n + 1));
             let trimmed = line.trim();
             if let Some(target) = include_target(trimmed) {
@@ -168,12 +273,40 @@ impl Pp<'_> {
                     .unwrap_or(d.len());
                 self.directive(&d[..split], d[split..].trim()).map_err(at)?;
             } else if self.live() && !trimmed.is_empty() {
+                if self.open_call(line) {
+                    pending = line.to_string();
+                    continue;
+                }
                 let line = self.expand(line, &mut Vec::new());
                 self.out.push_str(line.trim_end());
                 self.out.push('\n');
             }
         }
+        self.flush(&mut pending);
         Ok(())
+    }
+
+    /// Expands and writes a pending joined line as it is.
+    fn flush(&mut self, pending: &mut String) {
+        if !pending.is_empty() {
+            let line = self.expand(&std::mem::take(pending), &mut Vec::new());
+            self.out.push_str(line.trim_end());
+            self.out.push('\n');
+        }
+    }
+
+    /// Whether `line` calls a function-like macro whose `)` is on a later line.
+    fn open_call(&self, line: &str) -> bool {
+        let toks = lex(line);
+        toks.iter().enumerate().any(|(i, &(k, s))| {
+            k == K::Ident && self.macros.get(s).is_some_and(|m| m.params.is_some()) && {
+                let mut j = i + 1;
+                while toks.get(j).is_some_and(|t| t.0 == K::Space) {
+                    j += 1;
+                }
+                toks.get(j).is_some_and(|t| t.1 == "(") && call_args(&toks, i + 1).is_none()
+            }
+        })
     }
 
     fn directive(&mut self, name: &str, args: &str) -> Result<(), String> {
@@ -285,7 +418,9 @@ impl Pp<'_> {
             });
             i = j;
         }
-        Ok(expr::eval(&self.expand(&s, &mut Vec::new()))? != 0.0)
+        // A condition that does not parse is false, as in Iris (Pastel has
+        // `#if (in(biome, …)` in a live branch).
+        Ok(expr::eval(&self.expand(&s, &mut Vec::new())).is_ok_and(|v| v != 0.0))
     }
 
     /// Expands macros in `text`, whole identifiers only; `hide` holds the
@@ -316,7 +451,7 @@ impl Pp<'_> {
                             Some(p) if k == K::Ident => args[p].clone(),
                             _ => t.to_string(),
                         };
-                        lex(&m.body).into_iter().map(subst).collect()
+                        paste(&lex(&m.body).into_iter().map(subst).collect::<String>())
                     }
                     // Not a call (or a wrong arity): the name stays, as in C.
                     _ => {
@@ -340,6 +475,17 @@ impl Pp<'_> {
         }
         out
     }
+}
+
+/// `a ## b` → `ab` (token pasting in a macro body).
+fn paste(body: &str) -> String {
+    let mut out = body.to_string();
+    while let Some(at) = out.find("##") {
+        let left = out[..at].trim_end().len();
+        let right = at + 2 + (out[at + 2..].len() - out[at + 2..].trim_start().len());
+        out.replace_range(left..right, "");
+    }
+    out
 }
 
 /// A call's arguments on the same line, split at top-level commas, and the
@@ -460,6 +606,17 @@ mod tests {
         pp_with(text, &[])
     }
 
+    fn pp_with_version(text: &str, mc_version: u32) -> String {
+        preprocess_text(
+            text,
+            "shaders/t.fsh",
+            &PackFiles::default(),
+            &predefined(mc_version),
+            &[],
+        )
+        .unwrap()
+    }
+
     fn pp_with(text: &str, overrides: &[(&str, Option<&str>)]) -> String {
         let o: Vec<_> = overrides
             .iter()
@@ -473,6 +630,48 @@ mod tests {
             &o,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn horizon_says_it_is_iris_at_gl_410() {
+        let text = "#if defined IS_IRIS && IRIS_VERSION >= 10800 && MC_GL_VERSION == 410 && defined MC_NORMAL_MAP\nI\n#endif\n\
+                    #ifdef MC_GL_VENDOR_NVIDIA\nN\n#endif\n\
+                    MC_RENDER_STAGE_NONE MC_RENDER_STAGE_SUN BIOME_BADLANDS BIOME_PLAINS CAT_NETHER PPT_SNOW";
+        let out = pp(text);
+        let words: Vec<&str> = out.split_whitespace().collect();
+        assert_eq!(words, ["I", "0", "4", "0", "41", "16", "2"]);
+        let text = "#if defined IS_IRIS && MC_VERSION >= 260300 && IRIS_TAG_SUPPORT == 2
+V
+#endif
+";
+        assert_eq!(pp_with_version(text, 260300).trim(), "V");
+        assert_eq!(BIOMES[41], "plains");
+    }
+
+    #[test]
+    fn broken_conditions_are_false() {
+        assert_eq!(pp("#if (in(biome, 3)\nA\n#else\nB\n#endif\n").trim(), "B");
+    }
+
+    #[test]
+    fn open_conditionals_close_at_the_end() {
+        let out =
+            pp("#define T\nvoid main() {\n#ifdef T\nA;\n#ifdef U\nB;\n#else\nC;\n#endif\n}\n");
+        assert_eq!(
+            out.split_whitespace().collect::<Vec<_>>(),
+            ["void", "main()", "{", "A;", "C;", "}"]
+        );
+        assert_eq!(pp("#ifdef U\nA\n").trim(), "");
+    }
+
+    #[test]
+    fn macro_calls_across_lines_and_pasting() {
+        let text = "#define max0(x) max(x, 0.0)\n#define CAT(a, b) a ## b\n#define F(i) v ## i\n\
+                    float y = max0(\n    a\n    + b\n);\nfloat CAT(fo, o) = F(2);\nfloat z = max0(c);\n";
+        let out = pp(text);
+        assert!(out.contains("float y = max(a + b, 0.0);"), "{out}");
+        assert!(out.contains("float foo = v2;"), "{out}");
+        assert!(out.contains("float z = max(c, 0.0);"), "{out}");
     }
 
     #[test]
@@ -581,7 +780,7 @@ mod tests {
             "k\nn\n"
         );
         assert!(pp_err("#if 1\n#error stop\n#endif").contains("stop"));
-        assert!(pp_err("#if 1\nx").contains("#endif"));
+        assert_eq!(pp("#if 1\nx"), "x\n");
         assert!(pp_err("#endif").contains("without"));
         assert_eq!(pp("#if 0\n#error dead\n#endif\nok"), "ok\n");
     }
