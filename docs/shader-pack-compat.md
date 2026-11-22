@@ -58,13 +58,28 @@ still fails on its own textures.
 - No status got worse. `final` left the essential lists (316126b6: final is not essential), which changed
   no status.
 
+**Compute shaders and storage buffers (2026-11-22, `gabriel/packs-sampling` at 746bb590).** `.csh` programs and
+`bufferObject` storage buffers translate and run ([format notes §18](shader-pack-format-notes.md#18-compute-programs-and-storage-buffers)),
+and `COMPUTE_SHADERS` and `SSBO` are supported flags. Since then `pack_check` also compiles the whole pack once per
+dimension, and the summary takes the game's own refusal. Before, any `iris.features.required` line counted as
+Refused. Overworld, WebGPU's default limits (16 KiB of shared memory):
+
+| pack | before | after | what is left |
+|---|---|---|---|
+| Noble | Refused (compute, SSBO) | Partial | its 3 compute programs translate; optional `deferred4` fails (an array `out`, which Iris could not patch either) |
+| RenderPearl, FastPBR, Rethinking Voxels, Shrimple, Clarity | Refused | Refused | custom images only (the images session's branch); RenderPearl also needs 5 more flags |
+| Photon | Partial | Partial | the sky-light compute `deferred4_a` wants 36 KiB of shared memory: left out on WebGPU's 16 KiB and on lavapipe's 32 KiB (desktop GPUs with 48 KiB run it; not tested) |
+| Complementary, BSL, Mellow | Works-candidate | Works-candidate | their compute programs are off in the default options or write custom images |
+
+Renders with that branch (lavapipe, noon): Photon, BSL, Mellow and Complementary still draw (Iris diff 49, 9, 10 and 9).
+
 ## Packs
 
 ### Train set
 
 | rank | pack | version | 16 varyings | 28 varyings | rendered natively | notes |
 |---|---|---|---|---|---|---|
-| 1 | [Complementary Shaders - Reimagined](https://modrinth.com/shader/complementary-reimagined) | r5.10 | Works-candidate | Works-candidate | Draws, Iris diff 11 | optional compute and storage buffers skipped |
+| 1 | [Complementary Shaders - Reimagined](https://modrinth.com/shader/complementary-reimagined) | r5.10 | Works-candidate | Works-candidate | Draws, Iris diff 11 | storage buffers on; its compute program writes custom images |
 | 3 | [BSL Shaders](https://modrinth.com/shader/bsl-shaders) | 10.1.8 | Works-candidate | Works-candidate | Draws, Iris diff 11 | optional compute pass skipped |
 | 4 | [Photon Shaders](https://modrinth.com/shader/photon-shader) | v1.4 | Partial (O/E), Works-candidate (N) | Partial (O/E), Works-candidate (N) | Draws, lit (no Iris picture: Iris fails on llvmpipe) | an optional deferred pass fails (overworld: 17 textures; End: a sky function) |
 | 5 | [Solas Shader](https://modrinth.com/shader/solas-shader) | 3.9 | Partial | Partial | Draws, Iris diff 17 | shadow programs use image writes |
@@ -93,7 +108,7 @@ still fails on its own textures.
 | 21 | [I Like Vanilla](https://modrinth.com/shader/i-like-vanilla) | v1.5.0b | Works-candidate | Works-candidate | Draws, Iris diff 11 |  |
 | 22 | [Vanilla Plus Shader](https://modrinth.com/shader/vanilla-plus-shader) | 3.3 | Works-candidate | Works-candidate | Draws, Iris diff 119 (Iris picture blown out) |  |
 | 23 | [Visual Vibrance](https://modrinth.com/shader/visual-vibrance) | 0.3.5a | Refused | Refused |  | requires custom images, storage buffers, separate shadow samplers |
-| 24 | [Noble Shaders](https://modrinth.com/shader/noble) | 1.9.9 | Refused | Refused |  | requires compute shaders and storage buffers |
+| 24 | [Noble Shaders](https://modrinth.com/shader/noble) | 1.9.9 | Partial (O, 2026-11-22) | Refused (not rechecked) |  | compute and storage buffers since 2026-11-22; optional deferred4 fails (an array `out`) |
 
 ### Hold-out batch 2 (Modrinth ranks 25–40)
 
