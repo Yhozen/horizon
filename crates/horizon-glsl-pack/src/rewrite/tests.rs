@@ -786,3 +786,46 @@ fn a_sampler_declared_below_its_first_use() {
         rw.body
     );
 }
+
+#[test]
+fn image_uniforms_become_host_functions() {
+    let fs = "layout(r32ui) uniform uimage3D voxels;
+writeonly uniform image2D lighting;
+layout (rgba16f) readonly restrict uniform image2D history, other;
+void main() {
+    ivec3 size = imageSize(voxels);
+    uint old = imageAtomicMax(voxels, ivec3(0), 5u);
+    imageStore(lighting, ivec2(gl_FragCoord.xy), imageLoad(history, ivec2(1)) * float(old));
+    gl_FragColor = vec4(size);
+}
+";
+    let rw = rewrite(fs, Stage::Fragment).unwrap();
+    let img = |n: &str| rw.images.iter().find(|i| i.name == n).unwrap();
+    assert_eq!(rw.images.len(), 4);
+    assert_eq!(img("voxels").ty, "uimage3D");
+    assert_eq!(img("voxels").format.as_deref(), Some("r32ui"));
+    assert_eq!(img("voxels").access, ImageAccess::ReadWrite);
+    assert_eq!(img("voxels").calls, set(&["imageAtomicMax", "imageSize"]));
+    assert_eq!(img("lighting").format, None);
+    assert_eq!(img("lighting").access, ImageAccess::WriteOnly);
+    assert_eq!(img("lighting").calls, set(&["imageStore"]));
+    assert_eq!(img("history").access, ImageAccess::ReadOnly);
+    assert_eq!(img("other").format.as_deref(), Some("rgba16f"));
+    assert!(img("other").calls.is_empty());
+    assert!(rw.body.contains("hz_imageSize_voxels()"), "{}", rw.body);
+    assert!(
+        rw.body.contains("hz_imageAtomicMax_voxels( ivec3(0), 5u)"),
+        "{}",
+        rw.body
+    );
+    assert!(
+        rw.body.contains(
+            "hz_imageStore_lighting( ivec2(hz_FragCoord.xy), hz_imageLoad_history( ivec2(1))"
+        ),
+        "{}",
+        rw.body
+    );
+    assert!(rw.uniforms.is_empty() && rw.samplers.is_empty());
+    let err = rewrite("uniform image2D a[2];\nvoid main() {}\n", Stage::Fragment).unwrap_err();
+    assert_eq!(err, "image array `a`");
+}
