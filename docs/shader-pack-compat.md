@@ -67,7 +67,7 @@ still fails on its own textures.
 | 1 | [Complementary Shaders - Reimagined](https://modrinth.com/shader/complementary-reimagined) | r5.10 | Works-candidate | Works-candidate | Draws, Iris diff 11 | optional compute and storage buffers skipped |
 | 3 | [BSL Shaders](https://modrinth.com/shader/bsl-shaders) | 10.1.8 | Works-candidate | Works-candidate | Draws, Iris diff 11 | optional compute pass skipped |
 | 4 | [Photon Shaders](https://modrinth.com/shader/photon-shader) | v1.4 | Partial (O/E), Works-candidate (N) | Partial (O/E), Works-candidate (N) | Draws, lit (no Iris picture: Iris fails on llvmpipe) | an optional deferred pass fails (overworld: 17 textures; End: a sky function) |
-| 5 | [Solas Shader](https://modrinth.com/shader/solas-shader) | 3.9 | Partial | (not rerun) | Draws, Iris diff 17 | shadowcomp (compute) writes and samples the same flood-fill image in one dispatch, which WebGPU forbids: left out; images otherwise bound (packs-dims) |
+| 5 | [Solas Shader](https://modrinth.com/shader/solas-shader) | 3.9 | Partial | (not rerun) | Draws, Iris diff 11 (b6a120c7) | shadowcomp (compute) writes and samples the same flood-fill image in one dispatch, which WebGPU forbids: left out; images otherwise bound (packs-dims) |
 | 6 | [Bliss Shaders](https://modrinth.com/shader/bliss-shader) | 2.1.2 | Works-candidate | Works-candidate | Draws, Iris diff 18 |  |
 | 7 | [MakeUp - Ultra Fast](https://modrinth.com/shader/makeup-ultra-fast-shaders) | 9.6 | Works-candidate | Works-candidate | Draws, Iris diff 40 | water packs into 15 varying locations |
 | 8 | [Rethinking Voxels](https://modrinth.com/shader/rethinking-voxels) | r0.1-beta9 | Refused | Refused | Looks vanilla | requires compute shaders, custom images, storage buffers |
@@ -107,7 +107,7 @@ still fails on its own textures.
 | 30 | [Fantasy Shaders Reimagined](https://modrinth.com/shader/fantasy-shaders) | 1.11 | Works-candidate | Works-candidate |  |  |
 | 31 | [Body Camera](https://modrinth.com/shader/body-camera-shader) | 1.6.2 | Works-candidate | Works-candidate | Draws, Iris diff 30 |  |
 | 32 | [RenderPearl](https://modrinth.com/shader/renderpearl) | 2.8.0-beta.4 | Refused | Refused |  | requires compute shaders, storage buffers and 5 more features |
-| 33 | [Clarity](https://modrinth.com/shader/clarityshader) | 1.1.3 | Partial | (not rerun) |  | images in compute and composite work; the sky programs' interface blocks do not translate |
+| 33 | [Clarity](https://modrinth.com/shader/clarityshader) | 1.1.3 | Partial | (not rerun) | Draws, Iris diff 14 (b6a120c7) | images in compute and composite work; the sky programs' interface blocks do not translate; `composite2` left out natively (colorimg0 on a Bgra8Unorm colortex0) |
 | 34 | [Lux V1](https://modrinth.com/shader/lux-v1) | 1.3 | Works-candidate | Works-candidate | Draws, Iris diff 30 |  |
 | 35 | [Fantasy Shaders Unbound](https://modrinth.com/shader/fantasy-shader-unbound) | 1.11 | Works-candidate | Works-candidate |  |  |
 | 36 | [RedHat Shaders](https://modrinth.com/shader/redhat-shaders) | 34.3.1 | Works-candidate | Works-candidate | Draws, Iris diff 13 |  |
