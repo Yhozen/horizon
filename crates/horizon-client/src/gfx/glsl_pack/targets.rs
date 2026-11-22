@@ -65,7 +65,7 @@ pub(super) fn wgpu_format(
 
 /// The wgpu format of the crate's storage choice for every other format
 /// (snorm and packed small formats widened, integers as integer targets).
-fn storage_format(storage: StorageFormat, float32: bool) -> wgpu::TextureFormat {
+pub(super) fn storage_format(storage: StorageFormat, float32: bool) -> wgpu::TextureFormat {
     use StorageFormat as S;
     use wgpu::TextureFormat as T;
     match storage {
@@ -165,6 +165,8 @@ pub(super) struct Need {
     pub used: bool,
     pub two_sides: bool,
     pub mipmaps: bool,
+    /// A compute program writes or reads it as `colorimgN` (a storage texture).
+    pub storage: bool,
 }
 
 /// The screen-sized targets.
@@ -210,7 +212,12 @@ impl Targets {
                         .map(|side| {
                             let label =
                                 format!("colortex{i}{}", if side == 0 { "" } else { " (alt)" });
-                            let img = image(device, &label, size, formats[i], levels, COLOR_USAGE);
+                            let usage = if need.storage {
+                                COLOR_USAGE | wgpu::TextureUsages::STORAGE_BINDING
+                            } else {
+                                COLOR_USAGE
+                            };
+                            let img = image(device, &label, size, formats[i], levels, usage);
                             let target = img.texture.create_view(&wgpu::TextureViewDescriptor {
                                 mip_level_count: Some(1),
                                 ..Default::default()

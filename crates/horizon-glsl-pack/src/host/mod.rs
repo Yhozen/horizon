@@ -16,6 +16,7 @@ use crate::uniforms::{UNIFORM_BLOCK, uniform_type};
 use crate::{BlockIds, HostParams, PackPlan, ProgramKind, Stage, TextureBinding};
 
 mod builtins;
+mod compute;
 mod fragment;
 mod sampling;
 #[cfg(test)]
@@ -24,6 +25,7 @@ mod varyings;
 mod vertex;
 
 use builtins::*;
+pub use compute::{COLOR_IMAGE_BINDING, compute_source};
 use fragment::fragment_source;
 pub use fragment::variant;
 use sampling::*;

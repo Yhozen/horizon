@@ -8,12 +8,13 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use crate::compute::{self, ComputeSlot};
 use crate::program::find_candidates;
 use crate::report::{PackStatus, ProgramOutcome};
 use crate::{
-    BlockIds, CompiledPack, CompiledProgram, HostParams, PackError, PackFiles, PackOptions,
-    PackPlan, PackReport, ProgramKind, ShadowSettings, Stage, directives, features, host, naga_out,
-    options, preprocess, properties, rewrite, world_folder,
+    BlockIds, CompiledCompute, CompiledPack, CompiledProgram, HostParams, PackError, PackFiles,
+    PackOptions, PackPlan, PackReport, ProgramKind, ShadowSettings, Stage, directives, features,
+    host, naga_out, options, preprocess, properties, rewrite, world_folder,
 };
 
 /// Compiles every slot of the pack whose program exists for the dimension
@@ -206,6 +207,15 @@ struct State {
     cache: Vec<(Key, Result<CompiledProgram, PackError>)>,
     programs: BTreeMap<ProgramKind, CompiledProgram>,
     skipped: Vec<(ProgramKind, String)>,
+    /// Every compute program the pack has here, by slot (pack path, no extension).
+    compute_files: BTreeMap<ComputeSlot, String>,
+    /// Compute slots still to compile.
+    compute_queue: VecDeque<ComputeSlot>,
+    computes: BTreeMap<ComputeSlot, CompiledCompute>,
+    compute_failed: BTreeMap<ComputeSlot, PackError>,
+    /// The pack lists `COMPUTE_SHADERS` in `iris.features.required`: a
+    /// compute program that fails fails the pack.
+    compute_required: bool,
 }
 
 impl State {
@@ -271,6 +281,7 @@ enum Phase {
     Prepare,
     Plan,
     Slots,
+    Computes,
     Done,
 }
 
@@ -347,6 +358,7 @@ impl Session {
             Phase::Prepare => self.prepare_one(),
             Phase::Plan => self.read_globals(),
             Phase::Slots => self.settle_one(),
+            Phase::Computes => self.compute_one(),
             Phase::Done => return true,
         }
         self.done += 1;
@@ -530,6 +542,19 @@ impl Session {
             self.report.refusal = Some(why.clone());
             return self.fail(PackError::new(format!("shaders/{folder}"), why));
         }
+        // Compute programs run with the whole frame only (not for chosen slots).
+        let whole = self.mode.kinds.len() == ProgramKind::all().len();
+        let compute_files = if whole {
+            compute::find(&files, &folder, &usable)
+        } else {
+            BTreeMap::new()
+        };
+        let (buffer_objects, buffer_notes) = compute::BufferObject::parse_all(&props.entries);
+        self.report.notes.extend(buffer_notes);
+        let compute_required = features::flags(&props)
+            .0
+            .iter()
+            .any(|f| f == "COMPUTE_SHADERS");
         let mut wanted = self.mode.kinds.clone();
         wanted.sort();
         wanted.dedup();
@@ -560,8 +585,10 @@ impl Session {
             ..PackPlan::default()
         };
         let mut plan = plan;
+        plan.buffer_objects = buffer_objects;
         crate::shaders_properties::apply_pass_state(&mut plan, &props);
-        self.total = 1 + to_prepare.len() + 1 + queue.len();
+        self.total = 1 + to_prepare.len() + 1 + queue.len() + compute_files.len();
+        let compute_queue = compute_files.keys().copied().collect();
         self.state = Some(State {
             files,
             predefined,
@@ -578,6 +605,11 @@ impl Session {
             cache: Vec::new(),
             programs: BTreeMap::new(),
             skipped: Vec::new(),
+            compute_files,
+            compute_queue,
+            computes: BTreeMap::new(),
+            compute_failed: BTreeMap::new(),
+            compute_required,
         });
         self.phase = Phase::Prepare;
     }
@@ -610,10 +642,12 @@ impl Session {
                 preprocessed: [&p.vsh, &p.fsh],
             }),
         );
-        self.phase = if st.queue.is_empty() {
-            Phase::Done
-        } else {
+        self.phase = if !st.queue.is_empty() {
             Phase::Slots
+        } else if !st.compute_queue.is_empty() {
+            Phase::Computes
+        } else {
+            Phase::Done
         };
     }
 
@@ -670,6 +704,55 @@ impl Session {
             }
         }
         if st.queue.is_empty() {
+            self.phase = if st.compute_queue.is_empty() {
+                Phase::Done
+            } else {
+                Phase::Computes
+            };
+        }
+    }
+
+    /// Compiles the next compute program (no fallback: a program that fails
+    /// is left out, or fails the pack when the pack requires compute).
+    fn compute_one(&mut self) {
+        let compile = self.mode.compile;
+        let host = self.host;
+        let st = self.state.as_mut().expect("set up");
+        let Some(slot) = st.compute_queue.pop_front() else {
+            self.phase = Phase::Done;
+            return;
+        };
+        let path = st.compute_files[&slot].clone();
+        let result = if compile {
+            compile_compute(
+                &path,
+                slot,
+                &st.files,
+                &st.predefined,
+                &host,
+                &st.blocks,
+                &st.plan,
+            )
+            .map(Some)
+        } else {
+            preprocess::preprocess(&st.files, &format!("{path}.csh"), &st.predefined, &[])
+                .map(|_| None)
+        };
+        match result {
+            Ok(c) => {
+                st.plan.computes.insert(slot, path);
+                if let Some(c) = c {
+                    st.computes.insert(slot, c);
+                }
+            }
+            Err(e) => {
+                if st.compute_required {
+                    self.essential.get_or_insert(e.clone());
+                }
+                st.compute_failed.insert(slot, e);
+            }
+        }
+        if st.compute_queue.is_empty() {
             self.phase = Phase::Done;
         }
     }
@@ -713,6 +796,21 @@ impl Session {
                 error,
             });
         }
+        for (slot, path) in &st.compute_files {
+            if let Some(c) = st.computes.get(slot) {
+                unknown.extend(c.unknown_uniforms.iter().cloned());
+            }
+            let failed = st.compute_failed.get(slot);
+            report.programs.push(ProgramOutcome {
+                slot: slot.name(),
+                file: st.plan.computes.get(slot).cloned(),
+                failed: failed
+                    .map(|e| (format!("{path}.csh"), e.message.clone()))
+                    .into_iter()
+                    .collect(),
+                error: failed.map(|e| e.to_string()),
+            });
+        }
         report.unknown_uniforms = unknown.into_iter().collect();
         report.settle();
         if (self.error.is_some() || self.essential.is_some())
@@ -738,6 +836,7 @@ impl Session {
                 custom_uniforms: plan.custom_uniforms.clone(),
                 plan,
                 skipped: st.skipped.clone(),
+                computes: st.computes.clone(),
                 blocks: st.blocks.clone(),
                 entities: st.entities.clone(),
                 items: st.items.clone(),
@@ -838,6 +937,12 @@ fn compile_program(
         .map_err(|m| PackError::new(&vsh_path, m))?;
     let fragment_wgsl = naga_out::glsl_to_wgsl(&fs_glsl, Stage::Fragment)
         .map_err(|m| PackError::new(&fsh_path, m))?;
+    let storage = storage_bindings(
+        &[(&vertex, Stage::Vertex), (&fragment, Stage::Fragment)],
+        plan,
+        host,
+    )
+    .map_err(|m| PackError::new(program, m))?;
     // The samplers the program reads (a pack may declare more than it uses).
     let samplers = vertex
         .sample_calls
@@ -852,7 +957,128 @@ fn compile_program(
         draw_buffers: draw_buffers.to_vec(),
         samplers,
         textures,
+        storage,
         unknown_uniforms,
         notes,
+    })
+}
+
+/// The storage buffers the stages declare, checked against the plan's
+/// `bufferObject`s and the device's limits.
+fn storage_bindings(
+    stages: &[(&rewrite::Rewritten, Stage)],
+    plan: &PackPlan,
+    host: &HostParams,
+) -> Result<Vec<crate::StorageBinding>, String> {
+    let mut out: BTreeMap<u32, crate::StorageBinding> = BTreeMap::new();
+    for (rw, stage) in stages {
+        if rw.buffers.len() > host.max_storage_buffers as usize {
+            return Err(format!(
+                "{} storage buffers in one stage, the device allows {}",
+                rw.buffers.len(),
+                host.max_storage_buffers
+            ));
+        }
+        for b in &rw.buffers {
+            let Some(object) = plan.buffer_objects.get(&b.index) else {
+                return Err(format!(
+                    "a storage buffer at binding {} without bufferObject.{} in shaders.properties",
+                    b.index, b.index
+                ));
+            };
+            if object.relative.is_none() && object.size > host.max_storage_buffer_bytes {
+                return Err(format!(
+                    "bufferObject.{} is {} bytes, the device binds at most {}",
+                    b.index, object.size, host.max_storage_buffer_bytes
+                ));
+            }
+            let e = out.entry(b.index).or_insert(crate::StorageBinding {
+                binding: rewrite::STORAGE_BINDING + b.index,
+                buffer: b.index,
+                read_only: true,
+                vertex: false,
+                fragment: false,
+                compute: false,
+            });
+            e.read_only &= b.read_only;
+            match stage {
+                Stage::Vertex => e.vertex = true,
+                Stage::Fragment => e.fragment = true,
+                Stage::Compute => e.compute = true,
+            }
+        }
+    }
+    Ok(out.into_values().collect())
+}
+
+/// Translates the compute program at `program` (no extension) for `slot`
+/// and checks it against the device's compute limits.
+fn compile_compute(
+    program: &str,
+    slot: ComputeSlot,
+    files: &PackFiles,
+    predefined: &BTreeMap<String, String>,
+    host: &HostParams,
+    blocks: &BlockIds,
+    plan: &PackPlan,
+) -> Result<CompiledCompute, PackError> {
+    let path = format!("{program}.csh");
+    let err = |m: String| PackError::new(&path, m);
+    let source = preprocess::preprocess(files, &path, predefined, &[])?;
+    let dispatch = compute::Dispatch::parse(&source)
+        .map_err(err)?
+        .unwrap_or_default();
+    let rewritten = rewrite::rewrite(&source, Stage::Compute).map_err(err)?;
+    let storage = storage_bindings(&[(&rewritten, Stage::Compute)], plan, host).map_err(err)?;
+    let spec = host::ProgramSpec {
+        kind: slot.pass_kind().unwrap_or(ProgramKind::Prepare(0)),
+        geometry: host::Geometry::Fullscreen,
+        draw_buffers: &[],
+        host,
+        blocks,
+        plan,
+    };
+    let (out, color_images) = host::compute_source(&rewritten, &spec).map_err(err)?;
+    let wgsl = naga_out::glsl_to_wgsl(&out.fragment, Stage::Compute).map_err(err)?;
+    let (size, shared) = crate::naga_atomics::compute_facts(&wgsl).map_err(err)?;
+    let invocations = size.iter().product::<u32>();
+    if invocations > host.max_invocations {
+        return Err(err(format!(
+            "workgroups of {}×{}×{} = {invocations} invocations, the device allows {}",
+            size[0], size[1], size[2], host.max_invocations
+        )));
+    }
+    if let Some(i) = (0..3).find(|&i| size[i] > host.max_workgroup_size[i]) {
+        return Err(err(format!(
+            "local_size_{} = {}, the device allows {}",
+            ["x", "y", "z"][i],
+            size[i],
+            host.max_workgroup_size[i]
+        )));
+    }
+    if shared > host.max_workgroup_storage {
+        return Err(err(format!(
+            "{shared} bytes of shared memory, the device allows {}",
+            host.max_workgroup_storage
+        )));
+    }
+    if let compute::Dispatch::Fixed(g) = dispatch
+        && g.iter().any(|&n| n > host.max_workgroups)
+    {
+        return Err(err(format!(
+            "workGroups {g:?}: the device allows {} per dimension",
+            host.max_workgroups
+        )));
+    }
+    Ok(CompiledCompute {
+        source: program.to_string(),
+        wgsl,
+        textures: out.textures,
+        storage,
+        color_images,
+        workgroup_size: size,
+        dispatch,
+        unknown_uniforms: out.unknown_uniforms,
+        notes: out.notes,
     })
 }

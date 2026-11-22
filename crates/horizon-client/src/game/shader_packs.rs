@@ -515,6 +515,7 @@ fn programs_named(error: &str, compiled: &CompiledPack) -> Vec<String> {
         .programs
         .values()
         .map(|p| p.source.clone())
+        .chain(compiled.computes.values().map(|c| c.source.clone()))
         .filter(|source| error.contains(source.as_str()))
         .collect()
 }

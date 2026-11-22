@@ -74,13 +74,15 @@ impl Ctx<'_> {
             }
             if member {
                 // Swizzles and struct fields: only the reserved words need renaming.
-                if listed(KEYWORDS, name) {
+                if self.reserved(name) {
                     out.push_str("hz_u_");
                 }
                 out.push_str(name);
                 continue;
             }
             if let Some(next) = self.sampling(name, i, end, out)? {
+                i = next;
+            } else if let Some(next) = self.image_call(name, i, end, out)? {
                 i = next;
             } else if listed(PRECISION, name) {
                 // Dropped: GLSL 450 desktop has no precision qualifiers worth keeping.
@@ -132,7 +134,10 @@ impl Ctx<'_> {
                 } else {
                     "int(gl_InstanceIndex)"
                 });
-            } else if name.starts_with("gl_") && !listed(KEPT, name) {
+            } else if name.starts_with("gl_")
+                && !listed(KEPT, name)
+                && !(self.stage == Stage::Compute && listed(COMPUTE_BUILTINS, name))
+            {
                 return Err(format!("unsupported built-in `{name}`"));
             } else if name == "ftransform" {
                 self.out.builtins.insert("hz_ftransform".into());
@@ -142,7 +147,7 @@ impl Ctx<'_> {
             } else if let Some(&n) = self.frag_outs.get(name) {
                 self.out.builtins.insert("hz_gl_FragData".into());
                 out.push_str(&format!("hz_gl_FragData[{n}]"));
-            } else if listed(KEYWORDS, name) || self.user_builtins.contains(name) {
+            } else if self.reserved(name) || self.user_builtins.contains(name) {
                 out.push_str("hz_u_");
                 out.push_str(name);
             } else {
@@ -150,6 +155,44 @@ impl Ctx<'_> {
             }
         }
         Ok(())
+    }
+
+    /// Rewrites `imageStore(img, …)` (name at `i - 1`) into `hz_imageStore_img(…)`
+    /// for a declared image; returns where to go on (the rest of the
+    /// arguments are emitted as usual), or `None` if it is not one.
+    pub(super) fn image_call(
+        &mut self,
+        name: &str,
+        i: usize,
+        end: usize,
+        out: &mut String,
+    ) -> Result<Option<usize>, String> {
+        if !IMAGE_BUILTINS.contains(&name) {
+            return Ok(None);
+        }
+        let Some(open) = self.next_sig(i, end).filter(|&o| self.text(o) == "(") else {
+            return Ok(None);
+        };
+        let (args, _) = self.call_args(open, end)?;
+        let sig: Vec<usize> = (args[0].0..args[0].1)
+            .filter(|&k| self.toks[k].kind != Kind::Space)
+            .collect();
+        let image = match sig[..] {
+            [k] => self.text(k).to_string(),
+            _ => return Err(format!("`{name}` on an expression, not an image uniform")),
+        };
+        let Some(img) = self.out.images.iter_mut().find(|u| u.name == image) else {
+            return Err(format!(
+                "`{name}` on `{image}`, which is not an image uniform"
+            ));
+        };
+        img.calls.insert(name.into());
+        out.push_str(&format!("hz_{name}_{image}("));
+        // Past the image and its comma; `imageSize(img)` keeps its `)`.
+        Ok(Some(match args.get(1) {
+            Some(&(start, _)) => start,
+            None => args[0].1,
+        }))
     }
 
     /// Rewrites `name(sampler, …)` (name at `i - 1`) into a host sampling
