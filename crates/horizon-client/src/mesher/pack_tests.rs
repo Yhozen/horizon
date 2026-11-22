@@ -34,19 +34,37 @@ fn ids_outside_the_stream_s_range_are_unlisted() {
 #[test]
 fn quad_normals_follow_the_winding_and_tilt_with_the_quad() {
     // An up face as the models wind it (counter-clockwise from above).
-    let up = [[0.0, 1.0, 0.0], [0.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 0.0]];
+    let up = [
+        [0.0, 1.0, 0.0],
+        [0.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0],
+        [1.0, 1.0, 0.0],
+    ];
     assert_eq!(quad_normal(up, [0.0; 3]), [0.0, 1.0, 0.0]);
     let mut down = up;
     down.reverse();
     assert_eq!(quad_normal(down, [0.0; 3]), [0.0, -1.0, 0.0]);
     // A cross plant's diagonal: the real normal, not an axis.
-    let cross = [[0.0, 1.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0]];
+    let cross = [
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 1.0],
+        [1.0, 1.0, 1.0],
+    ];
     let n = quad_normal(cross, [0.0; 3]);
     let h = std::f32::consts::FRAC_1_SQRT_2;
     // (v1 - v0) x (v2 - v0), the winding the up face above follows.
-    assert!((n[0] + h).abs() < 1e-6 && n[1] == 0.0 && (n[2] - h).abs() < 1e-6, "{n:?}");
+    assert!(
+        (n[0] + h).abs() < 1e-6 && n[1] == 0.0 && (n[2] - h).abs() < 1e-6,
+        "{n:?}"
+    );
     // A sloped fluid top leans away from its higher side.
-    let slope = [[0.0, 0.9, 0.0], [0.0, 0.9, 1.0], [1.0, 0.5, 1.0], [1.0, 0.5, 0.0]];
+    let slope = [
+        [0.0, 0.9, 0.0],
+        [0.0, 0.9, 1.0],
+        [1.0, 0.5, 1.0],
+        [1.0, 0.5, 0.0],
+    ];
     let n = quad_normal(slope, [0.0; 3]);
     assert!(n[0] > 0.0 && n[1] > 0.9 && n[2] == 0.0, "{n:?}");
     // A degenerate quad takes the face's direction.
@@ -134,7 +152,10 @@ fn sections_carry_the_stream_only_with_a_pack() {
                 [12, 3, 4] => (89, 15),
                 other => panic!("{other:?}"),
             };
-            assert_eq!((p[0].block, p[0].normal[3], fluid), (block, light, cell == [5, 1, 5]));
+            assert_eq!(
+                (p[0].block, p[0].normal[3], fluid),
+                (block, light, cell == [5, 1, 5])
+            );
             assert!(p.iter().all(|v| *v == p[0]));
         }
     }

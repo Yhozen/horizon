@@ -752,7 +752,8 @@ fn pack_terrain_layout(device: &wgpu::Device, sprite_arrays: u32) -> wgpu::BindG
         (4, sampler),
     ];
     entries.extend(
-        (1..sprite_arrays.clamp(1, 8)).map(|i| (4 + i, texture(wgpu::TextureViewDimension::D2Array))),
+        (1..sprite_arrays.clamp(1, 8))
+            .map(|i| (4 + i, texture(wgpu::TextureViewDimension::D2Array))),
     );
     let entries: Vec<wgpu::BindGroupLayoutEntry> = entries
         .into_iter()
@@ -3021,7 +3022,11 @@ impl Renderer {
             let stride = std::mem::size_of::<PackVertex>() as u64;
             let parts = [
                 (0, &mesh.solid_pack, mesh.solid.len()),
-                (mesh.solid.len(), &mesh.translucent_pack, mesh.translucent.len()),
+                (
+                    mesh.solid.len(),
+                    &mesh.translucent_pack,
+                    mesh.translucent.len(),
+                ),
             ];
             for (offset, part, len) in parts {
                 if len == 0 {

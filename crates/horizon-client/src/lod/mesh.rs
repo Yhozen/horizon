@@ -2,7 +2,10 @@
 use super::{Column, Span, TileKey};
 use crate::{
     fast_hash::{FxHashMap, FxHashSet},
-    mesher::{CELL_FLUID, CELL_NONE, OPAQUE_LAYER, SectionMesh, TerrainVertex, direction_normal, pack_quad},
+    mesher::{
+        CELL_FLUID, CELL_NONE, OPAQUE_LAYER, SectionMesh, TerrainVertex, direction_normal,
+        pack_quad,
+    },
     streaming::WorkerContext,
 };
 use horizon_assets::model::Direction;
