@@ -599,6 +599,26 @@ fn too_many_textures_fail_only_their_program() {
     .unwrap_err();
     assert!(err.contains("17 textures in the fragment stage"), "{err}");
     assert!(err.contains("depthtex2"), "{err}");
+    // The limit is the device's: the game asks the adapter for its own, and
+    // Chrome 146+ offers 48 on adapters that have them (Arc's passes read 19).
+    let files = sampling_pack(
+        &format!("{decls}uniform sampler2D depthtex2;"),
+        &ok,
+        "",
+        &[],
+    );
+    let host = HostParams {
+        max_textures: 48,
+        ..HostParams::default()
+    };
+    let pack = compile(
+        &files,
+        "minecraft:overworld",
+        &PackOptions::default(),
+        &host,
+    )
+    .unwrap();
+    assert_eq!(pack.programs[&ProgramKind::Deferred(0)].textures.len(), 17);
 }
 
 #[test]
