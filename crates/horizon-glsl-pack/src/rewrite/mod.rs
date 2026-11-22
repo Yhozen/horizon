@@ -28,6 +28,47 @@ pub struct Uniform {
     pub ty: String,
 }
 
+/// How a program may use an image: GLSL's `readonly` / `writeonly`, or both
+/// when the declaration says neither.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ImageAccess {
+    ReadOnly,
+    WriteOnly,
+    #[default]
+    ReadWrite,
+}
+
+/// A `uniform image*` declaration the rewriter removed (`colorimgN` and the
+/// pack's own `image.*` images): the host declares it again at its binding.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ImageUniform {
+    pub name: String,
+    /// `image2D`, `uimage3D`, `iimage2D`…
+    pub ty: String,
+    /// The `layout(…)` format as written (`r32ui`, `rgba16f`), if any.
+    pub format: Option<String>,
+    pub access: ImageAccess,
+    /// The image built-ins the body calls on it (`imageLoad`, `imageStore`,
+    /// `imageSize`, `imageAtomicMax`…). Each call `f(name, …)` became
+    /// `hz_<f>_<name>(…)` (the image argument dropped): a host function.
+    pub calls: BTreeSet<String>,
+}
+
+/// The image built-ins the rewriter turns into per-image host functions.
+pub const IMAGE_BUILTINS: [&str; 11] = [
+    "imageLoad",
+    "imageStore",
+    "imageSize",
+    "imageAtomicAdd",
+    "imageAtomicMin",
+    "imageAtomicMax",
+    "imageAtomicAnd",
+    "imageAtomicOr",
+    "imageAtomicXor",
+    "imageAtomicExchange",
+    "imageAtomicCompSwap",
+];
+
 /// One stage of a pack program, ready for the host to wrap.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Rewritten {
@@ -46,6 +87,8 @@ pub struct Rewritten {
     pub sample_calls: BTreeSet<String>,
     /// Each declared sampler's full GLSL type (`sampler2D`, `usampler3D`…), by name.
     pub sampler_types: BTreeMap<String, String>,
+    /// `uniform image*` declarations, in source order.
+    pub images: Vec<ImageUniform>,
 }
 
 /// Compatibility-profile built-ins the host provides as plain globals named `hz_` + name.
@@ -73,6 +116,8 @@ const QUALIFIERS: &str = "\
     attribute varying uniform in out flat smooth noperspective centroid invariant const \
     highp mediump lowp";
 const PRECISION: &str = "highp mediump lowp";
+/// Memory qualifiers of image (and buffer) declarations.
+const MEMORY: &str = "readonly writeonly coherent volatile restrict";
 
 /// Whether `word` is one of the space-separated words of `list`.
 fn listed(list: &str, word: &str) -> bool {
