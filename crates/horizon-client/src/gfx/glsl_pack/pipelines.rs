@@ -4,7 +4,8 @@
 
 use horizon_glsl_pack::host::Geometry;
 use horizon_glsl_pack::{
-    CompiledProgram, ProgramKind, SampleKind, SamplerKind, TexDim, TextureBinding, TextureSource,
+    CompiledCompute, CompiledProgram, ProgramKind, SampleKind, SamplerKind, StorageBinding, TexDim,
+    TextureBinding, TextureSource,
 };
 
 /// A pipeline and what its bind group 1 must hold.
@@ -16,6 +17,20 @@ pub(super) struct Program {
     pub samplers: Vec<SamplerKind>,
     /// colortex (gbuffers, full-screen) or shadowcolor (shadow) indices, by output location.
     pub draw_buffers: Vec<u8>,
+    /// `bufferObject`s the program binds.
+    pub storage: Vec<StorageBinding>,
+}
+
+/// A compute program's pipeline, its group 1 layout and what it binds.
+pub(super) struct ComputeProgram {
+    pub source: String,
+    pub pipeline: wgpu::ComputePipeline,
+    pub layout: wgpu::BindGroupLayout,
+    pub textures: Vec<TextureBinding>,
+    pub samplers: Vec<SamplerKind>,
+    pub storage: Vec<StorageBinding>,
+    pub workgroup_size: [u32; 3],
+    pub dispatch: horizon_glsl_pack::compute::Dispatch,
 }
 
 /// Group 0 layouts, by geometry, and the target formats.
@@ -35,9 +50,13 @@ pub(super) struct Layouts<'a> {
 }
 
 fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    uniform_entry_in(binding, wgpu::ShaderStages::VERTEX_FRAGMENT)
+}
+
+fn uniform_entry_in(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
-        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+        visibility,
         ty: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
             has_dynamic_offset: false,
@@ -224,6 +243,9 @@ pub(super) fn build(
             count: None,
         });
     }
+    for b in &program.storage {
+        entries.push(storage_entry(b, stages(b.vertex, b.fragment)));
+    }
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some(&program.source),
         entries: &entries,
@@ -386,6 +408,117 @@ pub(super) fn build(
         textures: program.textures.clone(),
         samplers,
         draw_buffers: program.draw_buffers.clone(),
+        storage: program.storage.clone(),
+    })
+}
+
+fn storage_entry(b: &StorageBinding, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding: b.binding,
+        visibility,
+        ty: wgpu::BindingType::Buffer {
+            // The vertex stage cannot write storage in WebGPU (the crate makes it read only).
+            ty: wgpu::BufferBindingType::Storage {
+                read_only: b.read_only || b.vertex,
+            },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+/// A compute program's pipeline: group 0 empty, group 1 the uniform block,
+/// textures, samplers and storage buffers, all seen by the compute stage.
+pub(super) fn build_compute(
+    device: &wgpu::Device,
+    program: &CompiledCompute,
+    layouts: &Layouts,
+) -> Result<ComputeProgram, String> {
+    let compute = wgpu::ShaderStages::COMPUTE;
+    let mut entries = vec![uniform_entry_in(0, compute)];
+    if layouts.custom_uniforms {
+        entries.push(uniform_entry_in(
+            horizon_glsl_pack::custom_uniforms::CUSTOM_BINDING,
+            compute,
+        ));
+    }
+    let mut samplers: Vec<SamplerKind> = Vec::new();
+    for t in &program.textures {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: t.binding,
+            visibility: compute,
+            ty: wgpu::BindingType::Texture {
+                sample_type: sample_type(t),
+                view_dimension: match t.dimension {
+                    TexDim::D2 => wgpu::TextureViewDimension::D2,
+                    TexDim::D3 => wgpu::TextureViewDimension::D3,
+                },
+                multisampled: false,
+            },
+            count: None,
+        });
+        if !samplers.contains(&t.sampler) {
+            samplers.push(t.sampler);
+        }
+    }
+    samplers.sort();
+    for &s in &samplers {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: s.binding(),
+            visibility: compute,
+            ty: wgpu::BindingType::Sampler(match s {
+                SamplerKind::Compare => wgpu::SamplerBindingType::Comparison,
+                SamplerKind::Point | SamplerKind::PointRepeat => {
+                    wgpu::SamplerBindingType::NonFiltering
+                }
+                _ => wgpu::SamplerBindingType::Filtering,
+            }),
+            count: None,
+        });
+    }
+    for b in &program.storage {
+        entries.push(storage_entry(b, compute));
+    }
+    let limits = device.limits();
+    if program.textures.len() as u32 > limits.max_sampled_textures_per_shader_stage {
+        return Err(format!(
+            "{}: {} textures, the device allows {}",
+            program.source,
+            program.textures.len(),
+            limits.max_sampled_textures_per_shader_stage
+        ));
+    }
+    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some(&program.source),
+        entries: &entries,
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(&program.source),
+        bind_group_layouts: &[Some(layouts.empty), Some(&layout)],
+        ..Default::default()
+    });
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(&program.source),
+        source: wgpu::ShaderSource::Wgsl(program.wgsl.as_str().into()),
+    });
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some(&program.source),
+        layout: Some(&pipeline_layout),
+        module: &module,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    Ok(ComputeProgram {
+        source: program.source.clone(),
+        pipeline,
+        layout,
+        textures: program.textures.clone(),
+        samplers,
+        storage: program.storage.clone(),
+        workgroup_size: program.workgroup_size,
+        dispatch: program.dispatch,
     })
 }
 

@@ -31,7 +31,7 @@ pub(crate) use probation::Probation;
 pub(super) use uniforms::PackUniformInputs;
 
 use horizon_glsl_pack::schedule::Side;
-use pipelines::Program;
+use pipelines::{ComputeProgram, Program};
 use targets::{Need, ShadowTargets, Targets};
 
 /// Features a pack's targets can use (32-bit float targets that filter and
@@ -86,6 +86,13 @@ pub(crate) struct PackRenderer {
     /// The custom uniform block (group 1, binding 1) and what computes it,
     /// when the pack has custom uniforms.
     custom: Option<CustomBlock>,
+    /// Compute programs, by slot (run where the schedule says).
+    computes: BTreeMap<horizon_glsl_pack::compute::ComputeSlot, ComputeProgram>,
+    /// `bufferObject.N`: zeroed when made, kept across frames; the relative
+    /// ones are made again (zeroed) when the size changes.
+    storage: BTreeMap<u32, StorageBuffer>,
+    /// The `setup` programs ran.
+    pub(super) setup_done: bool,
     /// Frames drawn, for `frameCounter`.
     pub(super) frames: u32,
     pub(super) history: uniforms::History,
@@ -93,6 +100,35 @@ pub(crate) struct PackRenderer {
 
 /// The custom uniforms' buffer, their state between frames and a scratch
 /// buffer for their bytes.
+struct StorageBuffer {
+    object: horizon_glsl_pack::compute::BufferObject,
+    buffer: Option<wgpu::Buffer>,
+}
+
+impl StorageBuffer {
+    fn make(&mut self, device: &wgpu::Device, index: u32, size: [u32; 2]) {
+        let bytes = self.object.bytes(size[0], size[1]);
+        self.buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("Shader pack bufferObject.{index}")),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+    }
+}
+
+/// What a pipeline's group 1 holds: a render program's or a compute program's.
+struct Binds<'a> {
+    layout: &'a wgpu::BindGroupLayout,
+    textures: &'a [horizon_glsl_pack::TextureBinding],
+    samplers: &'a [SamplerKind],
+    storage: &'a [horizon_glsl_pack::StorageBinding],
+    /// Gbuffers programs (not full-screen passes, not compute).
+    gbuffers: bool,
+    shadow: bool,
+    draw_buffers: &'a [u8],
+}
+
 struct CustomBlock {
     buffer: wgpu::Buffer,
     uniforms: horizon_glsl_pack::custom_uniforms::CustomUniforms,
@@ -177,6 +213,21 @@ impl PackRenderer {
                 }
             }
         }
+        for c in pack.computes.values() {
+            for t in &c.textures {
+                match t.source {
+                    TextureSource::Buffer(b) => {
+                        if let Some(n) = needs.get_mut(usize::from(b)) {
+                            n.used = true;
+                        }
+                    }
+                    TextureSource::ShadowTex(_)
+                    | TextureSource::ShadowTexMips(_)
+                    | TextureSource::ShadowColor(_) => shadow_used = true,
+                    _ => {}
+                }
+            }
+        }
         for buffers in plan.mipmaps.values() {
             for &b in buffers {
                 if let Some(n) = needs.get_mut(usize::from(b)) {
@@ -226,6 +277,28 @@ impl PackRenderer {
                 pipelines::build(device, kind, program, &state, &layouts)?,
             );
         }
+        let mut computes = BTreeMap::new();
+        for (&slot, c) in &pack.computes {
+            computes.insert(slot, pipelines::build_compute(device, c, &layouts)?);
+        }
+        let limit = device.limits().max_storage_buffer_binding_size;
+        let mut storage = BTreeMap::new();
+        for (&index, object) in &plan.buffer_objects {
+            let mut b = StorageBuffer {
+                object: *object,
+                buffer: None,
+            };
+            if object.relative.is_none() {
+                if object.bytes(1, 1) > limit {
+                    return Err(format!(
+                        "bufferObject.{index}: {} bytes, the device binds at most {limit}",
+                        object.size
+                    ));
+                }
+                b.make(device, index, [1, 1]);
+            }
+            storage.insert(index, b);
+        }
         let mut textures = textures::Textures::new(device, queue, &plan, files, resources);
         textures.notes.append(&mut size_notes);
         // No `final`: colortex0 goes to the screen, as OptiFine shows it.
@@ -262,6 +335,9 @@ impl PackRenderer {
             empty_group,
             sky: frame::sky_box(device),
             custom,
+            computes,
+            storage,
+            setup_done: false,
             frames: 0,
             history: Default::default(),
             plan,
@@ -313,6 +389,11 @@ impl PackRenderer {
             &self.sizes,
             &mut self.mips,
         ));
+        for (&index, b) in &mut self.storage {
+            if b.object.relative.is_some() {
+                b.make(device, index, size);
+            }
+        }
     }
 
     fn targets(&self) -> &Targets {
@@ -339,8 +420,45 @@ impl PackRenderer {
         uniforms: &wgpu::Buffer,
         sides: &[Side; 16],
     ) -> wgpu::BindGroup {
+        let binds = Binds {
+            layout: &program.layout,
+            textures: &program.textures,
+            samplers: &program.samplers,
+            storage: &program.storage,
+            gbuffers: !program.kind.is_fullscreen(),
+            shadow: program.kind.is_shadow(),
+            draw_buffers: &program.draw_buffers,
+        };
+        self.bind_group(device, &binds, uniforms, sides)
+    }
+
+    fn compute_group(
+        &self,
+        device: &wgpu::Device,
+        program: &ComputeProgram,
+        sides: &[Side; 16],
+    ) -> wgpu::BindGroup {
+        let binds = Binds {
+            layout: &program.layout,
+            textures: &program.textures,
+            samplers: &program.samplers,
+            storage: &program.storage,
+            gbuffers: false,
+            shadow: false,
+            draw_buffers: &[],
+        };
+        self.bind_group(device, &binds, &self.uniforms.main, sides)
+    }
+
+    fn bind_group(
+        &self,
+        device: &wgpu::Device,
+        program: &Binds,
+        uniforms: &wgpu::Buffer,
+        sides: &[Side; 16],
+    ) -> wgpu::BindGroup {
         let targets = self.targets();
-        let gbuffers = !program.kind.is_fullscreen();
+        let gbuffers = program.gbuffers;
         let mut entries = vec![wgpu::BindGroupEntry {
             binding: 0,
             resource: uniforms.as_entire_binding(),
@@ -351,7 +469,7 @@ impl PackRenderer {
                 resource: custom.buffer.as_entire_binding(),
             });
         }
-        for t in &program.textures {
+        for t in program.textures {
             // What a binding reads when its texture is missing: zeros of its own type.
             let missing = self.textures.fallback(t.dimension, t.sample);
             let view = match t.source {
@@ -373,14 +491,14 @@ impl PackRenderer {
                 TextureSource::Depth(0) => &targets.depth.view,
                 TextureSource::Depth(n) => &targets.depth_copies[usize::from(n.min(2)) - 1].view,
                 TextureSource::ShadowTex(n) => match &self.shadow {
-                    Some(s) if n == 0 && !program.kind.is_shadow() => &s.depth.view,
-                    Some(s) if !program.kind.is_shadow() => &s.depth_opaque.view,
+                    Some(s) if n == 0 && !program.shadow => &s.depth.view,
+                    Some(s) if !program.shadow => &s.depth_opaque.view,
                     _ => &self.textures.far_depth,
                 },
                 // Level 0 of the map stands in for the mipmapped copy.
                 TextureSource::ShadowTexMips(n) => match &self.shadow {
-                    Some(s) if n == 0 && !program.kind.is_shadow() => &s.depth.view,
-                    Some(s) if !program.kind.is_shadow() => &s.depth_opaque.view,
+                    Some(s) if n == 0 && !program.shadow => &s.depth.view,
+                    Some(s) if !program.shadow => &s.depth_opaque.view,
                     _ => &self.textures.far_depth,
                 },
                 TextureSource::ShadowColor(n) => {
@@ -389,7 +507,7 @@ impl PackRenderer {
                         .as_ref()
                         .and_then(|s| s.colors[usize::from(n.min(1))].as_ref())
                     {
-                        Some((img, _)) if !program.kind.is_shadow() => &img.view,
+                        Some((img, _)) if !program.shadow => &img.view,
                         _ if t.sample != horizon_glsl_pack::SampleKind::Float => missing,
                         _ => &self.textures.white,
                     }
@@ -410,7 +528,15 @@ impl PackRenderer {
                 resource: wgpu::BindingResource::TextureView(view),
             });
         }
-        for &s in &program.samplers {
+        for b in program.storage {
+            if let Some(buffer) = self.storage.get(&b.buffer).and_then(|s| s.buffer.as_ref()) {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: b.binding,
+                    resource: buffer.as_entire_binding(),
+                });
+            }
+        }
+        for &s in program.samplers {
             let index = SamplerKind::ALL.iter().position(|&k| k == s).unwrap_or(0);
             entries.push(wgpu::BindGroupEntry {
                 binding: s.binding(),
@@ -419,7 +545,7 @@ impl PackRenderer {
         }
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Shader pack pass"),
-            layout: &program.layout,
+            layout: program.layout,
             entries: &entries,
         })
     }
