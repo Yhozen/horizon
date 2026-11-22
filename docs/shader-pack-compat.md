@@ -58,16 +58,51 @@ still fails on its own textures.
 - No status got worse. `final` left the essential lists (316126b6: final is not essential), which changed
   no status.
 
+**Re-measured 2026-11-22** (every pack at 16 varyings, all dimensions, Chrome; the packs below also at 28):
+`gabriel/packs-corpus` at bb40a7b3 (`gabriel/packs-int` 6b79df1a plus translator fixes and `shadowcomp`).
+Reports: `c3-{train,holdout-1,holdout-2}-16`, `c3-changed-28`. What changed, and why:
+- Hysteria (O/E): Partial → Works-candidate. Its overworld cloud pass has a struct member named like one of the
+  pass's outputs, and the output's rename hit the member too; its End sky builds `vec3(bool)`, which naga's
+  GLSL front end left a scalar.
+- Kappa (O): Partial → Works-candidate. A one-component swizzle of a scalar (`f(x).x`, GLSL 4.20) and a 3D
+  custom texture in depthtex1's unit, which the depthtex2 → depthtex1 alias put on the same binding.
+- Photon (E): Partial → Works-candidate (`vec3(bool)` in its sky). Its overworld stays Partial: an optional
+  deferred pass reads 17 textures.
+- `shadowcomp` passes run now (Nostalgia, Kappa, Vanilla Plus, FastPBR have one; FastPBR stays Refused), and
+  `texture.prepare.*` overrides reach prepare passes.
+- Arc: every texture its two big passes bind is read by live code, so none can be dropped; it needs a device
+  over 16 textures per stage. The game asks the adapter for its own limit; Chrome 146+ reports 48 on
+  adapters that have them (Chrome on SwiftShader reports 16).
+- Totals over all dimensions at 16: train 35 / 4 / 3 / 0, batch 1 27 / 0 / 6 / 0, batch 2 28 / 0 / 15 / 2 / 3.
+  No status got worse.
+
+**Compute shaders and storage buffers (2026-11-22, `gabriel/packs-sampling` at 746bb590).** `.csh` programs and
+`bufferObject` storage buffers translate and run ([format notes §18](shader-pack-format-notes.md#18-compute-programs-and-storage-buffers)),
+and `COMPUTE_SHADERS` and `SSBO` are supported flags. Since then `pack_check` also compiles the whole pack once per
+dimension, and the summary takes the game's own refusal. Before, any `iris.features.required` line counted as
+Refused. Overworld, WebGPU's default limits (16 KiB of shared memory):
+
+| pack | before | after | what is left |
+|---|---|---|---|
+| Noble | Refused (compute, SSBO) | Partial | its 3 compute programs translate; optional `deferred4` fails (an array `out`, which Iris could not patch either) |
+| RenderPearl, FastPBR, Rethinking Voxels, Shrimple, Clarity | Refused | Refused | custom images only (the images session's branch); RenderPearl also needs 5 more flags |
+| Photon | Partial | Partial | the sky-light compute `deferred4_a` wants 36 KiB of shared memory: left out on WebGPU's 16 KiB and on lavapipe's 32 KiB (desktop GPUs with 48 KiB run it; not tested) |
+| Complementary, BSL, Mellow | Works-candidate | Works-candidate | their compute programs are off in the default options or write custom images |
+
+Renders with that branch (lavapipe, noon): Photon, BSL, Mellow and Complementary still draw (Iris diff 49, 9, 10 and 9).
+
+**Custom images (2026-11-22, `gabriel/packs-dims` at b6a120c7, with compute merged).** No pack is refused for images any more: Solas and Clarity draw (Iris diff 11 and 14); Pegasus, Shrimple, FastPBR and Visual Vibrance get past the refusal and stop on the translator gaps in their rows; RenderPearl still requires other Iris flags.
+
 ## Packs
 
 ### Train set
 
 | rank | pack | version | 16 varyings | 28 varyings | rendered natively | notes |
 |---|---|---|---|---|---|---|
-| 1 | [Complementary Shaders - Reimagined](https://modrinth.com/shader/complementary-reimagined) | r5.10 | Works-candidate | Works-candidate | Draws, Iris diff 11 | optional compute and storage buffers skipped |
+| 1 | [Complementary Shaders - Reimagined](https://modrinth.com/shader/complementary-reimagined) | r5.10 | Works-candidate | Works-candidate | Draws, Iris diff 11 | storage buffers on; its compute program writes custom images |
 | 3 | [BSL Shaders](https://modrinth.com/shader/bsl-shaders) | 10.1.8 | Works-candidate | Works-candidate | Draws, Iris diff 11 | optional compute pass skipped |
-| 4 | [Photon Shaders](https://modrinth.com/shader/photon-shader) | v1.4 | Partial (O/E), Works-candidate (N) | Partial (O/E), Works-candidate (N) | Draws, lit (no Iris picture: Iris fails on llvmpipe) | an optional deferred pass fails (overworld: 17 textures; End: a sky function) |
-| 5 | [Solas Shader](https://modrinth.com/shader/solas-shader) | 3.9 | Partial | Partial | Draws, Iris diff 17 | shadow programs use image writes |
+| 4 | [Photon Shaders](https://modrinth.com/shader/photon-shader) | v1.4 | Partial (O), Works-candidate (N/E) | Partial (O), Works-candidate (N/E) | Draws, lit (no Iris picture: Iris fails on llvmpipe) | an optional deferred pass reads 17 textures in the overworld (16 allowed; passes where the device allows more) |
+| 5 | [Solas Shader](https://modrinth.com/shader/solas-shader) | 3.9 | Partial | (not rerun) | Draws, Iris diff 11 (b6a120c7) | shadowcomp (compute) writes and samples the same flood-fill image in one dispatch, which WebGPU forbids: left out; images otherwise bound (packs-dims) |
 | 6 | [Bliss Shaders](https://modrinth.com/shader/bliss-shader) | 2.1.2 | Works-candidate | Works-candidate | Draws, Iris diff 18 |  |
 | 7 | [MakeUp - Ultra Fast](https://modrinth.com/shader/makeup-ultra-fast-shaders) | 9.6 | Works-candidate | Works-candidate | Draws, Iris diff 40 | water packs into 15 varying locations |
 | 8 | [Rethinking Voxels](https://modrinth.com/shader/rethinking-voxels) | r0.1-beta9 | Refused | Refused | Looks vanilla | requires compute shaders, custom images, storage buffers |
@@ -84,36 +119,36 @@ still fails on its own textures.
 | rank | pack | version | 16 varyings | 28 varyings | rendered natively | notes |
 |---|---|---|---|---|---|---|
 | 14 | [Pastel Shaders](https://modrinth.com/shader/pastel-shaders) | 1.200 | Works-candidate | Works-candidate | Draws, Iris diff 23 |  |
-| 15 | [Nostalgia Shader](https://modrinth.com/shader/nostalgia-shader) | 5.1 | Works-candidate | Works-candidate | Draws, Iris diff 36 |  |
-| 16 | [Hysteria Shaders](https://modrinth.com/shader/hysteria-shaders) | 1.2.1 | Partial (O/E), Works-candidate (N) | Partial (O/E), Works-candidate (N) | Draws, Iris diff 9 | one optional pass fails per dimension |
+| 15 | [Nostalgia Shader](https://modrinth.com/shader/nostalgia-shader) | 5.1 | Works-candidate | Works-candidate | Draws, Iris diff 12 (was 36: its `shadowcomp` runs now) |  |
+| 16 | [Hysteria Shaders](https://modrinth.com/shader/hysteria-shaders) | 1.2.1 | Works-candidate | Works-candidate | Draws, Iris diff 4 |  |
 | 17 | [VanillAA](https://modrinth.com/shader/vanillaa) | 1.3 | Works-candidate | Works-candidate | Draws, Iris diff 9 |  |
-| 18 | [Kappa Shader](https://modrinth.com/shader/kappa-shader) | 5.3 | Partial (O), Works-candidate (N/E) | Partial (O), Works-candidate (N/E) | Draws, Iris diff 57 | one optional prepare pass and one deferred pass fail |
+| 18 | [Kappa Shader](https://modrinth.com/shader/kappa-shader) | 5.3 | Works-candidate | Works-candidate | Draws, Iris diff 7 (was 57) |  |
 | 19 | [Potato Shaders](https://modrinth.com/shader/potato-shaders) | 1.0d | Works-candidate | Works-candidate | Draws, Iris diff 7 |  |
 | 20 | [Spooklementary](https://modrinth.com/shader/spooklementary) | v2.0.4 | Works-candidate | Works-candidate | Draws, Iris diff 6 |  |
 | 21 | [I Like Vanilla](https://modrinth.com/shader/i-like-vanilla) | v1.5.0b | Works-candidate | Works-candidate | Draws, Iris diff 11 |  |
 | 22 | [Vanilla Plus Shader](https://modrinth.com/shader/vanilla-plus-shader) | 3.3 | Works-candidate | Works-candidate | Draws, Iris diff 119 (Iris picture blown out) |  |
-| 23 | [Visual Vibrance](https://modrinth.com/shader/visual-vibrance) | 0.3.5a | Refused | Refused |  | requires custom images, storage buffers, separate shadow samplers |
-| 24 | [Noble Shaders](https://modrinth.com/shader/noble) | 1.9.9 | Refused | Refused |  | requires compute shaders and storage buffers |
+| 23 | [Visual Vibrance](https://modrinth.com/shader/visual-vibrance) | 0.3.5a | Fails | (not rerun) |  | no longer refused (images, storage buffers, `shadowtexNHW` supported); its storage-buffer blocks did not translate at packs-int 7790f0ff (fixed on packs-sampling aee7631a, not rechecked) |
+| 24 | [Noble Shaders](https://modrinth.com/shader/noble) | 1.9.9 | Partial (O, 2026-11-22) | Refused (not rechecked) |  | compute and storage buffers since 2026-11-22; optional deferred4 fails (an array `out`) |
 
 ### Hold-out batch 2 (Modrinth ranks 25–40)
 
 | rank | pack | version | 16 varyings | 28 varyings | rendered natively | notes |
 |---|---|---|---|---|---|---|
 | 25 | [BSL Shaders - Classic](https://modrinth.com/shader/bsl-shaders-classic) | 10.0 | Works-candidate | Works-candidate | Draws, Iris diff 14 (0271d3c4) |  |
-| 26 | [Shrimple](https://modrinth.com/shader/shrimple) | v0.12 | Refused | Refused |  | requires compute shaders and custom images |
+| 26 | [Shrimple](https://modrinth.com/shader/shrimple) | v0.12 | Fails | (not rerun) |  | no longer refused; buffer-block errors as Visual Vibrance's, plus `gl_WorkGroupSize` and other compute gaps |
 | 27 | [Bloop Shaders](https://modrinth.com/shader/bloop-shaders) | 1.8.0-Alpha-3 | Works-candidate | Works-candidate | Draws, Iris diff 17 (0271d3c4) | its shadow program writes an undeclared varying, declared as Iris does |
-| 28 | [FastPBR](https://modrinth.com/shader/fastpbr) | 2.0 | Refused | Refused |  | requires compute shaders, custom images, storage buffers |
+| 28 | [FastPBR](https://modrinth.com/shader/fastpbr) | 2.0 | Fails | (not rerun) |  | no longer refused; `prepare*` compute programs size `shared` arrays by a const ivec2's members (naga: runtime expression) |
 | 29 | [E-LITE shaders (MakeUp edit)](https://modrinth.com/shader/lite-shaders) | ELT513 | Works-candidate | Works-candidate | Draws, Iris diff 32 | water packs into exactly 16 varying locations |
 | 30 | [Fantasy Shaders Reimagined](https://modrinth.com/shader/fantasy-shaders) | 1.11 | Works-candidate | Works-candidate |  |  |
 | 31 | [Body Camera](https://modrinth.com/shader/body-camera-shader) | 1.6.2 | Works-candidate | Works-candidate | Draws, Iris diff 30 |  |
 | 32 | [RenderPearl](https://modrinth.com/shader/renderpearl) | 2.8.0-beta.4 | Refused | Refused |  | requires compute shaders, storage buffers and 5 more features |
-| 33 | [Clarity](https://modrinth.com/shader/clarityshader) | 1.1.3 | Refused | Refused |  | requires compute shaders and custom images |
+| 33 | [Clarity](https://modrinth.com/shader/clarityshader) | 1.1.3 | Partial | (not rerun) | Draws, Iris diff 14 (b6a120c7) | images in compute and composite work; the sky programs' interface blocks do not translate; `composite2` left out natively (colorimg0 on a Bgra8Unorm colortex0) |
 | 34 | [Lux V1](https://modrinth.com/shader/lux-v1) | 1.3 | Works-candidate | Works-candidate | Draws, Iris diff 30 |  |
 | 35 | [Fantasy Shaders Unbound](https://modrinth.com/shader/fantasy-shader-unbound) | 1.11 | Works-candidate | Works-candidate |  |  |
 | 36 | [RedHat Shaders](https://modrinth.com/shader/redhat-shaders) | 34.3.1 | Works-candidate | Works-candidate | Draws, Iris diff 13 |  |
 | 37 | [No Fog](https://modrinth.com/shader/nofog) | 2.1.1 | Not a pack | Not a pack |  | a resource pack, not a shader pack |
-| 38 | [Arc](https://modrinth.com/shader/arc-shader) | 0.15.2 | Fails (O/E), Works-candidate (N) | Fails (O/E), Works-candidate (N) |  | an essential composite pass reads 19 of its own textures (16 allowed); passes with a device allowing more (`--max-textures 32`) |
-| 39 | [Pegasus Shaders](https://modrinth.com/shader/pegasus) | 0.8.1 | Refused | Refused |  | requires custom images |
+| 38 | [Arc](https://modrinth.com/shader/arc-shader) | 0.15.2 | Fails (O/E), Works-candidate (N) | Fails (O/E), Works-candidate (N) |  | an essential composite pass reads 19 of its own textures (WebGPU's minimum is 16); passes where the device allows more (Chrome 146+ offers 48 on Vulkan/Metal adapters; the game asks for the adapter's limit) |
+| 39 | [Pegasus Shaders](https://modrinth.com/shader/pegasus) | 0.8.1 | Fails | (not rerun) |  | no longer refused (images, a stray `#endif` now ignored); `mat3(mat3, mat3, mat3)` constructors fail in gbuffers and composite10 |
 | 40 | [Aurora's Shaders](https://modrinth.com/shader/auroras-shaders) | 1.9 | Works-candidate | Works-candidate | Draws, Iris diff 24 |  |
 
 ### Hold-out packs far from Iris (noon, 4cb3030f)
@@ -123,12 +158,12 @@ Packs with an Iris diff of 30 or more. The tree beside the wall is shaped differ
 
 - **Vanilla Plus (119)**: the Iris picture is blown out to white on llvmpipe; Horizon's looks plausible.
   The number says nothing.
-- **Kappa (57)**: blocks under the water are lit bright cyan, the sky is a dark blue-green and the
-  leaves have dark holes; Iris has pale sand, a cloudy blue sky and full leaves.
 - BSL Classic (52 → 14) and Bloop (51 → 17) were in this list until custom uniforms divided as floats and
   full-screen passes stopped blending (re-rendered at 0271d3c4).
-- **Nostalgia (36)**: the same over-bright cyan as Kappa on blocks under the water; the sky is
-  close.
+- Kappa (57 → 7) and Nostalgia (36 → 12) were in this list for bright cyan blocks under the water: their
+  `shadowcomp` pass, which turns the water data in `shadowcolor0` into the light tint, did not run. Kappa's
+  dark blue-green sky also came from prepare passes that failed or lacked their custom texture.
+  Re-rendered at `gabriel/packs-corpus` bb40a7b3 (`render/c3-after`, the same pose).
 - **Lite (32)**: close; darker leaves and less clear water near the bottom edge.
 - **Body Camera (30)**: close; the fisheye border and colours match. The difference is the tree and a mob.
 - **Lux V1 (30)**: the water is clear with no reflection; Iris has deep blue water reflecting the wall
@@ -160,11 +195,13 @@ Overworld statuses; "renders" counts Works-candidate and Partial.
 |---|---|---|---|---|---|---|---|---|
 | 1 (ranks 14–24) | 11 | first try, 16 and 28 varyings | 2 | 1 | 2 | 6 | – | 3 |
 | | | after fixes, 16 and 28 varyings | 8 | 1 | 2 | 0 | – | 9 |
+| | | re-measured 2026-11-22, 16 varyings | 9 | 0 | 2 | 0 | – | 9 |
 | 2 (ranks 25–40) | 16 | first try, 16 varyings | 5 | 0 | 5 | 6 | – | 5 |
 | | | first try, 28 varyings | 6 | 0 | 5 | 5 | – | 6 |
 | | | after fixes, 16 varyings | 7 | 1 | 5 | 2 | 1 | 8 |
 | | | after fixes, 28 varyings | 8 | 1 | 5 | 1 | 1 | 9 |
 | | | re-measured 2026-11-21, 16 and 28 varyings | 9 | 0 | 5 | 1 | 1 | 9 |
+| | | re-measured 2026-11-22, 16 varyings | 9 | 0 | 5 | 1 | 1 | 9 |
 
 - **Batch 1** (rank 13 was already in the train set): 16 and 28 varyings gave the same statuses throughout.
   Over all three dimensions: 7 / 3 / 6 / 17 on the first try, 24 / 3 / 6 / 0 after.

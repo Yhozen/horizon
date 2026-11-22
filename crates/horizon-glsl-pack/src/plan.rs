@@ -770,6 +770,13 @@ pub struct PackPlan {
     pub outputs: BTreeMap<ProgramKind, Vec<FragOutput>>,
     /// `uniform.*` / `variable.*` of `shaders.properties` (group 1, binding 1).
     pub custom_uniforms: crate::custom_uniforms::CustomUniforms,
+    /// `image.*` declarations (custom images), bound at
+    /// [`crate::host::IMAGE_BINDING`] + their index.
+    pub images: Vec<crate::images::ImageSpec>,
+    /// Compute programs that run, by slot, with the pack path (no extension).
+    pub computes: BTreeMap<crate::compute::ComputeSlot, String>,
+    /// `bufferObject.N` storage buffers, by index.
+    pub buffer_objects: BTreeMap<u32, crate::compute::BufferObject>,
 }
 
 impl Default for PackPlan {
@@ -791,6 +798,9 @@ impl Default for PackPlan {
             program_states: BTreeMap::new(),
             outputs: BTreeMap::new(),
             custom_uniforms: Default::default(),
+            images: Vec::new(),
+            computes: BTreeMap::new(),
+            buffer_objects: BTreeMap::new(),
         }
     }
 }

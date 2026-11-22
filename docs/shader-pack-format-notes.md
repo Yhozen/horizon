@@ -30,8 +30,8 @@ Terms: *gbuffers* are the programs that draw world geometry; *composite-style* p
 
 - The docs do not fix the order inside the gbuffers steps (medium for steps 3–7). What packs rely on: weather,
   water and translucent held items draw after `deferred`.
-- Compute programs (`_a`…`_z`) run before their pass's vertex stage; gbuffers cannot have them. A missing or
-  disabled program uses its fallback (section 2); with no fallback it draws nothing.
+- Compute programs (`<pass>.csh`, then `_a`…`_z`) run before their pass's vertex stage; gbuffers cannot have them
+  (section 18). A missing or disabled program uses its fallback (section 2); with no fallback it draws nothing.
 
 ## 2. Programs and fallbacks
 
@@ -170,6 +170,12 @@ Terms: *gbuffers* are the programs that draw world geometry; *composite-style* p
 4. Depth copied into shadowtex1.
 5. Translucent terrain, into shadowtex0 and the shadowcolors only.
 6. Mipmaps, then `shadowcomp`.
+
+`shadowcomp` passes draw full-screen into the shadowcolors (draw buffers name shadowcolor0/1, at the shadow
+map's size) and can sample the shadowcolors and shadowtex. Like a `composite` pass, one that samples and
+writes the same shadowcolor reads what it held before the pass. Horizon gets this by copying each shadowcolor
+the pass writes just before it and binding the copy for its reads (same result for a pass that writes every
+pixel, as composite-style passes do; not measured under Iris). Their `texture.shadowcomp.*` overrides apply.
 
 - Alpha test: solid and translucent terrain none, cutout terrain > 0.5, entities and block entities > 0.1.
 - `shadow` is shadowtex0; if the pack declares `watershadow`, then `watershadow` is shadowtex0 and `shadow` is
@@ -445,8 +451,10 @@ Sodium 0.9.2 on Minecraft 26.3 (Mesa llvmpipe, OpenGL 4.5 core, Linux, 854×480)
   they are unknown or unsupported in that build. (measured)
 - `iris.features.required` gets the same macros. A required flag the loader lacks refuses the whole pack.
   (public docs; the required case was not probed)
-- Horizon defines a flag's macro only for the flags it has: today only `BLOCK_EMISSION_ATTRIBUTE`
-  (`features::SUPPORTED_FLAGS`). A pack that requires any other flag is reported as Not supported.
+- Horizon defines a flag's macro only for the flags it has: `BLOCK_EMISSION_ATTRIBUTE`, `COMPUTE_SHADERS`,
+  `SSBO` (section 18), `CUSTOM_IMAGES` and `SEPARATE_HARDWARE_SAMPLERS` (section 19)
+  (`features::SUPPORTED_FLAGS`). A pack that requires any other flag is reported as Not
+  supported.
 
 **Option files** (measured)
 - A folder pack's options are read from `shaderpacks/<folder>.txt`; a zip's from `shaderpacks/<file>.zip.txt`.
@@ -517,3 +525,135 @@ unverified against Iris)
 - A line that does not parse, or whose value does not fit its type, reads 0.
 - The pack never fails because of a custom uniform; Horizon lists such lines in its report.
 
+
+## 18. Compute programs and storage buffers
+
+Sources: "(docs)" is the public Iris documentation of compute shaders and buffer objects; "(corpus)" is what
+the corpus packs rely on; "(inferred)" is Horizon's own reading, not probed in Iris.
+
+**Programs** (docs)
+- A compute program is a `.csh` file. These passes may have them: `setup`, `begin`, `shadowcomp`, `prepare`,
+  `deferred` and `composite`, each numbered like its full-screen programs (`composite`, `composite1` …
+  `composite99`). gbuffers and `final` cannot.
+- Each pass number has one unlettered program (`composite2.csh`), then up to 26 more, `composite2_a.csh` to
+  `composite2_z.csh`. They run in that order, all of them before the pass's own vertex and fragment programs.
+  A pass may have compute programs and no full-screen program; they still run at that pass's place (Noble's
+  `composite99.csh`).
+- `setup*` is compute only and runs once, when the pack loads. `begin*` runs at the start of every frame,
+  before the shadow map. `shadowcomp*` runs after the shadow map.
+- Like the other programs, a program in the world folder replaces the one of the same name in `shaders/`, and
+  `program.<name>.enabled` applies to it.
+
+**Workgroups** (docs)
+- `layout(local_size_x = X, local_size_y = Y, local_size_z = Z) in;` sets the workgroup size. Omitted
+  dimensions are 1.
+- `const ivec3 workGroups = ivec3(x, y, z);` dispatches that many workgroups.
+- `const vec2 workGroupsRender = vec2(sx, sy);` dispatches enough workgroups to cover the render size scaled by
+  (sx, sy): `ceil(ceil(width × sx) / X)` by `ceil(ceil(height × sy) / Y)` by 1.
+- With neither constant, Horizon dispatches as `workGroupsRender = vec2(1.0, 1.0)`. (inferred: every corpus
+  program declares one)
+- Built-ins: `gl_GlobalInvocationID`, `gl_LocalInvocationID`, `gl_LocalInvocationIndex`, `gl_WorkGroupID`,
+  `gl_NumWorkGroups`, `gl_WorkGroupSize`; `shared` variables; `barrier()`, `memoryBarrier*()`,
+  `groupMemoryBarrier()`; the `atomic*` functions on buffer and shared members.
+- Samplers read like a vertex stage (no implicit level). `colortexN` reads the side the pass would read at that
+  point. (inferred)
+
+**Buffer objects** (docs)
+- `bufferObject.<N> = <bytes>` declares storage buffer N. It is zeroed when created and kept across frames.
+- `bufferObject.<N> = <bytes per pixel> true <sx> <sy>` makes it relative to the render size (scaled by sx,
+  sy), so it is made again, zeroed, on a resize. No corpus pack uses this form. (docs; the per-pixel
+  reading is inferred)
+- Any stage binds buffer N with `layout(std430, binding = N) buffer Name { … } name;`. The last member may be
+  an unsized array. `readonly`, `writeonly`, `coherent`, `volatile` and `restrict` may qualify it.
+- `iris.features.required/optional` lists `COMPUTE_SHADERS` and `SSBO`.
+
+**How Horizon runs them** (inferred)
+- Every buffer object is a WebGPU storage buffer at group 1, binding 160 + N, in every program that declares it.
+  A vertex stage reads it only, because WebGPU vertex stages cannot write storage.
+- GLSL's memory barriers alone have no WebGPU equivalent. They become nothing: within one invocation, order
+  already holds. `barrier()` becomes a storage barrier plus a workgroup barrier.
+- naga's GLSL front end has no atomics. Each `atomicAdd`/`Min`/`Max`/`And`/`Or`/`Xor`/`Exchange` call becomes
+  a WebGPU atomic on the member, and that member's type becomes `atomic<u32>`/`atomic<i32>`. Plain reads and
+  writes of it then become `atomicLoad`/`atomicStore`. `atomicCompSwap` and atomics on floats are not
+  supported (no corpus pack uses them).
+- WebGPU's default limits are lower than desktop GL's: 16 KiB of `shared` memory, 256 invocations per
+  workgroup, 8 storage buffers per stage, 128 MiB per storage binding. Horizon checks each program against
+  the device's actual limits. A program over a limit is left out, and the report gives the reason. If the pack
+  lists `COMPUTE_SHADERS` in `iris.features.required`, that fails the pack. (corpus: Photon's sky light
+  program without subgroups wants 36 KiB of shared memory)
+- `setup` programs run once, before the pack's first frame, and not again on a resize.
+
+## 19. Custom images
+
+**Source:** the public format documentation for Iris's custom images and the GLSL image functions, read
+against the corpus packs that declare them (Pegasus, Visual Vibrance, Shrimple, Clarity, FastPBR,
+RenderPearl, Solas). Horizon's implementation is `images.rs` and `host/images.rs` in `horizon-glsl-pack`
+and `gfx/glsl_pack/images.rs` in the client. "(unverified)" marks what neither the docs nor a measurement
+settle.
+
+**Declaring**
+- `image.<name>=<sampler> <pixel format> <internal format> <pixel type> <clear> <relative> <size…>` in
+  shaders.properties. Packs put declarations under `#if` to pick sizes by option; the live one counts.
+- `<name>` is the uniform programs declare as `image1D` / `image2D` / `image3D` (`iimage…` / `uimage…`
+  for integer formats).
+- `<sampler>` is a second name for the same texture, sampled like any texture (`texture`, `texelFetch`).
+  `none` means there is no sampler name.
+- `<internal format>` is one of the colour target format names (`RGBA16F`, `R32UI`, `RG8`…). It decides
+  what the texture stores.
+- `<pixel format>` (`RGBA`, `RED_INTEGER`…) and `<pixel type>` (`FLOAT`, `UNSIGNED_INT`…) describe data
+  handed to the texture. Programs never see them, and Horizon ignores them.
+- `<clear>`: `true` sets every texel to zero at the start of each frame. With `false` the texels persist
+  from one frame to the next, which is how packs keep histories and flood-fill lighting.
+  (When in the frame the clear happens: unverified. Horizon clears before the shadow pass.)
+- `<relative>`: `true` means two factors of the screen size follow (`1.0 1.0`, `0.5 0.5`), and the image
+  follows the window when it resizes. `false` means one, two or three texel counts follow, for 1D, 2D or 3D.
+- The declaration has no mipmap setting. Horizon makes level 0 only. (unverified)
+- `iris.features.required` / `optional` may name `CUSTOM_IMAGES`. A pack that requires it is refused where
+  it is missing. A pack that lists it as optional checks `IRIS_FEATURE_CUSTOM_IMAGES` in its sources.
+
+**Using**
+- Declaration: `layout(r32ui) uniform uimage3D voxels;`, optionally with the `readonly` / `writeonly` and
+  `coherent` / `volatile` / `restrict` memory qualifiers. GLSL requires the `layout` format for an image
+  that is read. A `writeonly` image may leave it out (Pegasus, Solas do).
+- `imageLoad(img, coord)` returns a 4-component vector. Missing channels read as 0, and alpha as 1.
+  `imageStore(img, coord, value)` writes one.
+- `imageSize(img)` returns the size as `int` / `ivec2` / `ivec3`.
+- Coordinates are integer texel positions. Reads outside the image return 0, and writes outside it are
+  dropped.
+- `imageAtomicAdd/Min/Max/And/Or/Xor/Exchange/CompSwap(img, coord, value)` change one texel atomically
+  and return its old value. They work on `r32ui` / `r32i` images.
+- Corpus packs write images in vertex shaders as well as fragment and compute ones. Solas and Pegasus
+  voxelise the world from the shadow pass's vertex stage.
+
+**What Horizon does (WebGPU)**
+- Each image is a storage texture in group 1, at binding 240 + its index; its sampler name is a sampled
+  texture at 304 + the index. Image built-in calls become per-image functions `hz_imageStore_<name>(…)`.
+- Core WebGPU stores few formats, so the internal format widens to one it does store:
+  - 8-bit normalized formats → `rgba8unorm`;
+  - 1- and 2-channel 16-bit normalized, signed normalized and float formats → `r32float` / `rg32float`;
+  - wider ones, packed floats and `RGB10_A2` → `rgba16float`. Normalized values are still clamped to
+    their range on store;
+  - 1- and 2-channel 8/16-bit integers → 32 bits; 3-channel ones → 4.
+- Read and write of one image in one program: core WebGPU allows it only for `r32float`, `r32sint` and
+  `r32uint`. With other formats the program is left out with that reason, unless the adapter allows
+  read-write on every format (native, adapter-specific features).
+- WGSL has no image atomics. `imageAtomic*` is a load then a store: exact for one invocation, but racing
+  invocations on one texel can lose updates.
+- The browser's WebGPU cannot write storage textures from a vertex stage. There, a vertex stage's image
+  writes are dropped, with a note in the report. Natively, Horizon asks for `VERTEX_WRITABLE_STORAGE` and
+  keeps them.
+- Per render pass, WebGPU forbids reading a texture that another pipeline of the pass writes as storage.
+  The gbuffers and shadow passes draw many programs, so such a read gets a 1-texel stand-in (zeros), and
+  the log says so. A program may not write an image and also sample it through its sampler name: that
+  program is left out.
+- Limits: storage textures per stage (`maxStorageTexturesPerShaderStage`, 4 in WebGPU); 256 MiB per image
+  (a relative image is measured at 3840×2160); the device's texture size limits. A program over any of
+  them is left out with the reason.
+- `<sampler>` reads of a 32-bit float image are filtered in the shader, as for colour targets that the
+  device cannot filter.
+- Compute programs bind images the same way, each dispatch its own usage scope, so nothing is replaced there.
+
+**Separate hardware shadow samplers** (`SEPARATE_HARDWARE_SAMPLERS`, from the format docs)
+- `shadowtex0HW` / `shadowtex1HW`, declared `sampler2DShadow`, read the shadow map with a depth compare and
+  hardware filtering whatever `shadowHardwareFiltering` says, while `shadowtex0` / `shadowtex1` keep their
+  own setting. Read without a compare, they are the map itself. (Horizon's reading, unverified against Iris.)

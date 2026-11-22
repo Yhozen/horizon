@@ -338,7 +338,10 @@ impl Pp<'_> {
                 c.taken = true;
             }
             "endif" => {
-                self.conds.pop().ok_or("`#endif` without `#if`")?;
+                // A stray `#endif` is ignored, as GL drivers do: Pegasus has an
+                // include with one `#endif` too many, which closes its includer's
+                // block early and leaves the includer's last `#endif` unmatched.
+                self.conds.pop();
             }
             _ if !live => {}
             "define" => self.define(args)?,
@@ -649,6 +652,19 @@ V
     }
 
     #[test]
+    fn a_stray_endif_is_ignored() {
+        let words = |t: &str| {
+            pp(t)
+                .split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(words("#if 0\nA\n#endif\n#endif\nB\n"), ["B"]);
+        // An include's extra `#endif` closes the includer's block early.
+        assert_eq!(words("#if 0\nA\n#endif\n#endif\nC\n#endif\n"), ["C"]);
+    }
+
+    #[test]
     fn broken_conditions_are_false() {
         assert_eq!(pp("#if (in(biome, 3)\nA\n#else\nB\n#endif\n").trim(), "B");
     }
@@ -781,7 +797,7 @@ V
         );
         assert!(pp_err("#if 1\n#error stop\n#endif").contains("stop"));
         assert_eq!(pp("#if 1\nx"), "x\n");
-        assert!(pp_err("#endif").contains("without"));
+        assert_eq!(pp("#endif\nok"), "ok\n");
         assert_eq!(pp("#if 0\n#error dead\n#endif\nok"), "ok\n");
     }
 

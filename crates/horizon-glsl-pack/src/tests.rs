@@ -84,7 +84,7 @@ fn compile_all(files: &PackFiles, options: &PackOptions) -> Result<CompiledPack,
 #[test]
 fn slots() {
     let all = ProgramKind::all();
-    assert_eq!(all.len(), 17 + 15 + 3 * 100 + 1);
+    assert_eq!(all.len(), 17 + 15 + 4 * 100 + 1);
     assert_eq!(
         [
             ProgramKind::Composite(0).name(),
@@ -599,6 +599,77 @@ fn too_many_textures_fail_only_their_program() {
     .unwrap_err();
     assert!(err.contains("17 textures in the fragment stage"), "{err}");
     assert!(err.contains("depthtex2"), "{err}");
+    // The limit is the device's: the game asks the adapter for its own, and
+    // Chrome 146+ offers 48 on adapters that have them (Arc's passes read 19).
+    let files = sampling_pack(
+        &format!("{decls}uniform sampler2D depthtex2;"),
+        &ok,
+        "",
+        &[],
+    );
+    let host = HostParams {
+        max_textures: 48,
+        ..HostParams::default()
+    };
+    let pack = compile(
+        &files,
+        "minecraft:overworld",
+        &PackOptions::default(),
+        &host,
+    )
+    .unwrap();
+    assert_eq!(pack.programs[&ProgramKind::Deferred(0)].textures.len(), 17);
+}
+
+#[test]
+fn a_3d_texture_in_depthtex1_s_place_keeps_depthtex2_its_own() {
+    // No hand program, so depthtex2 would read depthtex1's binding, but here
+    // depthtex1's unit holds a 3D custom texture.
+    let decls = "uniform sampler3D depthtex1;\nuniform sampler2D depthtex2;";
+    let body = "    c += texture(depthtex1, vec3(uv, 0.5)) + texture(depthtex2, uv);";
+    let properties =
+        "texture.deferred.depthtex1=tex/curl.dat TEXTURE_3D RGB8 4 4 4 RGB UNSIGNED_BYTE\n";
+    let p = deferred(&sampling_pack(decls, body, properties, &[])).unwrap();
+    let mut got: Vec<(TextureSource, TexDim)> = p
+        .textures
+        .iter()
+        .map(|t| (t.source.clone(), t.dimension))
+        .collect();
+    got.sort_by_key(|(_, d)| *d == TexDim::D2);
+    assert_eq!(
+        got,
+        [
+            (TextureSource::Custom(0), TexDim::D3),
+            (TextureSource::Depth(2), TexDim::D2)
+        ]
+    );
+}
+
+#[test]
+fn prepare_and_shadowcomp_custom_textures_apply_to_their_passes() {
+    let fsh = "#version 130\nuniform sampler2D colortex3;\nvarying vec2 uv;\n\
+               void main() { gl_FragData[0] = texture(colortex3, uv); }\n";
+    let files = pack_of(
+        &[
+            program("gbuffers_terrain", GBUFFERS_VSH, GBUFFERS_FSH),
+            program("shadow", GBUFFERS_VSH, GBUFFERS_FSH),
+            program("shadowcomp", PASS_VSH, fsh),
+            program("prepare", PASS_VSH, fsh),
+            program("deferred", PASS_VSH, fsh),
+            program("final", PASS_VSH, PASS_FSH),
+        ],
+        &[(
+            "shaders/shaders.properties",
+            "texture.prepare.colortex3=tex/a.png\ntexture.shadowcomp.colortex3=tex/b.png\n",
+        )],
+    );
+    let pack = compile_all(&files, &PackOptions::default()).unwrap();
+    let source = |k: ProgramKind| pack.programs[&k].textures[0].source.clone();
+    assert_eq!(source(ProgramKind::Prepare(0)), TextureSource::Custom(0));
+    assert_eq!(source(ProgramKind::ShadowComp(0)), TextureSource::Custom(1));
+    assert_eq!(source(ProgramKind::Deferred(0)), TextureSource::Buffer(3));
+    // shadowcomp draws into shadowcolor0, not colortex0.
+    assert_eq!(pack.programs[&ProgramKind::ShadowComp(0)].draw_buffers, [0]);
 }
 
 #[test]
@@ -810,4 +881,165 @@ fn mipmaps_are_sampled_on_the_side_they_were_built_for() {
     assert_eq!(sampler(K::Composite(2)), SamplerKind::Linear);
     assert_eq!(sampler(K::Composite(3)), SamplerKind::Trilinear);
     assert_eq!(sampler(K::Composite(4)), SamplerKind::Linear);
+}
+
+const IMAGES: &str = "image.lit=litSampler rgba rgba16f float true true 1.0 1.0
+image.voxels=none RED_INTEGER R32UI UNSIGNED_INT true false 64 32 64
+image.history=historySampler rgba rgba16f float false true 0.5 0.5
+";
+
+#[test]
+fn custom_images_bind_as_storage_and_sampled_textures() {
+    use crate::images::ImageDim;
+    use crate::plan::StorageFormat;
+    use crate::rewrite::ImageAccess;
+    let decls = "layout(rgba16f) writeonly uniform image2D lit;
+layout(r32ui) uniform uimage3D voxels;
+uniform sampler2D historySampler;";
+    let body = "    uint old = imageAtomicMax(voxels, ivec3(1, 2, 3), 7u);
+    imageStore(lit, ivec2(gl_FragCoord.xy), vec4(float(old)) + texture(historySampler, uv));
+    c = vec4(imageSize(voxels), 1.0);";
+    let files = sampling_pack(decls, body, IMAGES, &[]);
+    let p = deferred(&files).unwrap();
+    assert_eq!(
+        p.images,
+        vec![
+            ImageBinding {
+                binding: 240,
+                source: ImageSource::Custom(0),
+                access: ImageAccess::WriteOnly,
+                dimension: ImageDim::D2,
+                format: StorageFormat::Rgba16Float,
+                vertex: false,
+                fragment: true,
+                compute: false,
+            },
+            ImageBinding {
+                binding: 241,
+                source: ImageSource::Custom(1),
+                access: ImageAccess::ReadWrite,
+                dimension: ImageDim::D3,
+                format: StorageFormat::R32Uint,
+                vertex: false,
+                fragment: true,
+                compute: false,
+            },
+        ]
+    );
+    assert!(
+        p.fragment_wgsl
+            .contains("texture_storage_2d<rgba16float,write>"),
+        "{}",
+        p.fragment_wgsl
+    );
+    assert!(
+        p.fragment_wgsl
+            .contains("texture_storage_3d<r32uint,read_write>")
+    );
+    // The other image, through its sampler name.
+    assert!(
+        p.textures
+            .iter()
+            .any(|t| t.source == TextureSource::Image(2) && t.binding == 306)
+    );
+    let pack = compile_all(&files, &PackOptions::default()).unwrap();
+    assert_eq!(pack.plan.images.len(), 3);
+}
+
+#[test]
+fn image_uses_webgpu_cannot_bind_fail_their_program() {
+    let rw = "layout(rgba16f) uniform image2D lit;";
+    let body = "    imageStore(lit, ivec2(0), imageLoad(lit, ivec2(1)));";
+    let err = deferred(&sampling_pack(rw, body, IMAGES, &[])).unwrap_err();
+    assert!(err.contains("read and written by one program"), "{err}");
+    let sampled = "layout(rgba16f) writeonly uniform image2D lit;\nuniform sampler2D litSampler;";
+    let body = "    imageStore(lit, ivec2(0), texture(litSampler, uv));";
+    let err = deferred(&sampling_pack(sampled, body, IMAGES, &[])).unwrap_err();
+    assert!(err.contains("written and read through litSampler"), "{err}");
+    let undeclared = "writeonly uniform image2D other;";
+    let body = "    imageStore(other, ivec2(0), vec4(1.0));";
+    let err = deferred(&sampling_pack(undeclared, body, IMAGES, &[])).unwrap_err();
+    assert!(err.contains("no image.other declaration"), "{err}");
+    let wrong = "layout(r32ui) uniform uimage2D voxels;";
+    let body = "    c.x = float(imageLoad(voxels, ivec2(0)).x);";
+    let err = deferred(&sampling_pack(wrong, body, IMAGES, &[])).unwrap_err();
+    assert!(err.contains("uimage2D in the program"), "{err}");
+}
+
+#[test]
+fn vertex_image_writes_are_dropped_without_the_feature() {
+    let vsh = "#version 430
+layout(r32ui) uniform uimage3D voxels;
+varying vec2 uv;
+void main() {
+    gl_Position = ftransform();
+    uv = gl_MultiTexCoord0.st;
+    imageAtomicMax(voxels, ivec3(gl_Position.xyz), 1u);
+}
+";
+    let files = pack_of(
+        &[
+            program(
+                "gbuffers_terrain",
+                vsh,
+                GBUFFERS_FSH
+                    .replace("varying vec4 tint;", "vec4 tint = vec4(1.0);")
+                    .leak(),
+            ),
+            program("final", PASS_VSH, PASS_FSH),
+        ],
+        &[("shaders/shaders.properties", IMAGES)],
+    );
+    let pack = compile_all(&files, &PackOptions::default()).unwrap();
+    let p = &pack.programs[&ProgramKind::Terrain];
+    assert!(p.images.is_empty(), "{:?}", p.images);
+    assert!(
+        p.notes
+            .iter()
+            .any(|n| n.contains("vertex stage's writes are dropped")),
+        "{:?}",
+        p.notes
+    );
+    let host = HostParams {
+        vertex_storage_writes: true,
+        ..HostParams::default()
+    };
+    let pack = compile(
+        &files,
+        "minecraft:overworld",
+        &PackOptions::default(),
+        &host,
+    )
+    .unwrap();
+    let p = &pack.programs[&ProgramKind::Terrain];
+    assert_eq!(p.images.len(), 1);
+    assert!(p.images[0].vertex && !p.images[0].fragment);
+    assert!(
+        p.vertex_wgsl
+            .contains("texture_storage_3d<r32uint,read_write>")
+    );
+}
+
+#[test]
+fn separate_hardware_shadow_samplers() {
+    let decls = "uniform sampler2DShadow shadowtex0HW;\nuniform sampler2DShadow shadowtex1HW;\nuniform sampler2D shadowtex0;";
+    let body =
+        "    c += texture(shadowtex0HW, vec3(uv, 0.5)) + shadow2D(shadowtex1HW, vec3(uv, 0.5)).r;
+    c += texture(shadowtex0, uv);";
+    let p = deferred(&sampling_pack(decls, body, "", &[])).unwrap();
+    let find = |b: u32| p.textures.iter().find(|t| t.binding == b).unwrap();
+    // Compared at the compare bindings without `shadowHardwareFiltering`; shadowtex0 plain.
+    assert_eq!(find(host::COMPARE_BINDING).sampler, SamplerKind::Compare);
+    assert_eq!(
+        find(host::COMPARE_BINDING + 1).source,
+        TextureSource::ShadowTex(1)
+    );
+    assert_eq!(find(21).sampler, SamplerKind::Point);
+    assert_eq!(p.textures.len(), 3);
+    let props = "iris.features.required=SEPARATE_HARDWARE_SAMPLERS CUSTOM_IMAGES\n";
+    let pack = compile_all(
+        &sampling_pack(decls, body, props, &[]),
+        &PackOptions::default(),
+    );
+    assert!(pack.is_ok());
 }

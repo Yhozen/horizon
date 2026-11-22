@@ -132,6 +132,16 @@ pub(super) fn top_level_items(toks: &[Tok]) -> Result<Vec<(usize, usize)>, Strin
     for (i, t) in toks.iter().enumerate() {
         match t.text {
             "struct" if depth == 0 => is_struct = true,
+            // `buffer Name { … } name;` ends at its `;`, as a struct does.
+            "buffer"
+                if depth == 0 && {
+                    let mut next = toks[i + 1..].iter().filter(|t| t.kind != Kind::Space);
+                    next.next().is_some_and(|t| t.kind == Kind::Ident)
+                        && next.next().is_some_and(|t| t.text == "{")
+                } =>
+            {
+                is_struct = true
+            }
             "{" => depth += 1,
             "}" => {
                 depth -= 1;

@@ -65,7 +65,7 @@ pub(super) fn wgpu_format(
 
 /// The wgpu format of the crate's storage choice for every other format
 /// (snorm and packed small formats widened, integers as integer targets).
-fn storage_format(storage: StorageFormat, float32: bool) -> wgpu::TextureFormat {
+pub(super) fn storage_format(storage: StorageFormat, float32: bool) -> wgpu::TextureFormat {
     use StorageFormat as S;
     use wgpu::TextureFormat as T;
     match storage {
@@ -165,6 +165,8 @@ pub(super) struct Need {
     pub used: bool,
     pub two_sides: bool,
     pub mipmaps: bool,
+    /// A compute program writes or reads it as `colorimgN` (a storage texture).
+    pub storage: bool,
 }
 
 /// The screen-sized targets.
@@ -210,7 +212,12 @@ impl Targets {
                         .map(|side| {
                             let label =
                                 format!("colortex{i}{}", if side == 0 { "" } else { " (alt)" });
-                            let img = image(device, &label, size, formats[i], levels, COLOR_USAGE);
+                            let usage = if need.storage {
+                                COLOR_USAGE | wgpu::TextureUsages::STORAGE_BINDING
+                            } else {
+                                COLOR_USAGE
+                            };
+                            let img = image(device, &label, size, formats[i], levels, usage);
                             let target = img.texture.create_view(&wgpu::TextureViewDescriptor {
                                 mip_level_count: Some(1),
                                 ..Default::default()
@@ -288,6 +295,9 @@ pub(super) struct ShadowTargets {
     /// `shadowtex1`: opaque casters only (copied before translucent terrain).
     pub depth_opaque: Image,
     pub colors: [Option<(Image, wgpu::TextureView)>; 2],
+    /// Level 0 of the colours a `shadowcomp` pass draws into, copied before
+    /// it so it reads what the shadow map held.
+    pub copies: [Option<Image>; 2],
 }
 
 impl ShadowTargets {
@@ -295,6 +305,7 @@ impl ShadowTargets {
         device: &wgpu::Device,
         spec: &ShadowSpec,
         colors_used: [bool; 2],
+        copied: [bool; 2],
         features: wgpu::Features,
         mips: &mut mips::Mips,
     ) -> Self {
@@ -329,6 +340,18 @@ impl ShadowTargets {
                 (img, target)
             })
         });
+        let copies = std::array::from_fn(|i| {
+            (colors_used[i] && copied[i]).then(|| {
+                image(
+                    device,
+                    &format!("shadowcolor{i} (shadowcomp's copy)"),
+                    size,
+                    wgpu_format(spec.color_format[i], None, features),
+                    1,
+                    wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                )
+            })
+        });
         Self {
             depth: image(
                 device,
@@ -349,6 +372,7 @@ impl ShadowTargets {
                 wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             ),
             colors,
+            copies,
         }
     }
 }

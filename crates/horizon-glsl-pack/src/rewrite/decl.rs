@@ -2,6 +2,13 @@
 
 use super::*;
 
+/// Whether a GLSL type is an image (`image2D`, `uimage3D`…).
+pub(super) fn is_image(ty: &str) -> bool {
+    ["image", "iimage", "uimage"]
+        .iter()
+        .any(|p| ty.starts_with(p))
+}
+
 impl Ctx<'_> {
     pub(super) fn text(&self, i: usize) -> &str {
         self.toks[i].text
@@ -14,18 +21,34 @@ impl Ctx<'_> {
         if words.last() == Some(&";") {
             words.pop();
         }
-        // `layout(...)` is skipped; locations come from declaration order.
+        // `layout(...)` is skipped (locations come from declaration order) but
+        // for an image's format: a word not followed by `=`. It may come
+        // before or among the qualifiers (`uniform layout(rg8) writeonly image2D`).
         let mut k = 0;
-        if words.first() == Some(&"layout") {
-            k = words
-                .iter()
-                .position(|w| *w == ")")
-                .map_or(words.len(), |p| p + 1);
-        }
+        let mut format = None;
         let mut quals = Vec::new();
-        while k + 2 < words.len() && listed(QUALIFIERS, words[k]) {
-            quals.push(words[k]);
-            k += 1;
+        while k + 2 < words.len() {
+            if words[k] == "layout" {
+                let close = words[k..]
+                    .iter()
+                    .position(|w| *w == ")")
+                    .map_or(words.len(), |p| k + p + 1);
+                format = words[k..close]
+                    .windows(2)
+                    .find(|w| {
+                        w[0].starts_with(|c: char| c.is_ascii_alphabetic())
+                            && matches!(w[1], "," | ")")
+                            && !matches!(w[0], "std140" | "std430" | "shared" | "packed")
+                    })
+                    .map(|w| w[0].to_ascii_lowercase())
+                    .or(format);
+                k = close;
+            } else if listed(QUALIFIERS, words[k]) || listed(MEMORY, words[k]) {
+                quals.push(words[k]);
+                k += 1;
+            } else {
+                break;
+            }
         }
         let storage = quals
             .iter()
@@ -86,7 +109,25 @@ impl Ctx<'_> {
                 }
                 continue;
             }
-            self.record(storage, &ty, name, flat, array_len)?;
+            if storage == "uniform" && is_image(&ty) {
+                if array_len.is_some() {
+                    return Err(format!("image array `{name}`"));
+                }
+                let access = match (quals.contains(&"readonly"), quals.contains(&"writeonly")) {
+                    (true, false) => ImageAccess::ReadOnly,
+                    (false, true) => ImageAccess::WriteOnly,
+                    _ => ImageAccess::ReadWrite,
+                };
+                self.out.images.push(ImageUniform {
+                    name: name.into(),
+                    ty: ty.clone(),
+                    format: format.clone(),
+                    access,
+                    calls: BTreeSet::new(),
+                });
+            } else {
+                self.record(storage, &ty, name, flat, array_len)?;
+            }
             match rest.get(next) {
                 None => break,
                 Some(&",") => rest = &rest[next + 1..],

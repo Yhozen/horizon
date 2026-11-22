@@ -28,6 +28,47 @@ pub struct Uniform {
     pub ty: String,
 }
 
+/// How a program may use an image: GLSL's `readonly` / `writeonly`, or both
+/// when the declaration says neither.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ImageAccess {
+    ReadOnly,
+    WriteOnly,
+    #[default]
+    ReadWrite,
+}
+
+/// A `uniform image*` declaration the rewriter removed (`colorimgN` and the
+/// pack's own `image.*` images): the host declares it again at its binding.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ImageUniform {
+    pub name: String,
+    /// `image2D`, `uimage3D`, `iimage2D`…
+    pub ty: String,
+    /// The `layout(…)` format as written (`r32ui`, `rgba16f`), if any.
+    pub format: Option<String>,
+    pub access: ImageAccess,
+    /// The image built-ins the body calls on it (`imageLoad`, `imageStore`,
+    /// `imageSize`, `imageAtomicMax`…). Each call `f(name, …)` became
+    /// `hz_<f>_<name>(…)` (the image argument dropped): a host function.
+    pub calls: BTreeSet<String>,
+}
+
+/// The image built-ins the rewriter turns into per-image host functions.
+pub const IMAGE_BUILTINS: [&str; 11] = [
+    "imageLoad",
+    "imageStore",
+    "imageSize",
+    "imageAtomicAdd",
+    "imageAtomicMin",
+    "imageAtomicMax",
+    "imageAtomicAnd",
+    "imageAtomicOr",
+    "imageAtomicXor",
+    "imageAtomicExchange",
+    "imageAtomicCompSwap",
+];
+
 /// One stage of a pack program, ready for the host to wrap.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Rewritten {
@@ -46,6 +87,10 @@ pub struct Rewritten {
     pub sample_calls: BTreeSet<String>,
     /// Each declared sampler's full GLSL type (`sampler2D`, `usampler3D`…), by name.
     pub sampler_types: BTreeMap<String, String>,
+    /// Storage buffer blocks the stage declares (kept in `body`, rebound).
+    pub buffers: Vec<BufferUse>,
+    /// `uniform image*` declarations, in source order.
+    pub images: Vec<ImageUniform>,
 }
 
 /// Compatibility-profile built-ins the host provides as plain globals named `hz_` + name.
@@ -58,6 +103,10 @@ const LEGACY: &str = "\
 /// Built-ins GLSL 450 has under the same name.
 const KEPT: &str =
     "gl_Position gl_FragCoord gl_FrontFacing gl_PointCoord gl_FragDepth gl_PointSize";
+/// Compute built-ins, kept as they are (naga has them).
+const COMPUTE_BUILTINS: &str = "\
+    gl_GlobalInvocationID gl_LocalInvocationID gl_WorkGroupID gl_NumWorkGroups \
+    gl_LocalInvocationIndex gl_WorkGroupSize";
 /// Words GLSL 450 reserves that GLSL 120 left free: any use is the pack's own name.
 const KEYWORDS: &str = "\
     sample smooth flat noperspective centroid patch subroutine invariant precise common \
@@ -73,6 +122,8 @@ const QUALIFIERS: &str = "\
     attribute varying uniform in out flat smooth noperspective centroid invariant const \
     highp mediump lowp";
 const PRECISION: &str = "highp mediump lowp";
+/// Memory qualifiers of image (and buffer) declarations.
+const MEMORY: &str = "readonly writeonly coherent volatile restrict";
 
 /// Whether `word` is one of the space-separated words of `list`.
 fn listed(list: &str, word: &str) -> bool {
@@ -162,6 +213,7 @@ fn polyfill(text: &str) -> Option<(String, BTreeSet<String>)> {
     Some((out, used.iter().map(|(_, defs)| defs.to_string()).collect()))
 }
 
+mod buffers;
 mod compat;
 mod dead;
 mod decl;
@@ -173,6 +225,7 @@ mod scope;
 #[cfg(test)]
 mod tests;
 
+pub use buffers::{BufferUse, STORAGE_BINDING, STORAGE_BUFFERS};
 use lex::{Kind, Tok, drop_unreachable, is_type, tokenize, top_level_items};
 
 struct Ctx<'a> {
@@ -246,6 +299,9 @@ pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
         let first = sig.first().map(|&i| cx.toks[i].text);
         let is_block = sig.iter().any(|&i| cx.toks[i].text == "{");
         if first == Some("precision") {
+            continue;
+        }
+        if is_block && cx.buffer_block(&sig, end, &mut body)? {
             continue;
         }
         if is_block

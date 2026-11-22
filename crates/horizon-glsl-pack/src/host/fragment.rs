@@ -35,7 +35,7 @@ fn output_format(spec: &ProgramSpec, i: usize) -> Option<BufferFormat> {
     let n = usize::from(*spec.draw_buffers.get(i)?);
     if spec.kind == ProgramKind::Final {
         None
-    } else if spec.kind.is_shadow() {
+    } else if spec.kind.writes_shadowcolor() {
         spec.plan.shadow.color_format.get(n).copied()
     } else {
         spec.plan.buffers.get(n).map(|b| b.format)
@@ -77,7 +77,7 @@ fn alpha_test(kind: ProgramKind) -> Option<&'static str> {
             "    if (!(hz_gl_FragData[0].a > 0.1)) { discard; }\n"
         }
         SkyBasic | SkyTextured | Basic | Line | Lightning | BeaconBeam | TerrainSolid
-        | Prepare(_) | Deferred(_) | Composite(_) | Final => return None,
+        | ShadowComp(_) | Prepare(_) | Deferred(_) | Composite(_) | Final => return None,
     })
 }
 
@@ -201,6 +201,7 @@ pub(super) fn fragment_source(
     let mut out = format!("#version 450\n{}", uniform_block(extras));
     let sampled = sampling(&fragment.sample_calls, Stage::Fragment, spec, extras)?;
     out += &sampled.decls;
+    out += &extras.images[1];
     declare_unknown_uniforms(&mut out, fragment);
     shared.declare(&mut out, "in");
     let location = shared.next_location();
@@ -246,7 +247,14 @@ pub(super) fn fragment_source(
     }
     out += "vec4 hz_gl_FragData[8];\n";
     out += OUTPUT_HELPERS;
-    let mut body = fragment.body.clone();
+    // Atomics on storage buffers (naga_atomics), and GLSL's memory barriers.
+    let (mut body, atomics) = crate::naga_atomics::rename_calls(&fragment.body)?;
+    if !fragment.buffers.is_empty() {
+        out += super::compute::MEMORY_BARRIERS;
+    }
+    if atomics {
+        out += &crate::naga_atomics::atomic_stubs();
+    }
     for o in outputs {
         glsl_type(&o.ty)?;
         writeln!(out, "{} hz_o_{};", o.ty, o.index).unwrap();

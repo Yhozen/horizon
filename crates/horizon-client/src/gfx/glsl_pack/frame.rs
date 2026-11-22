@@ -116,6 +116,59 @@ impl PackRenderer {
         })
     }
 
+    /// Dispatches the compute program of `slot` (if it built) over a
+    /// `size` render, sampling each colortex from `sides`.
+    fn dispatch(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        slot: horizon_glsl_pack::compute::ComputeSlot,
+        sides: &[Side; 16],
+        size: [u32; 2],
+    ) {
+        let Some(c) = self.computes.get(&slot) else {
+            return;
+        };
+        let groups = c.dispatch.groups(size[0], size[1], c.workgroup_size);
+        if groups.contains(&0) {
+            return;
+        }
+        let max = device.limits().max_compute_workgroups_per_dimension;
+        // A colortex the program writes as colorimgN and also samples: WebGPU
+        // forbids both in one dispatch, so it samples a copy on the other side.
+        let mut sample_sides = *sides;
+        for img in &c.color_images {
+            let b = img.buffer;
+            if !c
+                .textures
+                .iter()
+                .any(|t| t.source == horizon_glsl_pack::TextureSource::Buffer(b))
+            {
+                continue;
+            }
+            if let Some(buffer) = self.targets().buffer(b)
+                && buffer.sides.len() > 1
+            {
+                let side = sides[usize::from(b)];
+                super::targets::copy_whole(
+                    encoder,
+                    &buffer.side(side).texture,
+                    &buffer.side(side.other()).texture,
+                );
+                sample_sides[usize::from(b)] = side.other();
+            }
+        }
+        let group = self.compute_group(device, c, &sample_sides, sides);
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some(&c.source),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&c.pipeline);
+        pass.set_bind_group(0, &self.empty_group, &[]);
+        pass.set_bind_group(1, &group, &[]);
+        pass.dispatch_workgroups(groups[0].min(max), groups[1].min(max), groups[2].min(max));
+    }
+
     fn clear(&self, encoder: &mut wgpu::CommandEncoder, clears: &[BufferClear], fog: [f32; 4]) {
         let t = self.targets();
         for c in clears {
@@ -203,9 +256,17 @@ impl Renderer {
             bytemuck::cast_slice(&sky_vertices(frame.sky.sky_color)),
         );
         pack.frames = pack.frames.wrapping_add(1);
+        pack.images.clear(&self.device, encoder);
         if fresh {
             let initial = pack.schedule.initial_clears.clone();
             pack.clear(encoder, &initial, counts.fog_color);
+        }
+        // `setup*` programs: once, before the pack's first frame.
+        if !pack.setup_done {
+            for &slot in &pack.schedule.setup {
+                pack.dispatch(&self.device, encoder, slot, &[Side::Main; 16], size);
+            }
+            pack.setup_done = true;
         }
         let steps = pack.schedule.steps.clone();
         for step in &steps {
@@ -274,6 +335,40 @@ impl Renderer {
                             pass.set_viewport(x, y, vw, vh, 0.0, 1.0);
                         }
                     }
+                    pass.set_pipeline(&program.pipeline);
+                    pass.set_bind_group(0, &pack.empty_group, &[]);
+                    pass.set_bind_group(1, &group, &[]);
+                    pass.draw(0..4, 0..1);
+                }
+                Step::Compute { slot, reads } => {
+                    pack.dispatch(&self.device, encoder, *slot, reads, size);
+                }
+                Step::ShadowComp { kind, writes } => {
+                    let (Some(program), Some(shadow)) = (pack.programs.get(kind), &pack.shadow)
+                    else {
+                        continue;
+                    };
+                    let mut attachments = Vec::new();
+                    for &b in writes {
+                        let i = usize::from(b.min(1));
+                        let Some((img, target)) = &shadow.colors[i] else {
+                            continue;
+                        };
+                        if let Some(copy) = &shadow.copies[i] {
+                            super::targets::copy_whole(encoder, &img.texture, &copy.texture);
+                        }
+                        attachments.push(attachment(target, wgpu::LoadOp::Load));
+                    }
+                    if attachments.len() != program.draw_buffers.len() {
+                        continue;
+                    }
+                    let main = [horizon_glsl_pack::schedule::Side::Main; 16];
+                    let group = pack.group(&self.device, program, &pack.uniforms.main, &main);
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some(&format!("{kind:?}")),
+                        color_attachments: &attachments,
+                        ..Default::default()
+                    });
                     pass.set_pipeline(&program.pipeline);
                     pass.set_bind_group(0, &pack.empty_group, &[]);
                     pass.set_bind_group(1, &group, &[]);

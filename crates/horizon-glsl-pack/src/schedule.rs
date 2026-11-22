@@ -27,6 +27,7 @@
 use std::collections::BTreeSet;
 
 use crate::ProgramKind;
+use crate::compute::{ComputePass, ComputeSlot};
 use crate::plan::{BufferSize, PackPlan, Scale};
 
 /// Number of `colortexN` buffers.
@@ -118,6 +119,23 @@ pub enum Step {
         sides: [Side; BUFFERS],
     },
     Pass(Pass),
+    /// A compute program (`plan.computes`), dispatched where the format
+    /// runs it: `begin*` before the shadow map, `shadowcomp*` after it, and
+    /// a pass's own (`composite2`, `composite2_a` …) just before that pass's
+    /// full-screen program, or where it would run when the pack has none.
+    /// `reads[N]` is the side of `colortexN` it samples.
+    Compute {
+        slot: ComputeSlot,
+        reads: [Side; BUFFERS],
+    },
+    /// A `shadowcomp` pass, right after [`Step::Shadow`]: it draws into the
+    /// `shadowcolorN` in `writes` (one texture each, no sides). The client
+    /// copies each before the pass and binds the copy for its reads, so the
+    /// pass reads what the shadow map held, as Iris's flipped buffers give.
+    ShadowComp {
+        kind: ProgramKind,
+        writes: Vec<u8>,
+    },
     /// Copy these buffers' alternate side into their main side (end of frame).
     CopyBack(Vec<u8>),
 }
@@ -138,6 +156,9 @@ pub struct FrameSchedule {
     /// Buffers some program writes (gbuffers or full-screen; shadow programs
     /// write shadowcolor, not colortex). Others are only ever cleared.
     pub written: BTreeSet<u8>,
+    /// `setup*` compute programs, run once before the first frame (after
+    /// the targets are created), in order.
+    pub setup: Vec<ComputeSlot>,
 }
 
 /// The colour `buffer` is cleared to under `plan`.
@@ -176,7 +197,7 @@ impl FrameSchedule {
     pub fn new(plan: &PackPlan) -> Self {
         let mut written = BTreeSet::new();
         for &kind in plan.programs.keys() {
-            if kind.is_shadow() || kind == ProgramKind::Final {
+            if kind.writes_shadowcolor() || kind == ProgramKind::Final {
                 continue;
             }
             written.extend(draw_buffers(plan, kind));
@@ -197,34 +218,82 @@ impl FrameSchedule {
         if !per_frame.is_empty() {
             steps.push(Step::Clear(per_frame));
         }
+        let mut sides = [Side::Main; BUFFERS];
+        let computes = |pass: ComputePass, n: Option<u8>| -> Vec<ComputeSlot> {
+            plan.computes
+                .keys()
+                .copied()
+                .filter(|c| c.pass == pass && n.is_none_or(|n| c.n == n))
+                .collect()
+        };
+        let dispatch = |steps: &mut Vec<Step>, slots: Vec<ComputeSlot>, sides: &[Side; BUFFERS]| {
+            for slot in slots {
+                steps.push(Step::Compute {
+                    slot,
+                    reads: *sides,
+                });
+            }
+        };
+        dispatch(&mut steps, computes(ComputePass::Begin, None), &sides);
         if plan.programs.contains_key(&ProgramKind::Shadow)
             || plan.programs.contains_key(&ProgramKind::ShadowEntities)
         {
             steps.push(Step::Shadow);
+            for &kind in plan.programs.keys() {
+                if let ProgramKind::ShadowComp(_) = kind {
+                    let mut writes = plan.draw_buffers.get(&kind).cloned().unwrap_or(vec![0]);
+                    writes.retain(|&b| b < 2);
+                    writes.dedup();
+                    steps.push(Step::ShadowComp { kind, writes });
+                }
+            }
         }
-        let mut sides = [Side::Main; BUFFERS];
-        let passes = plan.fullscreen_passes();
+        dispatch(&mut steps, computes(ComputePass::ShadowComp, None), &sides);
+        // Each pass number in order: its compute programs, then its full-screen program.
+        let phase = |steps: &mut Vec<Step>,
+                     sides: &mut [Side; BUFFERS],
+                     kinds: Vec<ProgramKind>,
+                     compute_pass: ComputePass| {
+            let mut numbers: BTreeSet<u8> =
+                computes(compute_pass, None).iter().map(|c| c.n).collect();
+            numbers.extend(kinds.iter().map(|k| match k {
+                ProgramKind::Prepare(n) | ProgramKind::Deferred(n) | ProgramKind::Composite(n) => {
+                    *n
+                }
+                _ => u8::MAX,
+            }));
+            for n in numbers {
+                dispatch(steps, computes(compute_pass, Some(n)), sides);
+                if let Some(kind) = kinds.iter().find(|k| {
+                    matches!(k, ProgramKind::Prepare(m) | ProgramKind::Deferred(m) | ProgramKind::Composite(m) if *m == n)
+                }) {
+                    steps.push(Step::Pass(pass(plan, *kind, sides)));
+                }
+            }
+        };
+        let mut passes = plan.fullscreen_passes();
+        passes.retain(|k| !k.writes_shadowcolor());
         let (prepare, passes): (Vec<_>, Vec<_>) = passes
             .iter()
             .partition(|k| matches!(k, ProgramKind::Prepare(_)));
         let (deferred, rest): (Vec<_>, Vec<_>) = passes
             .into_iter()
             .partition(|k| matches!(k, ProgramKind::Deferred(_)));
-        for kind in prepare {
-            steps.push(Step::Pass(pass(plan, kind, &mut sides)));
-        }
+        phase(&mut steps, &mut sides, prepare, ComputePass::Prepare);
         steps.push(Step::Gbuffers {
             phase: GbufferPhase::Opaque,
             sides,
         });
-        for kind in deferred {
-            steps.push(Step::Pass(pass(plan, kind, &mut sides)));
-        }
+        phase(&mut steps, &mut sides, deferred, ComputePass::Deferred);
         steps.push(Step::Gbuffers {
             phase: GbufferPhase::Translucent,
             sides,
         });
-        for kind in rest {
+        let (composite, last): (Vec<_>, Vec<_>) = rest
+            .into_iter()
+            .partition(|k| matches!(k, ProgramKind::Composite(_)));
+        phase(&mut steps, &mut sides, composite, ComputePass::Composite);
+        for kind in last {
             steps.push(Step::Pass(pass(plan, kind, &mut sides)));
         }
         let copy_back: Vec<u8> = (0..BUFFERS as u8)
@@ -238,6 +307,7 @@ impl FrameSchedule {
             initial_clears,
             latest: sides,
             written,
+            setup: computes(ComputePass::Setup, None),
         }
     }
 
@@ -275,7 +345,7 @@ pub fn mipmapped_reads(plan: &PackPlan, kind: ProgramKind) -> [bool; BUFFERS] {
         .chain(plan.draw_buffers.keys())
         .chain(plan.mipmaps.keys())
         .copied()
-        .filter(|k| k.is_fullscreen() && *k < kind)
+        .filter(|k| k.is_fullscreen() && !k.writes_shadowcolor() && *k < kind)
         .collect();
     kinds.sort();
     kinds.dedup();
@@ -425,6 +495,9 @@ mod tests {
     fn deferred_runs_between_the_gbuffer_phases() {
         let p = plan(&[
             (ProgramKind::Shadow, &[0, 1]),
+            // shadowcomp writes shadowcolors (5 is not one), right after the shadow map.
+            (ProgramKind::ShadowComp(1), &[1, 5]),
+            (ProgramKind::ShadowComp(0), &[0]),
             (ProgramKind::Terrain, &[0, 2]),
             (ProgramKind::Deferred(0), &[0]),
             (ProgramKind::Composite(0), &[0]),
@@ -438,6 +511,8 @@ mod tests {
                 Step::Shadow => "shadow".into(),
                 Step::Gbuffers { phase, .. } => format!("{phase:?}"),
                 Step::Pass(p) => format!("{:?}", p.kind),
+                Step::Compute { slot, .. } => slot.name(),
+                Step::ShadowComp { kind, writes } => format!("{kind:?} {writes:?}"),
                 Step::CopyBack(_) => "copy".into(),
             })
             .collect();
@@ -446,17 +521,19 @@ mod tests {
             [
                 "clear",
                 "shadow",
+                "ShadowComp(0) [0]",
+                "ShadowComp(1) [1]",
                 "Opaque",
                 "Deferred(0)",
                 "Translucent",
                 "Composite(0)"
             ]
         );
-        let Step::Gbuffers { sides: after, .. } = &s.steps[4] else {
+        let Step::Gbuffers { sides: after, .. } = &s.steps[6] else {
             panic!()
         };
         assert_eq!(*after, sides(&[0]));
-        // Shadow draw buffers are shadowcolors, not colortex.
+        // Shadow and shadowcomp draw buffers are shadowcolors, not colortex.
         assert_eq!(s.written, BTreeSet::from([0, 2]));
         // Two flips of colortex0: back on main.
         assert_eq!(s.latest, sides(&[]));

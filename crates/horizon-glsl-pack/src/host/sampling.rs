@@ -272,11 +272,10 @@ fn custom_applies(stage: TextureStage, sampler: &str, spec: &ProgramSpec) -> boo
         TextureStage::Deferred => matches!(kind, ProgramKind::Deferred(_)),
         TextureStage::Composite => matches!(kind, ProgramKind::Composite(_) | ProgramKind::Final),
         TextureStage::All => true,
+        TextureStage::Shadowcomp => matches!(kind, ProgramKind::ShadowComp(_)),
+        TextureStage::Prepare => matches!(kind, ProgramKind::Prepare(_)),
         // Passes Horizon does not run.
-        TextureStage::Prepare
-        | TextureStage::Shadowcomp
-        | TextureStage::Begin
-        | TextureStage::Setup => false,
+        TextureStage::Begin | TextureStage::Setup => false,
     };
     if !applies {
         return false;
@@ -289,7 +288,8 @@ fn custom_applies(stage: TextureStage, sampler: &str, spec: &ProgramSpec) -> boo
         return true;
     };
     let earlier = |k: &ProgramKind| match (kind, k) {
-        (ProgramKind::Deferred(a), ProgramKind::Deferred(b))
+        (ProgramKind::Prepare(a), ProgramKind::Prepare(b))
+        | (ProgramKind::Deferred(a), ProgramKind::Deferred(b))
         | (ProgramKind::Composite(a), ProgramKind::Composite(b)) => b < &a,
         (ProgramKind::Final, ProgramKind::Composite(_)) => true,
         _ => false,
@@ -333,6 +333,47 @@ fn custom_entry(
     })
 }
 
+/// The custom image whose sampler is `sampler`, read as a texture of the
+/// declared dimension (a 1D image or another dimension: none).
+fn image_entry(sampler: &str, dim: TexDim, spec: &ProgramSpec) -> Option<Entry> {
+    use crate::images::ImageDim;
+    let (i, image) = spec
+        .plan
+        .images
+        .iter()
+        .enumerate()
+        .find(|(_, i)| i.sampler.as_deref() == Some(sampler))?;
+    let image_dim = match image.size.dim() {
+        ImageDim::D2 => TexDim::D2,
+        ImageDim::D3 => TexDim::D3,
+        ImageDim::D1 => return None,
+    };
+    if image_dim != dim {
+        return None;
+    }
+    use crate::plan::StorageFormat as S;
+    let format = image.storage();
+    let sample = buffer_sample(image.format);
+    let hardware = sample == SampleKind::Float
+        && !matches!(format, S::R32Float | S::Rg32Float | S::Rgba32Float);
+    let kind = if hardware {
+        SamplerKind::Linear
+    } else {
+        SamplerKind::Point
+    };
+    Some(Entry {
+        dim,
+        sample,
+        manual: !hardware && sample == SampleKind::Float && dim == TexDim::D2,
+        channels: image.format.channels(),
+        ..Entry::new(
+            super::IMAGE_SAMPLED_BINDING + i as u32,
+            TextureSource::Image(i),
+            kind,
+        )
+    })
+}
+
 /// What `name` (declared with dimension `dim`) reads for the operation `op`
 /// in this program. `depth2_is_1`: `depthtex2` reads `depthtex1` (they hold
 /// the same without a hand program).
@@ -352,9 +393,43 @@ pub(super) fn resolve(
     } else {
         name
     };
+    // `shadowtexNHW` (`SEPARATE_HARDWARE_SAMPLERS`): the shadow map with a
+    // depth compare whatever `shadowHardwareFiltering` says; read without one,
+    // the map itself.
+    if let Some(n) = name
+        .strip_prefix("shadowtex")
+        .and_then(|r| r.strip_suffix("HW"))
+        .and_then(|n| n.parse::<u8>().ok())
+        .filter(|&n| n < 2)
+    {
+        if dim == TexDim::D3 {
+            return Ok(Source::Default);
+        }
+        let compared = matches!(op, "hz_shadow_" | "hz_shadowLod_");
+        return Ok(Source::Pack(if compared {
+            Entry {
+                depth: true,
+                compare: true,
+                sample: SampleKind::Depth,
+                ..Entry::new(
+                    COMPARE_BINDING + u32::from(n),
+                    TextureSource::ShadowTex(n),
+                    SamplerKind::Compare,
+                )
+            }
+        } else {
+            let base = sampler_binding(&format!("shadowtex{n}")).expect("shadowtex0/1 bind");
+            Entry {
+                depth: true,
+                manual: !spec.plan.shadow.tex_nearest[usize::from(n)],
+                ..Entry::new(base, TextureSource::ShadowTex(n), SamplerKind::Point)
+            }
+        }));
+    }
     let Some(canon) = canonical(name, watershadow) else {
-        // The pack's own name: a custom texture, else the 1×1 default.
-        return Ok(custom_entry(name, dim, None, spec).map_or(Source::Default, Source::Pack));
+        // The pack's own name: a custom texture, a custom image's sampler, else the 1×1 default.
+        let entry = custom_entry(name, dim, None, spec).or_else(|| image_entry(name, dim, spec));
+        return Ok(entry.map_or(Source::Default, Source::Pack));
     };
     let canon = match canon.as_str() {
         "gtexture" | "lightmap" if fullscreen => "colortex0".to_string(),
@@ -492,12 +567,17 @@ pub(super) struct Sampling {
 /// hand program (so the two hold the same) and the stage reads both, which
 /// saves a binding.
 fn depth2_is_1(calls: &BTreeSet<String>, spec: &ProgramSpec, watershadow: bool) -> bool {
+    // Only reads of the depth buffers themselves: a 2D read with no custom
+    // texture in its place (`texture.deferred.depthtex1=` a 3D noise volume).
     let reads = |want: &str| {
-        calls.iter().any(|c| {
-            split_sampling_call(c)
-                .and_then(|(_, n)| canonical(n, watershadow))
-                .is_some_and(|n| n == want)
-        })
+        calls
+            .iter()
+            .filter_map(|c| parse_sampling_call(c))
+            .any(|c| {
+                c.dim == TexDim::D2
+                    && canonical(c.name, watershadow).is_some_and(|n| n == want)
+                    && custom_entry(want, c.dim, None, spec).is_none()
+            })
     };
     !spec.plan.programs.contains_key(&ProgramKind::Hand) && reads("depthtex1") && reads("depthtex2")
 }

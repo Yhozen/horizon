@@ -4,7 +4,8 @@
 
 use horizon_glsl_pack::host::Geometry;
 use horizon_glsl_pack::{
-    CompiledProgram, ProgramKind, SampleKind, SamplerKind, TexDim, TextureBinding, TextureSource,
+    CompiledCompute, CompiledProgram, ImageBinding, ProgramKind, SampleKind, SamplerKind,
+    StorageBinding, TexDim, TextureBinding, TextureSource,
 };
 
 /// A pipeline and what its bind group 1 must hold.
@@ -14,8 +15,27 @@ pub(super) struct Program {
     pub layout: wgpu::BindGroupLayout,
     pub textures: Vec<TextureBinding>,
     pub samplers: Vec<SamplerKind>,
+    /// Storage images, by binding.
+    pub images: Vec<ImageBinding>,
     /// colortex (gbuffers, full-screen) or shadowcolor (shadow) indices, by output location.
     pub draw_buffers: Vec<u8>,
+    /// `bufferObject`s the program binds.
+    pub storage: Vec<StorageBinding>,
+}
+
+/// A compute program's pipeline, its group 1 layout and what it binds.
+pub(super) struct ComputeProgram {
+    pub source: String,
+    pub pipeline: wgpu::ComputePipeline,
+    pub layout: wgpu::BindGroupLayout,
+    pub textures: Vec<TextureBinding>,
+    pub samplers: Vec<SamplerKind>,
+    pub storage: Vec<StorageBinding>,
+    pub color_images: Vec<horizon_glsl_pack::ColorImageBinding>,
+    /// Custom images (`image.*`).
+    pub custom_images: Vec<ImageBinding>,
+    pub workgroup_size: [u32; 3],
+    pub dispatch: horizon_glsl_pack::compute::Dispatch,
 }
 
 /// Group 0 layouts, by geometry, and the target formats.
@@ -35,9 +55,13 @@ pub(super) struct Layouts<'a> {
 }
 
 fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    uniform_entry_in(binding, wgpu::ShaderStages::VERTEX_FRAGMENT)
+}
+
+fn uniform_entry_in(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
-        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+        visibility,
         ty: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
             has_dynamic_offset: false,
@@ -155,13 +179,15 @@ fn pack_blend(blend: horizon_glsl_pack::plan::Blend) -> Option<wgpu::BlendState>
 /// into 32-bit float targets in the browser only with `FLOAT32_BLENDABLE`
 /// (WebGPU rejects the pipeline otherwise).
 fn blendable(format: wgpu::TextureFormat, features: wgpu::Features) -> bool {
-    if cfg!(not(target_arch = "wasm32")) {
-        return true;
-    }
+    // Integer targets never blend, natively either (Noble's RGBA32UI colortex1
+    // under the default alpha blending of gbuffers_beaconbeam: a validation error).
     let integer = matches!(
         format.sample_type(None, None),
         Some(wgpu::TextureSampleType::Sint | wgpu::TextureSampleType::Uint)
     );
+    if cfg!(not(target_arch = "wasm32")) {
+        return !integer;
+    }
     let float32 = matches!(
         format,
         wgpu::TextureFormat::R32Float
@@ -204,6 +230,18 @@ pub(super) fn build(
             samplers.push(t.sampler);
         }
     }
+    for b in &program.images {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: b.binding,
+            visibility: stages(b.vertex, b.fragment),
+            ty: wgpu::BindingType::StorageTexture {
+                access: super::images::storage_access(b.access),
+                format: super::images::wgpu_format(b.format).0,
+                view_dimension: super::images::view_dimension(b.dimension),
+            },
+            count: None,
+        });
+    }
     samplers.sort();
     for &s in &samplers {
         let vertex = program.textures.iter().any(|t| t.sampler == s && t.vertex);
@@ -223,6 +261,9 @@ pub(super) fn build(
             }),
             count: None,
         });
+    }
+    for b in &program.storage {
+        entries.push(storage_entry(b, stages(b.vertex, b.fragment)));
     }
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some(&program.source),
@@ -280,7 +321,7 @@ pub(super) fn build(
         .map(|&i| {
             let format = if kind == ProgramKind::Final {
                 layouts.screen
-            } else if kind.is_shadow() {
+            } else if kind.writes_shadowcolor() {
                 (layouts.shadow_color)(i)
             } else {
                 (layouts.color)(i)
@@ -320,6 +361,17 @@ pub(super) fn build(
             return Err(format!(
                 "{}: {textures} textures in the {stage} stage, the device allows {}",
                 program.source, limits.max_sampled_textures_per_shader_stage
+            ));
+        }
+        let images = program
+            .images
+            .iter()
+            .filter(|b| if vertex { b.vertex } else { b.fragment })
+            .count() as u32;
+        if images > limits.max_storage_textures_per_shader_stage {
+            return Err(format!(
+                "{}: {images} storage images in the {stage} stage, the device allows {}",
+                program.source, limits.max_storage_textures_per_shader_stage
             ));
         }
     }
@@ -385,7 +437,156 @@ pub(super) fn build(
         layout,
         textures: program.textures.clone(),
         samplers,
+        images: program.images.clone(),
         draw_buffers: program.draw_buffers.clone(),
+        storage: program.storage.clone(),
+    })
+}
+
+fn storage_entry(b: &StorageBinding, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding: b.binding,
+        visibility,
+        ty: wgpu::BindingType::Buffer {
+            // The vertex stage cannot write storage in WebGPU (the crate makes it read only).
+            ty: wgpu::BufferBindingType::Storage {
+                read_only: b.read_only || b.vertex,
+            },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+/// A compute program's pipeline: group 0 empty, group 1 the uniform block,
+/// textures, samplers and storage buffers, all seen by the compute stage.
+pub(super) fn build_compute(
+    device: &wgpu::Device,
+    program: &CompiledCompute,
+    layouts: &Layouts,
+) -> Result<ComputeProgram, String> {
+    let compute = wgpu::ShaderStages::COMPUTE;
+    let mut entries = vec![uniform_entry_in(0, compute)];
+    if layouts.custom_uniforms {
+        entries.push(uniform_entry_in(
+            horizon_glsl_pack::custom_uniforms::CUSTOM_BINDING,
+            compute,
+        ));
+    }
+    let mut samplers: Vec<SamplerKind> = Vec::new();
+    for t in &program.textures {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: t.binding,
+            visibility: compute,
+            ty: wgpu::BindingType::Texture {
+                sample_type: sample_type(t),
+                view_dimension: match t.dimension {
+                    TexDim::D2 => wgpu::TextureViewDimension::D2,
+                    TexDim::D3 => wgpu::TextureViewDimension::D3,
+                },
+                multisampled: false,
+            },
+            count: None,
+        });
+        if !samplers.contains(&t.sampler) {
+            samplers.push(t.sampler);
+        }
+    }
+    samplers.sort();
+    for &s in &samplers {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: s.binding(),
+            visibility: compute,
+            ty: wgpu::BindingType::Sampler(match s {
+                SamplerKind::Compare => wgpu::SamplerBindingType::Comparison,
+                SamplerKind::Point | SamplerKind::PointRepeat => {
+                    wgpu::SamplerBindingType::NonFiltering
+                }
+                _ => wgpu::SamplerBindingType::Filtering,
+            }),
+            count: None,
+        });
+    }
+    for b in &program.storage {
+        entries.push(storage_entry(b, compute));
+    }
+    for img in &program.color_images {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: img.binding,
+            visibility: compute,
+            ty: wgpu::BindingType::StorageTexture {
+                access: match (img.read, img.write) {
+                    (true, true) => wgpu::StorageTextureAccess::ReadWrite,
+                    (true, false) => wgpu::StorageTextureAccess::ReadOnly,
+                    _ => wgpu::StorageTextureAccess::WriteOnly,
+                },
+                format: (layouts.color)(img.buffer),
+                view_dimension: wgpu::TextureViewDimension::D2,
+            },
+            count: None,
+        });
+    }
+    for b in &program.images {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: b.binding,
+            visibility: compute,
+            ty: wgpu::BindingType::StorageTexture {
+                access: super::images::storage_access(b.access),
+                format: super::images::wgpu_format(b.format).0,
+                view_dimension: super::images::view_dimension(b.dimension),
+            },
+            count: None,
+        });
+    }
+    let limits = device.limits();
+    let storage_images = program.color_images.len() + program.images.len();
+    if storage_images as u32 > limits.max_storage_textures_per_shader_stage {
+        return Err(format!(
+            "{}: {} storage images, the device allows {}",
+            program.source, storage_images, limits.max_storage_textures_per_shader_stage
+        ));
+    }
+    if program.textures.len() as u32 > limits.max_sampled_textures_per_shader_stage {
+        return Err(format!(
+            "{}: {} textures, the device allows {}",
+            program.source,
+            program.textures.len(),
+            limits.max_sampled_textures_per_shader_stage
+        ));
+    }
+    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some(&program.source),
+        entries: &entries,
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(&program.source),
+        bind_group_layouts: &[Some(layouts.empty), Some(&layout)],
+        ..Default::default()
+    });
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(&program.source),
+        source: wgpu::ShaderSource::Wgsl(program.wgsl.as_str().into()),
+    });
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some(&program.source),
+        layout: Some(&pipeline_layout),
+        module: &module,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    Ok(ComputeProgram {
+        source: program.source.clone(),
+        pipeline,
+        layout,
+        textures: program.textures.clone(),
+        samplers,
+        storage: program.storage.clone(),
+        color_images: program.color_images.clone(),
+        custom_images: program.images.clone(),
+        workgroup_size: program.workgroup_size,
+        dispatch: program.dispatch,
     })
 }
 

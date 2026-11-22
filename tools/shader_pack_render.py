@@ -268,6 +268,14 @@ def run_one(pack: Path | None, out: Path, timeout: int, extra: list[str]) -> dic
     }
 
 
+def pack_settled(logs: str) -> bool:
+    """Whether the game logged the pack's outcome: its status line or an error. A pack the GPU
+    rejected parts of compiles again without them ("the GPU rejected …", "no longer wanted"), and
+    only the next status line is the pack that draws."""
+    return any("Horizon: shader pack " in line and "the GPU rejected" not in line
+               and "no longer wanted" not in line for line in logs.splitlines())
+
+
 def run_iris(pack: Path | None, out: Path, timeout: int, extra: list[str]) -> dict:
     """The oracle's world and poses: `out` is the noon picture, `<stem>-dusk.png` and
     `<stem>-underwater.png` beside it."""
@@ -310,7 +318,7 @@ def run_iris(pack: Path | None, out: Path, timeout: int, extra: list[str]) -> di
         if pack:
             # The pack compiles in the background: pose only once it is in (or refused).
             until = time.time() + 400
-            while time.time() < until and "Horizon: shader pack " not in ctl("logs", "--lines", "400"):
+            while time.time() < until and not pack_settled(ctl("logs", "--lines", "400")):
                 output.pop()
                 time.sleep(5)
         ctl("key", "f1", "tap")
