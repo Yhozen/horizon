@@ -43,7 +43,8 @@ The page keeps the `shaderpacks` folder and `horizon-shaders.txt` in the browser
 Origin Private File System), so packs and the choice survive a reload. At boot only the choice, the option
 files and the chosen pack (when shaders are on) are put in the game's memory; another pack is read from
 storage when the page first shows it or it is chosen. A write the storage refuses (it is full, say) is
-said in chat. `?shaderpack=<url of a zip>` adds that
+said in chat, and what happened to each added file (added, not a zip, over 128 MB, dropped away from the
+Shader Packs page) is said in chat and for a few seconds on the Shader Packs page itself. `?shaderpack=<url of a zip>` adds that
 pack to the folder and chooses it. A pack whose shaders the browser's own compiler rejects is turned off
 during its first frames, and its report gives the browser's message; other programs of the pack fall back
 when they can.

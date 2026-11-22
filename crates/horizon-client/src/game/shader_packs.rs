@@ -33,6 +33,9 @@ pub(super) fn notice(line: String) {
     NOTICES.lock().unwrap_or_else(|e| e.into_inner()).push(line);
 }
 
+/// How long the Shader Packs page shows the last notice.
+const NOTICE_SHOWN: std::time::Duration = std::time::Duration::from_secs(12);
+
 fn take_notices() -> Vec<String> {
     std::mem::take(&mut *NOTICES.lock().unwrap_or_else(|e| e.into_inner()))
 }
@@ -571,6 +574,8 @@ pub(super) struct ShaderPacks {
     trial_drawn: Option<web_time::Instant>,
     /// A pack left on trial by the last run, not turned on (said in chat once in a world).
     held_back: Option<String>,
+    /// The last line about adding or loading packs, and when (shown on the page).
+    pub notice: Option<(String, web_time::Instant)>,
     loaded: bool,
 }
 
@@ -934,6 +939,7 @@ impl Game<'_> {
             self.shader_packs.rescan();
         }
         for line in take_notices() {
+            self.shader_packs.notice = Some((line.clone(), web_time::Instant::now()));
             self.system_message(horizon_client::text::Text::literal(line));
         }
         let want = self.shader_packs.target(self.dim);
@@ -1236,6 +1242,7 @@ impl Game<'_> {
             Ok(name) => format!("Added shader pack {name}."),
             Err(e) => format!("Not added: {e}"),
         };
+        self.shader_packs.notice = Some((line.clone(), web_time::Instant::now()));
         self.system_message(horizon_client::text::Text::literal(line));
     }
 
@@ -1490,6 +1497,11 @@ impl Game<'_> {
             web: cfg!(target_arch = "wasm32"),
             report,
             settings,
+            notice: sp
+                .notice
+                .as_ref()
+                .filter(|(_, at)| at.elapsed() < NOTICE_SHOWN)
+                .map(|(line, _)| line.clone()),
         }
     }
 

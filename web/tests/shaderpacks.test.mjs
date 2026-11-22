@@ -148,6 +148,9 @@ test("Chrome keeps shader packs in OPFS across restarts; picker, drop and clipbo
   await page.evaluate(() => store.flush());
   assert.deepEqual(await page.evaluate(() => installs), [["shaderpacks/My Pack [v2] §a+.zip", "PK\u0003\u0004"]]);
   assert.equal(await page.locator("#horizon-shaderpack-input").getAttribute("accept"), ".zip,application/zip");
+  // The player hears of each file (the game's chat and the Shader Packs page).
+  assert.deepEqual(await page.evaluate(() => notices.splice(0)),
+    ["Added shader pack My Pack [v2] §a+.zip.", "Not added: notes.txt is not a .zip file."]);
 
   // Drop: a synthetic drop of a zip (name with a slash) and a non-zip.
   const dropped = await page.evaluate(async (bytes) => {
@@ -177,9 +180,10 @@ test("Chrome keeps shader packs in OPFS across restarts; picker, drop and clipbo
     await new Promise((r) => setTimeout(r, 100));
     await store.flush();
     window.acceptDrops = true;
-    return { prevented: drop.defaultPrevented, changes, files: await store.listFiles() };
+    return { prevented: drop.defaultPrevented, changes, files: await store.listFiles(), notices: notices.splice(0) };
   }, [...zip]);
   assert.equal(ignored.prevented, true);
+  assert.deepEqual(ignored.notices.slice(-1), ["Not added: drop shader packs on Options > Horizon Settings > Shader Packs."]);
   assert.equal(ignored.changes, 2);
   assert(!ignored.files.includes("shaderpacks/Elsewhere.zip"));
 

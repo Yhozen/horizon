@@ -29,6 +29,9 @@ pub struct ShaderPacksView {
     pub report: Vec<String>,
     /// The selected pack's options (`None`: no pack selected).
     pub settings: Option<SettingsView>,
+    /// A recent line about adding packs ("Not added: …"), shown on the page for a
+    /// few seconds: the chat it also goes to is hidden behind the page.
+    pub notice: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct PackRow {

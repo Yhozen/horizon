@@ -2380,8 +2380,17 @@ impl OptionsUi {
                         w,
                         h: 9.0,
                         kind: WKind::Text {
-                            text: Text::literal("Drop .zip files on the window to add them"),
-                            color: 0xFFA0A0A0,
+                            text: Text::literal(
+                                view.notice
+                                    .as_deref()
+                                    .unwrap_or("Drop .zip files on the window to add them"),
+                            ),
+                            // White while it is a notice, the hint's grey otherwise.
+                            color: if view.notice.is_some() {
+                                u32::MAX
+                            } else {
+                                0xFFA0A0A0
+                            },
                             centered: true,
                         },
                         list: false,
@@ -3483,6 +3492,13 @@ mod tests {
         for want in ["Compiling 3/9", "A", "B", "Add Shader Pack..."] {
             assert!(shown.contains(&want.to_string()), "{want} in {shown:?}");
         }
+        assert!(shown.contains(&"Drop .zip files on the window to add them".to_string()));
+        // A notice (a pack not added) takes the hint's place while it lasts.
+        ui.shader_packs.notice = Some("Not added: big.zip is larger than 128 MB.".into());
+        let noticed = texts(&mut ui, &s);
+        assert!(noticed.contains(&"Not added: big.zip is larger than 128 MB.".to_string()));
+        assert!(!noticed.iter().any(|t| t.starts_with("Drop .zip files")));
+        ui.shader_packs.notice = None;
         // Vanilla's own ON/OFF words (the tests run without translations).
         assert!(shown.iter().any(|t| t.starts_with("Shaders: ")));
         let events = press(
