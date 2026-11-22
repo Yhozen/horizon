@@ -295,6 +295,9 @@ pub(super) struct ShadowTargets {
     /// `shadowtex1`: opaque casters only (copied before translucent terrain).
     pub depth_opaque: Image,
     pub colors: [Option<(Image, wgpu::TextureView)>; 2],
+    /// Level 0 of the colours a `shadowcomp` pass draws into, copied before
+    /// it so it reads what the shadow map held.
+    pub copies: [Option<Image>; 2],
 }
 
 impl ShadowTargets {
@@ -302,6 +305,7 @@ impl ShadowTargets {
         device: &wgpu::Device,
         spec: &ShadowSpec,
         colors_used: [bool; 2],
+        copied: [bool; 2],
         features: wgpu::Features,
         mips: &mut mips::Mips,
     ) -> Self {
@@ -336,6 +340,18 @@ impl ShadowTargets {
                 (img, target)
             })
         });
+        let copies = std::array::from_fn(|i| {
+            (colors_used[i] && copied[i]).then(|| {
+                image(
+                    device,
+                    &format!("shadowcolor{i} (shadowcomp's copy)"),
+                    size,
+                    wgpu_format(spec.color_format[i], None, features),
+                    1,
+                    wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                )
+            })
+        });
         Self {
             depth: image(
                 device,
@@ -356,6 +372,7 @@ impl ShadowTargets {
                 wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             ),
             colors,
+            copies,
         }
     }
 }

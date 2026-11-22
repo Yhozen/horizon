@@ -129,6 +129,8 @@ struct Binds<'a> {
     /// Gbuffers programs (not full-screen passes, not compute).
     gbuffers: bool,
     shadow: bool,
+    /// A `shadowcomp` pass: it reads the copies of the shadowcolors it draws into.
+    shadowcomp: bool,
     draw_buffers: &'a [u8],
 }
 
@@ -187,7 +189,7 @@ impl PackRenderer {
         let mut shadow_used = false;
         for (&kind, program) in &pack.programs {
             for &b in &program.draw_buffers {
-                if kind.is_shadow() {
+                if kind.writes_shadowcolor() {
                     if let Some(c) = shadow_colors.get_mut(usize::from(b)) {
                         *c = true;
                     }
@@ -251,8 +253,27 @@ impl PackRenderer {
         }
         let mut mips = mips::Mips::new(device);
         let has_shadow = pack.programs.contains_key(&ProgramKind::Shadow);
-        let shadow = (has_shadow || shadow_used)
-            .then(|| ShadowTargets::new(device, &plan.shadow, shadow_colors, features, &mut mips));
+        // The shadowcolors a `shadowcomp` pass draws into get a copy for its reads.
+        let mut comp_colors = [false; 2];
+        for (kind, program) in &pack.programs {
+            if kind.writes_shadowcolor() && !kind.is_shadow() {
+                for &b in &program.draw_buffers {
+                    if let Some(c) = comp_colors.get_mut(usize::from(b)) {
+                        *c = true;
+                    }
+                }
+            }
+        }
+        let shadow = (has_shadow || shadow_used).then(|| {
+            ShadowTargets::new(
+                device,
+                &plan.shadow,
+                shadow_colors,
+                comp_colors,
+                features,
+                &mut mips,
+            )
+        });
         let empty = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Shader pack (no group 0)"),
             entries: &[],
@@ -464,6 +485,7 @@ impl PackRenderer {
             image_sides: *sides,
             gbuffers: !program.kind.is_fullscreen(),
             shadow: program.kind.is_shadow(),
+            shadowcomp: program.kind.writes_shadowcolor() && !program.kind.is_shadow(),
             draw_buffers: &program.draw_buffers,
         };
         self.bind_group(device, &binds, uniforms, sides)
@@ -485,6 +507,7 @@ impl PackRenderer {
             image_sides: *image_sides,
             gbuffers: false,
             shadow: false,
+            shadowcomp: false,
             draw_buffers: &[],
         };
         self.bind_group(device, &binds, &self.uniforms.main, sides)
@@ -547,6 +570,17 @@ impl PackRenderer {
                         .as_ref()
                         .and_then(|s| s.colors[usize::from(n.min(1))].as_ref())
                     {
+                        // shadowcomp reads the copy of a shadowcolor it draws into.
+                        Some(_) if program.shadowcomp && program.draw_buffers.contains(&n) => {
+                            match self
+                                .shadow
+                                .as_ref()
+                                .and_then(|s| s.copies[usize::from(n.min(1))].as_ref())
+                            {
+                                Some(copy) => &copy.view,
+                                None => missing,
+                            }
+                        }
                         Some((img, _)) if !program.shadow => &img.view,
                         _ if t.sample != horizon_glsl_pack::SampleKind::Float => missing,
                         _ => &self.textures.white,
@@ -641,7 +675,7 @@ fn buffer_sizes(
     }
     let mut skip = std::collections::BTreeSet::new();
     for (kind, buffers) in &plan.draw_buffers {
-        if !kind.is_fullscreen() || *kind == ProgramKind::Final {
+        if !kind.is_fullscreen() || *kind == ProgramKind::Final || kind.writes_shadowcolor() {
             continue;
         }
         let mut distinct: Vec<BufferSize> = Vec::new();

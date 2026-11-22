@@ -342,6 +342,37 @@ impl Renderer {
                 Step::Compute { slot, reads } => {
                     pack.dispatch(&self.device, encoder, *slot, reads, size);
                 }
+                Step::ShadowComp { kind, writes } => {
+                    let (Some(program), Some(shadow)) = (pack.programs.get(kind), &pack.shadow)
+                    else {
+                        continue;
+                    };
+                    let mut attachments = Vec::new();
+                    for &b in writes {
+                        let i = usize::from(b.min(1));
+                        let Some((img, target)) = &shadow.colors[i] else {
+                            continue;
+                        };
+                        if let Some(copy) = &shadow.copies[i] {
+                            super::targets::copy_whole(encoder, &img.texture, &copy.texture);
+                        }
+                        attachments.push(attachment(target, wgpu::LoadOp::Load));
+                    }
+                    if attachments.len() != program.draw_buffers.len() {
+                        continue;
+                    }
+                    let main = [horizon_glsl_pack::schedule::Side::Main; 16];
+                    let group = pack.group(&self.device, program, &pack.uniforms.main, &main);
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some(&format!("{kind:?}")),
+                        color_attachments: &attachments,
+                        ..Default::default()
+                    });
+                    pass.set_pipeline(&program.pipeline);
+                    pass.set_bind_group(0, &pack.empty_group, &[]);
+                    pass.set_bind_group(1, &group, &[]);
+                    pass.draw(0..4, 0..1);
+                }
                 Step::CopyBack(buffers) => {
                     let t = pack.targets();
                     for &b in buffers {

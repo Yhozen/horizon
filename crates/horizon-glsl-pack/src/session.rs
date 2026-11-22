@@ -866,7 +866,7 @@ fn check_targets(
     plan: &PackPlan,
     host: &HostParams,
 ) -> Result<(), String> {
-    if kind.is_shadow() {
+    if kind.writes_shadowcolor() {
         if let Some(&b) = draw_buffers.iter().find(|&&b| b > 1) {
             return Err(format!("shadowcolor{b}: Horizon has shadowcolor0 and 1"));
         }
@@ -886,7 +886,7 @@ fn check_targets(
     let bytes: u32 = draw_buffers
         .iter()
         .map(|&b| {
-            if kind.is_shadow() {
+            if kind.writes_shadowcolor() {
                 plan.shadow.color_format[usize::from(b)].bytes()
             } else {
                 plan.buffers[usize::from(b)].format.bytes()

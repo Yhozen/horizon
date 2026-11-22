@@ -151,8 +151,7 @@ pub fn detect(files: &PackFiles, folder: &str, props: &ShadersProperties) -> Vec
                     if ext == "fsh" {
                         prepare.push(path.clone());
                     }
-                } else if (["shadowcomp", "begin", "setup"].contains(&base)
-                    || name.starts_with("dh_"))
+                } else if (["begin", "setup"].contains(&base) || name.starts_with("dh_"))
                     && !not_run.contains(path)
                 {
                     not_run.push(path.clone());
@@ -185,7 +184,7 @@ pub fn detect(files: &PackFiles, folder: &str, props: &ShadersProperties) -> Vec
     }
     if !not_run.is_empty() {
         out.push(feature(
-            "programs Horizon does not run (shadowcomp, begin, setup, Distant Horizons)",
+            "programs Horizon does not run (begin, setup, Distant Horizons)",
             false,
             false,
             &not_run,
@@ -383,7 +382,7 @@ mod tests {
                 ("tessellation shaders", false, false),
                 ("prepare passes", true, false),
                 (
-                    "programs Horizon does not run (shadowcomp, begin, setup, Distant Horizons)",
+                    "programs Horizon does not run (begin, setup, Distant Horizons)",
                     false,
                     false
                 ),
@@ -402,10 +401,7 @@ mod tests {
             f[0].detail,
             "shaders/composite.csh, shaders/world0/composite_a.csh"
         );
-        assert_eq!(
-            f[4].detail,
-            "shaders/begin.vsh, shaders/dh_terrain.fsh, shaders/world0/shadowcomp1.fsh"
-        );
+        assert_eq!(f[4].detail, "shaders/begin.vsh, shaders/dh_terrain.fsh");
         assert_eq!(refusal(&f), None);
         assert_eq!(
             feature_macros(&p).into_keys().collect::<Vec<_>>(),

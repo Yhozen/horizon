@@ -171,6 +171,12 @@ Terms: *gbuffers* are the programs that draw world geometry; *composite-style* p
 5. Translucent terrain, into shadowtex0 and the shadowcolors only.
 6. Mipmaps, then `shadowcomp`.
 
+`shadowcomp` passes draw full-screen into the shadowcolors (draw buffers name shadowcolor0/1, at the shadow
+map's size) and can sample the shadowcolors and shadowtex. Like a `composite` pass, one that samples and
+writes the same shadowcolor reads what it held before the pass. Horizon gets this by copying each shadowcolor
+the pass writes just before it and binding the copy for its reads (same result for a pass that writes every
+pixel, as composite-style passes do; not measured under Iris). Their `texture.shadowcomp.*` overrides apply.
+
 - Alpha test: solid and translucent terrain none, cutout terrain > 0.5, entities and block entities > 0.1.
 - `shadow` is shadowtex0; if the pack declares `watershadow`, then `watershadow` is shadowtex0 and `shadow` is
   shadowtex1.

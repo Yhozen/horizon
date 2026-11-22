@@ -35,7 +35,7 @@ fn output_format(spec: &ProgramSpec, i: usize) -> Option<BufferFormat> {
     let n = usize::from(*spec.draw_buffers.get(i)?);
     if spec.kind == ProgramKind::Final {
         None
-    } else if spec.kind.is_shadow() {
+    } else if spec.kind.writes_shadowcolor() {
         spec.plan.shadow.color_format.get(n).copied()
     } else {
         spec.plan.buffers.get(n).map(|b| b.format)
@@ -77,7 +77,7 @@ fn alpha_test(kind: ProgramKind) -> Option<&'static str> {
             "    if (!(hz_gl_FragData[0].a > 0.1)) { discard; }\n"
         }
         SkyBasic | SkyTextured | Basic | Line | Lightning | BeaconBeam | TerrainSolid
-        | Prepare(_) | Deferred(_) | Composite(_) | Final => return None,
+        | ShadowComp(_) | Prepare(_) | Deferred(_) | Composite(_) | Final => return None,
     })
 }
 

@@ -84,7 +84,7 @@ fn compile_all(files: &PackFiles, options: &PackOptions) -> Result<CompiledPack,
 #[test]
 fn slots() {
     let all = ProgramKind::all();
-    assert_eq!(all.len(), 17 + 15 + 3 * 100 + 1);
+    assert_eq!(all.len(), 17 + 15 + 4 * 100 + 1);
     assert_eq!(
         [
             ProgramKind::Composite(0).name(),
@@ -599,6 +599,26 @@ fn too_many_textures_fail_only_their_program() {
     .unwrap_err();
     assert!(err.contains("17 textures in the fragment stage"), "{err}");
     assert!(err.contains("depthtex2"), "{err}");
+    // The limit is the device's: the game asks the adapter for its own, and
+    // Chrome 146+ offers 48 on adapters that have them (Arc's passes read 19).
+    let files = sampling_pack(
+        &format!("{decls}uniform sampler2D depthtex2;"),
+        &ok,
+        "",
+        &[],
+    );
+    let host = HostParams {
+        max_textures: 48,
+        ..HostParams::default()
+    };
+    let pack = compile(
+        &files,
+        "minecraft:overworld",
+        &PackOptions::default(),
+        &host,
+    )
+    .unwrap();
+    assert_eq!(pack.programs[&ProgramKind::Deferred(0)].textures.len(), 17);
 }
 
 #[test]
@@ -623,6 +643,33 @@ fn a_3d_texture_in_depthtex1_s_place_keeps_depthtex2_its_own() {
             (TextureSource::Depth(2), TexDim::D2)
         ]
     );
+}
+
+#[test]
+fn prepare_and_shadowcomp_custom_textures_apply_to_their_passes() {
+    let fsh = "#version 130\nuniform sampler2D colortex3;\nvarying vec2 uv;\n\
+               void main() { gl_FragData[0] = texture(colortex3, uv); }\n";
+    let files = pack_of(
+        &[
+            program("gbuffers_terrain", GBUFFERS_VSH, GBUFFERS_FSH),
+            program("shadow", GBUFFERS_VSH, GBUFFERS_FSH),
+            program("shadowcomp", PASS_VSH, fsh),
+            program("prepare", PASS_VSH, fsh),
+            program("deferred", PASS_VSH, fsh),
+            program("final", PASS_VSH, PASS_FSH),
+        ],
+        &[(
+            "shaders/shaders.properties",
+            "texture.prepare.colortex3=tex/a.png\ntexture.shadowcomp.colortex3=tex/b.png\n",
+        )],
+    );
+    let pack = compile_all(&files, &PackOptions::default()).unwrap();
+    let source = |k: ProgramKind| pack.programs[&k].textures[0].source.clone();
+    assert_eq!(source(ProgramKind::Prepare(0)), TextureSource::Custom(0));
+    assert_eq!(source(ProgramKind::ShadowComp(0)), TextureSource::Custom(1));
+    assert_eq!(source(ProgramKind::Deferred(0)), TextureSource::Buffer(3));
+    // shadowcomp draws into shadowcolor0, not colortex0.
+    assert_eq!(pack.programs[&ProgramKind::ShadowComp(0)].draw_buffers, [0]);
 }
 
 #[test]

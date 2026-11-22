@@ -87,6 +87,9 @@ pub enum ProgramKind {
     ShadowWater,
     /// Shadow map, block entities (`shadow_block`; parent [`Self::ShadowEntities`]).
     ShadowBlock,
+    /// `shadowcomp`, `shadowcomp1` … `shadowcomp99`: full-screen passes over
+    /// the shadow map (they read and write `shadowcolorN`), right after it.
+    ShadowComp(u8),
     /// `prepare`, `prepare1` … `prepare99`: full-screen passes after the
     /// shadow map, before the opaque gbuffers.
     Prepare(u8),
@@ -202,8 +205,9 @@ impl ProgramKind {
             Self::Hand => return own("gbuffers_hand", Self::TexturedLit),
             Self::HandWater => return own("gbuffers_hand_water", Self::Hand),
             Self::Weather => return own("gbuffers_weather", Self::TexturedLit),
-            Self::Prepare(n) | Self::Deferred(n) | Self::Composite(n) => {
+            Self::ShadowComp(n) | Self::Prepare(n) | Self::Deferred(n) | Self::Composite(n) => {
                 let base = match self {
+                    Self::ShadowComp(_) => "shadowcomp",
                     Self::Prepare(_) => "prepare",
                     Self::Deferred(_) => "deferred",
                     _ => "composite",
@@ -230,19 +234,23 @@ impl ProgramKind {
             | Self::ShadowSolid
             | Self::ShadowCutout
             | Self::ShadowWater => host::Geometry::Terrain,
-            Self::Prepare(_) | Self::Deferred(_) | Self::Composite(_) | Self::Final => {
-                host::Geometry::Fullscreen
-            }
+            Self::ShadowComp(_)
+            | Self::Prepare(_)
+            | Self::Deferred(_)
+            | Self::Composite(_)
+            | Self::Final => host::Geometry::Fullscreen,
             _ => host::Geometry::Entity,
         }
     }
 
     /// Every slot, in frame-independent order: the gbuffers and shadow
-    /// slots (older ones first, then the split ones), `prepare..prepare99`,
+    /// slots (older ones first, then the split ones), `shadowcomp..shadowcomp99`,
+    /// `prepare..prepare99`,
     /// `deferred..deferred99`, `composite..composite99`, `final`.
     pub fn all() -> Vec<ProgramKind> {
         let mut all = Self::GEOMETRY.to_vec();
         all.extend(Self::SPLIT);
+        all.extend((0..=MAX_PASS).map(Self::ShadowComp));
         all.extend((0..=MAX_PASS).map(Self::Prepare));
         all.extend((0..=MAX_PASS).map(Self::Deferred));
         all.extend((0..=MAX_PASS).map(Self::Composite));
@@ -258,7 +266,8 @@ impl ProgramKind {
     /// The slot named `name` (`gbuffers_water`, `composite12`, `shadow`), if any.
     pub fn from_name(name: &str) -> Option<ProgramKind> {
         for (base, make) in [
-            ("prepare", Self::Prepare as fn(u8) -> Self),
+            ("shadowcomp", Self::ShadowComp as fn(u8) -> Self),
+            ("prepare", Self::Prepare),
             ("deferred", Self::Deferred),
             ("composite", Self::Composite),
         ] {
@@ -300,7 +309,13 @@ impl ProgramKind {
         )
     }
 
-    /// Whether the program is a full-screen pass (`prepare`, `deferred`, `composite`, `final`).
+    /// Whether the program draws into `shadowcolorN` (the shadow programs and
+    /// `shadowcomp`), not `colortexN`.
+    pub fn writes_shadowcolor(self) -> bool {
+        self.is_shadow() || matches!(self, Self::ShadowComp(_))
+    }
+
+    /// Whether the program is a full-screen pass (`shadowcomp`, `prepare`, `deferred`, `composite`, `final`).
     pub fn is_fullscreen(self) -> bool {
         self.geometry() == host::Geometry::Fullscreen
     }
@@ -390,6 +405,8 @@ mod tests {
         assert_eq!(K::Line.candidates(), ["gbuffers_line", "gbuffers_basic"]);
         assert_eq!(K::Composite(99).name(), "composite99");
         assert_eq!(K::Prepare(0).name(), "prepare");
+        assert_eq!(K::from_name("shadowcomp2"), Some(K::ShadowComp(2)));
+        assert_eq!(K::ShadowComp(0).name(), "shadowcomp");
         for k in K::all() {
             assert_eq!(K::from_name(&k.name()), Some(k), "{k:?}");
             assert_eq!(k.parent().is_some(), K::SPLIT.contains(&k), "{k:?}");
@@ -404,11 +421,13 @@ mod tests {
             K::Deferred(2),
             K::Prepare(1),
             K::Composite(2),
+            K::ShadowComp(3),
         ];
         passes.sort();
         assert_eq!(
             passes,
             [
+                K::ShadowComp(3),
                 K::Prepare(1),
                 K::Deferred(2),
                 K::Composite(2),

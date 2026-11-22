@@ -326,11 +326,7 @@ mod tests {
         // The product draws the same picture.
         let product = projection * model_view;
         let expected = gl_clip() * view_proj;
-        for (a, b) in product
-            .to_cols_array()
-            .iter()
-            .zip(expected.to_cols_array())
-        {
+        for (a, b) in product.to_cols_array().iter().zip(expected.to_cols_array()) {
             assert!((a - b).abs() < 1e-4, "{product:?} != {expected:?}");
         }
         // The projection has no rotation and no shift left: the same as with no bob.
@@ -344,7 +340,11 @@ mod tests {
         // A pixel's view direction from the inverse projection, without the
         // divide (as packs take it), does not move with the bob.
         let inverse = projection.inverse();
-        let direction = |m: Mat4| (m * glam::Vec4::new(0.3, 0.6, -1.0, 1.0)).truncate().normalize();
+        let direction = |m: Mat4| {
+            (m * glam::Vec4::new(0.3, 0.6, -1.0, 1.0))
+                .truncate()
+                .normalize()
+        };
         assert!((direction(inverse) - direction(still.inverse())).length() < 1e-4);
     }
 }
