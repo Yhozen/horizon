@@ -1038,7 +1038,7 @@ fn compile_compute(
         blocks,
         plan,
     };
-    let out = host::compute_source(&rewritten, &spec).map_err(err)?;
+    let (out, color_images) = host::compute_source(&rewritten, &spec).map_err(err)?;
     let wgsl = naga_out::glsl_to_wgsl(&out.fragment, Stage::Compute).map_err(err)?;
     let (size, shared) = crate::naga_atomics::compute_facts(&wgsl).map_err(err)?;
     let invocations = size.iter().product::<u32>();
@@ -1075,6 +1075,7 @@ fn compile_compute(
         wgsl,
         textures: out.textures,
         storage,
+        color_images,
         workgroup_size: size,
         dispatch,
         unknown_uniforms: out.unknown_uniforms,

@@ -134,7 +134,31 @@ impl PackRenderer {
             return;
         }
         let max = device.limits().max_compute_workgroups_per_dimension;
-        let group = self.compute_group(device, c, sides);
+        // A colortex the program writes as colorimgN and also samples: WebGPU
+        // forbids both in one dispatch, so it samples a copy on the other side.
+        let mut sample_sides = *sides;
+        for img in &c.color_images {
+            let b = img.buffer;
+            if !c
+                .textures
+                .iter()
+                .any(|t| t.source == horizon_glsl_pack::TextureSource::Buffer(b))
+            {
+                continue;
+            }
+            if let Some(buffer) = self.targets().buffer(b)
+                && buffer.sides.len() > 1
+            {
+                let side = sides[usize::from(b)];
+                super::targets::copy_whole(
+                    encoder,
+                    &buffer.side(side).texture,
+                    &buffer.side(side.other()).texture,
+                );
+                sample_sides[usize::from(b)] = side.other();
+            }
+        }
+        let group = self.compute_group(device, c, &sample_sides, sides);
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some(&c.source),
             timestamp_writes: None,

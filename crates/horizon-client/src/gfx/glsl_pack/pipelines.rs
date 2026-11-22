@@ -29,6 +29,7 @@ pub(super) struct ComputeProgram {
     pub textures: Vec<TextureBinding>,
     pub samplers: Vec<SamplerKind>,
     pub storage: Vec<StorageBinding>,
+    pub color_images: Vec<horizon_glsl_pack::ColorImageBinding>,
     pub workgroup_size: [u32; 3],
     pub dispatch: horizon_glsl_pack::compute::Dispatch,
 }
@@ -480,7 +481,31 @@ pub(super) fn build_compute(
     for b in &program.storage {
         entries.push(storage_entry(b, compute));
     }
+    for img in &program.color_images {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: img.binding,
+            visibility: compute,
+            ty: wgpu::BindingType::StorageTexture {
+                access: match (img.read, img.write) {
+                    (true, true) => wgpu::StorageTextureAccess::ReadWrite,
+                    (true, false) => wgpu::StorageTextureAccess::ReadOnly,
+                    _ => wgpu::StorageTextureAccess::WriteOnly,
+                },
+                format: (layouts.color)(img.buffer),
+                view_dimension: wgpu::TextureViewDimension::D2,
+            },
+            count: None,
+        });
+    }
     let limits = device.limits();
+    if program.color_images.len() as u32 > limits.max_storage_textures_per_shader_stage {
+        return Err(format!(
+            "{}: {} storage images, the device allows {}",
+            program.source,
+            program.color_images.len(),
+            limits.max_storage_textures_per_shader_stage
+        ));
+    }
     if program.textures.len() as u32 > limits.max_sampled_textures_per_shader_stage {
         return Err(format!(
             "{}: {} textures, the device allows {}",
@@ -517,6 +542,7 @@ pub(super) fn build_compute(
         textures: program.textures.clone(),
         samplers,
         storage: program.storage.clone(),
+        color_images: program.color_images.clone(),
         workgroup_size: program.workgroup_size,
         dispatch: program.dispatch,
     })

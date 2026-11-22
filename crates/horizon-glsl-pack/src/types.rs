@@ -224,6 +224,19 @@ pub struct StorageBinding {
     pub compute: bool,
 }
 
+/// `colorimgN`: colortexN as a storage image of a compute program, at group
+/// 1, binding [`crate::host::COLOR_IMAGE_BINDING`] + N, on the side the
+/// program reads `colortexN` from (format notes §18).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColorImageBinding {
+    pub binding: u32,
+    pub buffer: u8,
+    /// The colortex's texture format (the image's must be the same).
+    pub format: crate::plan::StorageFormat,
+    pub read: bool,
+    pub write: bool,
+}
+
 /// One compute program as WGSL (entry point `main`), with group 1 laid out
 /// as a full-screen pass's: the uniform block, textures, samplers, and its
 /// storage buffers.
@@ -234,6 +247,8 @@ pub struct CompiledCompute {
     pub wgsl: String,
     pub textures: Vec<TextureBinding>,
     pub storage: Vec<StorageBinding>,
+    /// `colorimgN` images.
+    pub color_images: Vec<ColorImageBinding>,
     /// `local_size_x/y/z`.
     pub workgroup_size: [u32; 3],
     pub dispatch: crate::compute::Dispatch,

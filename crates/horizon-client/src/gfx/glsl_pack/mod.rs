@@ -123,6 +123,9 @@ struct Binds<'a> {
     textures: &'a [horizon_glsl_pack::TextureBinding],
     samplers: &'a [SamplerKind],
     storage: &'a [horizon_glsl_pack::StorageBinding],
+    images: &'a [horizon_glsl_pack::ColorImageBinding],
+    /// The side of each colortex the images are (the textures read `sides`).
+    image_sides: [Side; 16],
     /// Gbuffers programs (not full-screen passes, not compute).
     gbuffers: bool,
     shadow: bool,
@@ -214,6 +217,17 @@ impl PackRenderer {
             }
         }
         for c in pack.computes.values() {
+            for img in &c.color_images {
+                if let Some(n) = needs.get_mut(usize::from(img.buffer)) {
+                    n.used = true;
+                    n.storage = true;
+                    // Sampled and written in one dispatch: it samples a copy on the other side.
+                    n.two_sides |= c
+                        .textures
+                        .iter()
+                        .any(|t| t.source == TextureSource::Buffer(img.buffer));
+                }
+            }
             for t in &c.textures {
                 match t.source {
                     TextureSource::Buffer(b) => {
@@ -278,8 +292,29 @@ impl PackRenderer {
             );
         }
         let mut computes = BTreeMap::new();
+        let float32 = features
+            .contains(wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE);
         for (&slot, c) in &pack.computes {
-            computes.insert(slot, pipelines::build_compute(device, c, &layouts)?);
+            // A colorimg must be its colortex's own format (colortex0 may be the world's).
+            let mismatch = c.color_images.iter().find(|img| {
+                targets::storage_format(img.format, float32) != formats[usize::from(img.buffer)]
+            });
+            if let Some(img) = mismatch {
+                log::warn!(
+                    "shader pack: {} left out: colortex{} is {:?} here, not {:?}",
+                    c.source,
+                    img.buffer,
+                    formats[usize::from(img.buffer)],
+                    img.format
+                );
+                continue;
+            }
+            match pipelines::build_compute(device, c, &layouts) {
+                Ok(p) => {
+                    computes.insert(slot, p);
+                }
+                Err(e) => log::warn!("shader pack: compute program left out: {e}"),
+            }
         }
         let limit = device.limits().max_storage_buffer_binding_size;
         let mut storage = BTreeMap::new();
@@ -425,6 +460,8 @@ impl PackRenderer {
             textures: &program.textures,
             samplers: &program.samplers,
             storage: &program.storage,
+            images: &[],
+            image_sides: *sides,
             gbuffers: !program.kind.is_fullscreen(),
             shadow: program.kind.is_shadow(),
             draw_buffers: &program.draw_buffers,
@@ -437,12 +474,15 @@ impl PackRenderer {
         device: &wgpu::Device,
         program: &ComputeProgram,
         sides: &[Side; 16],
+        image_sides: &[Side; 16],
     ) -> wgpu::BindGroup {
         let binds = Binds {
             layout: &program.layout,
             textures: &program.textures,
             samplers: &program.samplers,
             storage: &program.storage,
+            images: &program.color_images,
+            image_sides: *image_sides,
             gbuffers: false,
             shadow: false,
             draw_buffers: &[],
@@ -533,6 +573,17 @@ impl PackRenderer {
                 entries.push(wgpu::BindGroupEntry {
                     binding: b.binding,
                     resource: buffer.as_entire_binding(),
+                });
+            }
+        }
+        for img in program.images {
+            if let Some(buf) = targets.buffer(img.buffer) {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: img.binding,
+                    resource: wgpu::BindingResource::TextureView(
+                        &buf.side(program.image_sides[usize::from(img.buffer)])
+                            .target,
+                    ),
                 });
             }
         }

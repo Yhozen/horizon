@@ -807,3 +807,58 @@ fn compute_programs_over_the_device_limits() {
         r.text("x")
     );
 }
+
+#[test]
+fn compute_programs_write_colortex_images() {
+    use crate::compute::ComputeSlot;
+    let store = "#version 430
+layout(local_size_x = 8, local_size_y = 8) in;
+const vec2 workGroupsRender = vec2(1.0, 1.0);
+layout(rgba16f) uniform image2D colorimg2;
+uniform sampler2D colortex2;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(p, imageSize(colorimg2)))) return;
+    imageStore(colorimg2, p, texelFetch(colortex2, p, 0) * 0.5);
+}
+";
+    // colortex3 stays RGBA8: read and written, which WebGPU allows for r32 formats only.
+    let both = "#version 430
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(rgba8) uniform image2D colorimg3;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    imageStore(colorimg3, p, imageLoad(colorimg3, p) + 0.1);
+}
+";
+    let fsh = format!("{FSH}/*\nconst int colortex2Format = RGBA16F;\n*/\n");
+    let files = programs(
+        &[("gbuffers_terrain", FSH), ("composite", &fsh)],
+        &[
+            ("shaders/composite_a.csh", store),
+            ("shaders/composite_b.csh", both),
+        ],
+    );
+    let (pack, r) = report(&files, &PackOptions::default());
+    let pack = pack.unwrap();
+    let a = pack
+        .computes
+        .get(&ComputeSlot::from_name("composite_a").unwrap())
+        .unwrap_or_else(|| panic!("{}", r.text("x")));
+    assert_eq!(a.color_images.len(), 1);
+    let img = &a.color_images[0];
+    assert_eq!(
+        (img.binding, img.buffer, img.read, img.write),
+        (226, 2, false, true)
+    );
+    assert!(
+        a.wgsl.contains("texture_storage_2d<rgba16float,write>"),
+        "{}",
+        a.wgsl
+    );
+    let text = r.text("x");
+    assert!(
+        text.contains("colorimg3 is read and written: WebGPU allows that for r32 formats only"),
+        "{text}"
+    );
+}
