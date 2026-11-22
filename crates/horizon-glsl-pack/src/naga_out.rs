@@ -24,10 +24,12 @@ pub fn glsl_to_wgsl(source: &str, stage: Stage) -> Result<String, String> {
     };
     let (mut module, floated) = parse_floating_ambiguous(source, stage)?;
     let source = floated.as_deref().unwrap_or(source);
-    // `vector % scalar`: wrap the scalar in the source and parse again.
+    // `vector % scalar` and `vecN(bool)`: wrap the scalar in the source and parse again.
     let mut patched = String::new();
     for _ in 0..4 {
-        let splats = modulo_splats(&module, if patched.is_empty() { source } else { &patched });
+        let current = if patched.is_empty() { source } else { &patched };
+        let mut splats = modulo_splats(&module, current);
+        splats.extend(bool_splats(&module, current));
         if splats.is_empty() {
             break;
         }
@@ -653,6 +655,86 @@ fn modulo_splats(module: &naga::Module, source: &str) -> Vec<(std::ops::Range<us
     out
 }
 
+/// Where `vecN(b)` with a scalar `bool` `b` sits in `source`: `b`'s byte
+/// range and the scalar constructor to wrap it in (`vec3(float(b))`). GLSL
+/// converts the bool and splats it; naga's GLSL front end turns it into a
+/// scalar `select(0, 1, b)` and never splats it, so its validator finds a
+/// scalar where the vector should be.
+fn bool_splats(module: &naga::Module, source: &str) -> Vec<(std::ops::Range<usize>, String)> {
+    use naga::{Expression, Literal, ScalarKind, TypeInner};
+    let functions = module
+        .functions
+        .iter()
+        .map(|(_, f)| f)
+        .chain(module.entry_points.iter().map(|e| &e.function));
+    let mut out = Vec::new();
+    for f in functions {
+        let Some(last) = f.expressions.iter().map(|(h, _)| h).next_back() else {
+            continue;
+        };
+        let ctx = naga::proc::ResolveContext::with_locals(module, &f.local_variables, &f.arguments);
+        let mut types = naga::front::Typifier::new();
+        if types.grow(last, &f.expressions, &ctx).is_err() {
+            continue;
+        }
+        for (h, e) in f.expressions.iter() {
+            let Expression::Select {
+                condition,
+                accept,
+                reject,
+            } = *e
+            else {
+                continue;
+            };
+            let TypeInner::Scalar(c) = types.get(condition, &module.types) else {
+                continue;
+            };
+            if c.kind != ScalarKind::Bool {
+                continue;
+            }
+            let ctor = match (&f.expressions[accept], &f.expressions[reject]) {
+                (
+                    Expression::Literal(Literal::F32(1.0)),
+                    Expression::Literal(Literal::F32(0.0)),
+                ) => "float",
+                (Expression::Literal(Literal::I32(1)), Expression::Literal(Literal::I32(0))) => {
+                    "int"
+                }
+                (Expression::Literal(Literal::U32(1)), Expression::Literal(Literal::U32(0))) => {
+                    "uint"
+                }
+                _ => continue,
+            };
+            // The select's span is the constructor's argument: only a vector
+            // constructor's single argument needs the scalar conversion.
+            let Some(range) = f.expressions.get_span(h).to_range() else {
+                continue;
+            };
+            let (Some(before), Some(after)) = (source.get(..range.start), source.get(range.end..))
+            else {
+                continue;
+            };
+            let Some(head) = before.trim_end().strip_suffix('(') else {
+                continue;
+            };
+            let name = head
+                .trim_end()
+                .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .next()
+                .unwrap_or("");
+            let vector = name
+                .strip_prefix(['i', 'u'])
+                .unwrap_or(name)
+                .strip_prefix("vec")
+                .is_some_and(|n| matches!(n, "2" | "3" | "4"));
+            if vector && after.trim_start().starts_with(')') {
+                out.push((range, ctor.to_string()));
+            }
+        }
+    }
+    out
+}
+
 /// Where float `a != b` sits in `source`, with its text written as
 /// `!(a == b)`. GLSL's `!=` is true when either side is NaN (packs test
 /// `clamp(x, 0, 1) != x` to catch NaN), but naga's SPIR-V writer emits the
@@ -852,11 +934,40 @@ fn column_swizzle_stores(source: &str, mut ranges: Vec<std::ops::Range<usize>>) 
     ranges.dedup();
     let mut out = source.to_string();
     for r in ranges {
-        if let Some((range, text)) = column_swizzle_store(&out, r) {
+        if let Some((range, text)) =
+            column_swizzle_store(&out, r.clone()).or_else(|| scalar_swizzle(&out, r))
+        {
             out.replace_range(range, &text);
         }
     }
     out
+}
+
+/// A one-component swizzle read of a scalar (`f(x).x`, GLSL 4.20's scalar
+/// swizzle, which naga cannot look up): the `.x` removed, as the scalar is
+/// its own value. Stores are left alone (a matrix column's `m[0].x = …`).
+fn scalar_swizzle(
+    s: &str,
+    field: std::ops::Range<usize>,
+) -> Option<(std::ops::Range<usize>, String)> {
+    let text = s.get(field.clone())?;
+    let name = text.trim_start_matches(['.', ' ']).trim_end();
+    if !matches!(name, "x" | "r" | "s") {
+        return None;
+    }
+    let start = field.start + text.find(name)?;
+    let dot = s[..start].trim_end().len().checked_sub(1)?;
+    if s.as_bytes()[dot] != b'.' {
+        return None;
+    }
+    let after = s[start + name.len()..].trim_start();
+    let store = [
+        "+=", "-=", "*=", "/=", "++", "--", "%=", "&=", "|=", "^=", "<<=", ">>=",
+    ]
+    .iter()
+    .any(|op| after.starts_with(op))
+        || (after.starts_with('=') && !after.starts_with("=="));
+    (!store).then(|| (dot..start + name.len(), String::new()))
 }
 
 fn column_swizzle_store(
@@ -1014,6 +1125,26 @@ fn wrap_ranges(source: &str, mut patches: Vec<(std::ops::Range<usize>, String)>)
 #[cfg(test)]
 mod modulo_tests {
     use super::*;
+
+    #[test]
+    fn scalar_swizzles_read_the_scalar() {
+        let src = "#version 450\nlayout(location = 0) out vec4 o;\nfloat f(vec2 p) { return p.x * p.y; }\nvoid main() { mat2 m = mat2(1.0); float a = f(o.xy).x; float b = f(o.zw). r + m[1].x; o = vec4(a, b, m[0]); }\n";
+        let wgsl = glsl_to_wgsl(src, Stage::Fragment).unwrap();
+        assert!(!wgsl.contains("hz_sw"), "{wgsl}");
+        assert_eq!(scalar_swizzle("m[0].x = a;", 4..6), None);
+        assert_eq!(
+            scalar_swizzle("f(p).x + 1.0", 4..6),
+            Some((4..6, String::new()))
+        );
+    }
+
+    #[test]
+    fn bool_scalars_splat_into_vectors() {
+        let src = "#version 450\nlayout(location = 0) out vec4 o;\nvoid main() { float r = o.x; vec3 a = vec3(r < 0.5); ivec2 b = ivec2(r > 0.25); float c = float(r < 0.75); o = vec4(a, c) + vec4(b, 0, 0); }\n";
+        let wgsl = glsl_to_wgsl(src, Stage::Fragment).unwrap();
+        assert!(wgsl.contains("a = vec3(select(0f, 1f,"), "{wgsl}");
+        assert!(wgsl.contains("b = vec2(select(0i, 1i,"), "{wgsl}");
+    }
 
     #[test]
     fn swizzle_stores_into_matrix_columns() {

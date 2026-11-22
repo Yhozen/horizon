@@ -187,6 +187,18 @@ test("Chrome keeps shader packs in OPFS across restarts; picker, drop and clipbo
   assert.equal(ignored.changes, 2);
   assert(!ignored.files.includes("shaderpacks/Elsewhere.zip"));
 
+  // A file the browser reads as empty is not added: the game would list a pack that can
+  // never load ("Added", then "could not be loaded").
+  const empty = await page.evaluate(async () => {
+    const before = installs.length, changed = changes;
+    const added = await hooks.addFiles([new File([], "Empty.zip", { type: "application/zip" })]);
+    await store.flush();
+    return { counts: [added, installs.length - before, changes - changed], files: await store.listFiles(), notices: notices.splice(0) };
+  });
+  assert.deepEqual(empty.notices, ["Not added: Empty.zip is empty (the browser read 0 bytes of it)."]);
+  assert.deepEqual(empty.counts, [0, 0, 0]);
+  assert(!empty.files.includes("shaderpacks/Empty.zip"));
+
   // Clipboard.
   await page.bringToFront();
   await page.evaluate(() => window.horizonCopyText("Status: Works\nline 2"));
@@ -229,8 +241,34 @@ test("Chrome keeps shader packs in OPFS across restarts; picker, drop and clipbo
     return { installs: installs.slice(before), notices: notices.splice(0) };
   });
   assert.deepEqual(loaded.installs, [["shaderpacks/sub_Dropped.zip", "PK\u0003\u0004"]]);
-  assert.equal(loaded.notices.length, 1);
-  assert.match(loaded.notices[0], /Missing\.zip could not be loaded/);
+  assert.deepEqual(loaded.notices, ["Shader pack Missing.zip is not in this browser's storage: add it again."]);
+
+  // A stored pack with no bytes (a write cut short) is removed at boot instead of listed,
+  // chosen or not.
+  const cut = await page.evaluate(async () => {
+    await store.writeFile("shaderpacks/Cut.zip", new Uint8Array(0));
+    await store.writeFile("shaderpacks/Chosen.zip", new Uint8Array(0));
+    await store.writeFile("horizon-shaders.txt", new TextEncoder().encode("enabled:true\npack:Chosen.zip\n"));
+    const got = [], empty = [];
+    await store.mirrorAtBoot((path) => got.push(path), await store.listFiles(), (path) => empty.push(path));
+    await store.flush();
+    return { got, empty, files: await store.listFiles() };
+  });
+  assert.deepEqual(cut.empty, ["shaderpacks/Cut.zip", "shaderpacks/Chosen.zip"]);
+  assert(!cut.got.some((path) => /Cut|Chosen/.test(path)) && cut.got.includes("shaderpacks/B.zip"));
+  assert(!cut.files.some((path) => /Cut|Chosen/.test(path)));
+
+  // A write the browser cuts short leaves no empty file behind.
+  const cutShort = await page.evaluate(async () => {
+    const write = FileSystemWritableFileStream.prototype.write;
+    FileSystemWritableFileStream.prototype.write = () => Promise.reject(new DOMException("Full", "QuotaExceededError"));
+    let error = "";
+    try { await store.writeFile("shaderpacks/Full.zip", new Uint8Array([1, 2, 3])); } catch (e) { error = e.name; }
+    FileSystemWritableFileStream.prototype.write = write;
+    return { error, files: await store.listFiles() };
+  });
+  assert.equal(cutShort.error, "QuotaExceededError");
+  assert(!cutShort.files.includes("shaderpacks/Full.zip"));
 
   // An OPFS that throws: mirrorInto and horizonPersist report nothing to the caller.
   const failed = await page.evaluate(async () => {
