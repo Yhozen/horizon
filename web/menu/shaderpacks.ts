@@ -111,13 +111,36 @@ export async function readFile(path: string): Promise<Uint8Array | undefined> {
 }
 
 async function write(parts: string[], bytes: Uint8Array) {
-  const dir = await folder(parts.slice(0, -1), true);
-  const writable = await (await dir.getFileHandle(parts[parts.length - 1], { create: true })).createWritable();
+  const dir = await folder(parts.slice(0, -1), true), name = parts[parts.length - 1];
+  // Creating the handle already makes an empty file; the bytes arrive only when the
+  // writable closes. A write that stops in between must not leave that empty file: it
+  // would be listed as a pack that can never load.
+  const handle = await dir.getFileHandle(name, { create: true });
   try {
-    await writable.write(bytes as Uint8Array<ArrayBuffer>);
-    await writable.close();
+    const writable = await handle.createWritable();
+    try {
+      await writable.write(bytes as Uint8Array<ArrayBuffer>);
+      await writable.close();
+    } catch (error) {
+      await writable.abort().catch(() => {});
+      throw error;
+    }
+    const stored = (await handle.getFile()).size;
+    if (stored !== bytes.length) throw new Error(`the browser kept ${stored} of ${bytes.length} bytes`);
   } catch (error) {
-    await writable.abort().catch(() => {});
+    if (bytes.length && (await handle.getFile().then((f) => f.size, () => -1)) === 0) await dir.removeEntry(name).catch(() => {});
+    throw error;
+  }
+}
+
+/** A stored file's size, or undefined when there is none. */
+export async function fileSize(path: string): Promise<number | undefined> {
+  const parts = splitPath(path);
+  try {
+    const dir = await folder(parts.slice(0, -1), false);
+    return (await (await dir.getFileHandle(parts[parts.length - 1])).getFile()).size;
+  } catch (error) {
+    if (isNotFound(error) || (error as DOMException)?.name === "TypeMismatchError") return undefined;
     throw error;
   }
 }
@@ -199,9 +222,18 @@ export function bootPlan(paths: string[], selected?: string): { now: string[]; l
   return { now, later };
 }
 
+/** A stored pack that holds no bytes (a write the browser cut short, in a version that
+ * left the empty file behind): it could never load, so it is removed instead of listed. */
+function dropEmptyPack(path: string, onEmpty?: (path: string) => void) {
+  console.warn(`The saved ${path} is empty: removed`);
+  deleteFile(path).catch((error: unknown) => console.warn(`Removing the empty ${path} failed`, error));
+  try { onEmpty?.(path); } catch (error) { console.warn(error); }
+}
+
 /** Boot: the selection, the option files and the selected pack go into the game, the
- * other packs as empty placeholders; returns how many files were read. Never throws. */
-export async function mirrorAtBoot(installFile: InstallFile, paths: string[]): Promise<number> {
+ * other packs as empty placeholders; returns how many files were read. Stored packs that
+ * hold no bytes are removed and reported to `onEmpty`. Never throws. */
+export async function mirrorAtBoot(installFile: InstallFile, paths: string[], onEmpty?: (path: string) => void): Promise<number> {
   let selected: string | undefined;
   if (paths.includes(SELECTION)) {
     try {
@@ -212,19 +244,26 @@ export async function mirrorAtBoot(installFile: InstallFile, paths: string[]): P
     }
   }
   const { now, later } = bootPlan(paths, selected);
-  for (const path of later) installFile(path, new Uint8Array(0));
-  return mirrorInto(installFile, now);
+  for (const path of later) {
+    // Unreadable sizes count as stored: the game asks for the pack and reports the error.
+    const size = await fileSize(path).catch(() => 1);
+    if (size) installFile(path, new Uint8Array(0));
+    else if (size === 0) dropEmptyPack(path, onEmpty);
+  }
+  return mirrorInto(installFile, now, onEmpty);
 }
 
-/** Puts every stored file (or the `paths` given) into the game; returns how many. Never
- * throws: a browser without OPFS, or a full one, just starts with nothing. */
-export async function mirrorInto(installFile: InstallFile, paths?: string[]): Promise<number> {
+/** Puts every stored file (or the `paths` given) into the game; returns how many. Stored
+ * packs that hold no bytes are removed instead. Never throws: a browser without OPFS, or a
+ * full one, just starts with nothing. */
+export async function mirrorInto(installFile: InstallFile, paths?: string[], onEmpty?: (path: string) => void): Promise<number> {
   let installed = 0;
   try {
     for (const path of paths ?? await listFiles()) {
       try {
         const bytes = await readFile(path);
-        if (bytes) { installFile(path, bytes); installed++; }
+        if (bytes && !bytes.length && isStoredPack(path)) dropEmptyPack(path, onEmpty);
+        else if (bytes) { installFile(path, bytes); installed++; }
       } catch (error) {
         console.warn(`Loading the saved ${path} failed`, error);
       }
@@ -317,6 +356,13 @@ export function installHooks({ installFile, onChanged, notice, acceptsDrop }: Ho
         console.warn(`Reading ${file.name} failed`, error);
         continue;
       }
+      // The game reads an empty pack file as "not loaded yet" and asks the page for it,
+      // which has nothing either: say so here instead.
+      if (!bytes.length) {
+        console.warn(`${file.name}: the browser read 0 bytes (reported size ${file.size})`);
+        say(`Not added: ${file.name} is empty (the browser read 0 bytes of it).`);
+        continue;
+      }
       installFile(path, bytes);
       added++;
       await writeFile(path, bytes).then(() => say(`Added shader pack ${sanitizeName(file.name)}.`), (error: unknown) => {
@@ -331,13 +377,18 @@ export function installHooks({ installFile, onChanged, notice, acceptsDrop }: Ho
   /** A pack left out at boot, when the game first needs it. */
   const load = (path: string) => {
     void (async () => {
+      const name = path.split("/").pop() ?? path;
       try {
         const bytes = await readFile(path);
-        if (!bytes?.length) throw new Error("it is not stored");
+        if (!bytes?.length) {
+          console.warn(`The saved ${path} is ${bytes ? "empty" : "missing"}`);
+          say(`Shader pack ${name} is not in this browser's storage${bytes ? " (it was stored empty)" : ""}: add it again.`);
+          return;
+        }
         installFile(path, bytes);
       } catch (error) {
         console.warn(`Loading the saved ${path} failed`, error);
-        say(`Shader pack ${path} could not be loaded (${message(error)}).`);
+        say(`Shader pack ${name} could not be loaded (${message(error)}).`);
         return;
       }
       changed();
