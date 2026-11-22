@@ -375,7 +375,10 @@ pub fn pack_block_id(id: i32) -> u16 {
 }
 /// The `cell` of block `(x, y, z)` (0..16 each) of a section.
 pub fn pack_cell([x, y, z]: [i32; 3], fluid: bool) -> u16 {
-    (x & 15) as u16 | ((y & 15) as u16) << 4 | ((z & 15) as u16) << 8 | if fluid { CELL_FLUID } else { 0 }
+    (x & 15) as u16
+        | ((y & 15) as u16) << 4
+        | ((z & 15) as u16) << 8
+        | if fluid { CELL_FLUID } else { 0 }
 }
 /// What meshes made for a shader pack carry: the pack's block id of every
 /// state and of the fluid surfaces, and the lighting options it changes.
@@ -402,16 +405,14 @@ impl PackTags {
         Self {
             states: (0..registry.len() as u32)
                 .map(|id| {
-                    registry
-                        .state(BlockStateId(id))
-                        .map_or(PACK_UNLISTED, |s| {
-                            let props: Vec<(&str, &str)> = s
-                                .properties
-                                .iter()
-                                .map(|(k, v)| (k.as_str(), v.as_str()))
-                                .collect();
-                            pack_block_id(blocks.state_id(&s.name, &props))
-                        })
+                    registry.state(BlockStateId(id)).map_or(PACK_UNLISTED, |s| {
+                        let props: Vec<(&str, &str)> = s
+                            .properties
+                            .iter()
+                            .map(|(k, v)| (k.as_str(), v.as_str()))
+                            .collect();
+                        pack_block_id(blocks.state_id(&s.name, &props))
+                    })
                 })
                 .collect(),
             water: fluid("water"),
@@ -422,7 +423,10 @@ impl PackTags {
     }
     /// The id of state `id`.
     pub fn block(&self, id: u32) -> u16 {
-        self.states.get(id as usize).copied().unwrap_or(PACK_UNLISTED)
+        self.states
+            .get(id as usize)
+            .copied()
+            .unwrap_or(PACK_UNLISTED)
     }
 }
 /// A unit normal as [`PackVertex::normal`], with `w`.
@@ -443,12 +447,20 @@ pub(crate) fn quad_normal(p: [[f32; 3]; 4], fallback: [f32; 3]) -> [f32; 3] {
         return fallback;
     };
     match n.abs().max_element() {
-        m if m > 0.9999 => n.map(|c| if c.abs() == m { c.signum() } else { 0.0 }).into(),
+        m if m > 0.9999 => n
+            .map(|c| if c.abs() == m { c.signum() } else { 0.0 })
+            .into(),
         _ => n.into(),
     }
 }
 /// The pack stream of the quad `quad` (its four terrain vertices).
-pub(crate) fn pack_quad(quad: &[TerrainVertex], block: u16, cell: u16, normal: [f32; 3], emission: u8) -> [PackVertex; 4] {
+pub(crate) fn pack_quad(
+    quad: &[TerrainVertex],
+    block: u16,
+    cell: u16,
+    normal: [f32; 3],
+    emission: u8,
+) -> [PackVertex; 4] {
     let mean = |i: usize| ((quad.iter().map(|v| u32::from(v.uv[i])).sum::<u32>() + 2) / 4) as u16;
     [PackVertex {
         mid_uv: [mean(0), mean(1)],

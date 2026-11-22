@@ -1,12 +1,18 @@
 """Unit tests for the pure parts of tools/shader_pack_corpus.py (synthetic results only)."""
 
+import importlib.util
 import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
-import shader_pack_corpus as corpus  # noqa: E402
+# Loaded by path: tools/ holds harness scripts named like tests/ modules, so it stays off sys.path.
+_spec = importlib.util.spec_from_file_location(
+    "shader_pack_corpus", Path(__file__).resolve().parent.parent / "tools" / "shader_pack_corpus.py"
+)
+corpus = importlib.util.module_from_spec(_spec)
+sys.modules["shader_pack_corpus"] = corpus
+_spec.loader.exec_module(corpus)
 
 DIM = "minecraft:overworld"
 

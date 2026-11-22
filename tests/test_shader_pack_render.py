@@ -1,13 +1,19 @@
 """Unit tests for the pure parts of tools/shader_pack_render.py (synthetic pictures only)."""
 
+import importlib.util
 import sys
 import unittest
 import zlib
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
-import shader_pack_render as render  # noqa: E402
+# Loaded by path: tools/ holds harness scripts named like tests/ modules, so it stays off sys.path.
+_spec = importlib.util.spec_from_file_location(
+    "shader_pack_render", Path(__file__).resolve().parent.parent / "tools" / "shader_pack_render.py"
+)
+render = importlib.util.module_from_spec(_spec)
+sys.modules["shader_pack_render"] = render
+_spec.loader.exec_module(render)
 
 
 def picture(w, h, f):
