@@ -602,6 +602,30 @@ fn too_many_textures_fail_only_their_program() {
 }
 
 #[test]
+fn a_3d_texture_in_depthtex1_s_place_keeps_depthtex2_its_own() {
+    // No hand program, so depthtex2 would read depthtex1's binding, but here
+    // depthtex1's unit holds a 3D custom texture.
+    let decls = "uniform sampler3D depthtex1;\nuniform sampler2D depthtex2;";
+    let body = "    c += texture(depthtex1, vec3(uv, 0.5)) + texture(depthtex2, uv);";
+    let properties =
+        "texture.deferred.depthtex1=tex/curl.dat TEXTURE_3D RGB8 4 4 4 RGB UNSIGNED_BYTE\n";
+    let p = deferred(&sampling_pack(decls, body, properties, &[])).unwrap();
+    let mut got: Vec<(TextureSource, TexDim)> = p
+        .textures
+        .iter()
+        .map(|t| (t.source.clone(), t.dimension))
+        .collect();
+    got.sort_by_key(|(_, d)| *d == TexDim::D2);
+    assert_eq!(
+        got,
+        [
+            (TextureSource::Custom(0), TexDim::D3),
+            (TextureSource::Depth(2), TexDim::D2)
+        ]
+    );
+}
+
+#[test]
 fn unsupported_sampler_types_fail_their_program() {
     for (decl, call, msg) in [
         (
