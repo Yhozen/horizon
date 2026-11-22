@@ -28,7 +28,8 @@ use fragment::fragment_source;
 pub use fragment::variant;
 use sampling::*;
 pub use sampling::{
-    COMPARE_BINDING, MIPS_BINDING, SAMPLING_OPS, sampler_binding, split_sampling_call,
+    COMPARE_BINDING, CUSTOM_BINDING, MIPS_BINDING, SAMPLING_OPS, SamplingCall, parse_sampling_call,
+    sampler_binding, sampler_type, sampling_call, split_sampling_call,
 };
 use varyings::*;
 use vertex::vertex_source;
@@ -66,25 +67,136 @@ pub struct HostOutput {
     pub textures: Vec<TextureBinding>,
     /// Uniforms the pack declares that Horizon's block lacks: zero-valued globals.
     pub unknown_uniforms: BTreeSet<String>,
+    /// Report lines about what may not look as in Iris (samplers with no texture…).
+    pub notes: Vec<String>,
 }
 
-/// The uniform block; for entity geometry reading `entityColor`, its member
-/// is renamed so a per-vertex `entityColor` global can take the name.
+/// The uniform blocks. For entity geometry reading `entityColor`, its member
+/// is renamed so a per-vertex `entityColor` global can take the name. A
+/// uniform the pack declares with another type than the block's (`uniform
+/// float worldTime`, `uniform bool is_sneaking`) reads the renamed member
+/// through a converting `#define`. Custom uniforms the program declares come
+/// from the second block (group 1, binding 1), by `#define` as well.
 fn uniform_block(extras: &Extras) -> String {
-    if extras.entity_color {
+    let mut out = if extras.entity_color {
         UNIFORM_BLOCK.replace(" entityColor;", " hz_block_entityColor;")
     } else {
         UNIFORM_BLOCK.to_string()
+    };
+    if extras.entity {
+        // Entity geometry samples the shared atlas: its size is the atlas's.
+        out = out
+            .replace(" atlasSize;", " hz_terrain_atlasSize;")
+            .replace(" gtextureSize;", " hz_terrain_gtextureSize;");
+        out += "#define atlasSize hz_entityAtlasSize\n#define gtextureSize hz_entityAtlasSize\n";
+    }
+    for (name, ty) in &extras.converted {
+        if extras.entity && matches!(name.as_str(), "atlasSize" | "gtextureSize") {
+            writeln!(
+                out,
+                "#undef {name}\n#define {name} {ty}(hz_entityAtlasSize)"
+            )
+            .unwrap();
+            continue;
+        }
+        out = out.replace(&format!(" {name};\n"), &format!(" hz_b_{name};\n"));
+        writeln!(out, "#define {name} {ty}(hz_b_{name})").unwrap();
+    }
+    if let Some(block) = &extras.custom_block {
+        out += block;
+        for (name, from, to) in &extras.customs {
+            if from == to {
+                writeln!(out, "#define {name} hz_c_{name}").unwrap();
+            } else {
+                writeln!(out, "#define {name} {to}(hz_c_{name})").unwrap();
+            }
+        }
+    }
+    out
+}
+
+/// Zero-valued globals for the uniforms nothing provides (private globals
+/// start zeroed in WGSL). `program_sources` leaves only those in the stage's
+/// list.
+fn declare_unknown_uniforms(out: &mut String, stage: &Rewritten) {
+    for u in &stage.uniforms {
+        writeln!(out, "{} {};", u.ty, u.name).unwrap();
     }
 }
 
-/// Zero-valued globals for the uniforms Horizon does not provide (private
-/// globals start zeroed in WGSL).
-fn declare_unknown_uniforms(out: &mut String, stage: &Rewritten) {
-    for u in &stage.uniforms {
-        if uniform_type(&u.name).is_none() {
-            writeln!(out, "{} {};", u.ty, u.name).unwrap();
+/// The shape of a GLSL type for conversions: 1 for scalars, N for vectors,
+/// `None` for anything else (matrices, arrays).
+fn shape(ty: &str) -> Option<u8> {
+    match ty {
+        "float" | "int" | "uint" | "bool" => Some(1),
+        _ => {
+            let n = ty.strip_prefix(['i', 'u', 'b']).unwrap_or(ty);
+            let n = n.strip_prefix("vec")?.parse().ok()?;
+            (2..=4).contains(&n).then_some(n)
         }
+    }
+}
+
+/// Whether a value of GLSL type `from` converts to `to` by a constructor.
+fn converts(from: &str, to: &str) -> bool {
+    shape(from).is_some() && shape(from) == shape(to)
+}
+
+/// How each uniform the program declares is provided.
+#[derive(Default)]
+struct UniformPlan {
+    /// The block member under another type: name → the pack's type.
+    converted: BTreeMap<String, String>,
+    /// Custom uniforms: (name, block type, the pack's type).
+    customs: Vec<(String, String, String)>,
+    /// Nothing provides them: zero-valued globals.
+    unknown: BTreeSet<String>,
+}
+
+impl UniformPlan {
+    fn new(vertex: &Rewritten, fragment: &Rewritten, spec: &ProgramSpec) -> Result<Self, String> {
+        let mut plan = Self::default();
+        let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
+        for u in vertex.uniforms.iter().chain(&fragment.uniforms) {
+            match seen.insert(&u.name, &u.ty) {
+                Some(ty) if ty != u.ty => {
+                    return Err(format!(
+                        "uniform {} is {ty} in one stage and {} in the other",
+                        u.name, u.ty
+                    ));
+                }
+                Some(_) => continue,
+                None => {}
+            }
+            let custom = spec.plan.custom_uniforms.uniform(&u.name);
+            match (uniform_type(&u.name), custom) {
+                (Some(ty), _) if ty == u.ty => {}
+                (Some(ty), _) if converts(ty, &u.ty) => {
+                    plan.converted.insert(u.name.clone(), u.ty.clone());
+                }
+                (Some(ty), _) => {
+                    return Err(format!(
+                        "uniform {} is {} in the pack but {ty} in Horizon's",
+                        u.name, u.ty
+                    ));
+                }
+                (None, Some(c)) if converts(c.ty.block_glsl(), &u.ty) => {
+                    plan.customs
+                        .push((u.name.clone(), c.ty.block_glsl().into(), u.ty.clone()));
+                }
+                (None, _) => {
+                    plan.unknown.insert(u.name.clone());
+                }
+            }
+        }
+        Ok(plan)
+    }
+
+    /// `stage` with only the uniforms nothing provides left in its list.
+    fn unknown_only(&self, stage: &Rewritten) -> Rewritten {
+        let mut stage = stage.clone();
+        stage.uniforms.retain(|u| self.unknown.contains(&u.name));
+        stage
     }
 }
 
@@ -98,6 +210,14 @@ pub(super) struct Extras {
     pub(super) uv_wrap: bool,
     /// The program declares `watershadow` (then `shadow` is shadowtex1).
     pub(super) watershadow: bool,
+    /// Entity geometry (its atlas is the shared one, not the sprite arrays).
+    entity: bool,
+    /// Block members the pack declares with another type: name → its type.
+    converted: BTreeMap<String, String>,
+    /// The custom uniform block, when the program declares one of them.
+    custom_block: Option<String>,
+    /// The custom uniforms it declares: (name, block type, the pack's type).
+    customs: Vec<(String, String, String)>,
 }
 
 impl Extras {
@@ -111,9 +231,10 @@ impl Extras {
                 .any(|u| u.name == name)
         };
         let atlas = fragment.sample_calls.iter().any(|c| {
-            split_sampling_call(c)
-                .and_then(|(_, name)| canonical(name, false))
-                .is_some_and(|n| n == "gtexture")
+            split_sampling_call(c).is_some_and(|(_, name)| {
+                // `gcolor` is the atlas in gbuffers programs (sampling::resolve).
+                name == "gcolor" || canonical(name, false).is_some_and(|n| n == "gtexture")
+            })
         });
         Self {
             entity_color: entity && uses("entityColor"),
@@ -123,6 +244,10 @@ impl Extras {
                 .iter()
                 .chain(&fragment.samplers)
                 .any(|s| s == "watershadow"),
+            entity,
+            converted: BTreeMap::new(),
+            custom_block: None,
+            customs: Vec::new(),
         }
     }
 
@@ -152,21 +277,7 @@ pub fn program_sources(
     fragment: &Rewritten,
     spec: &ProgramSpec,
 ) -> Result<HostOutput, String> {
-    let mut unknown_uniforms = BTreeSet::new();
-    for u in vertex.uniforms.iter().chain(&fragment.uniforms) {
-        match uniform_type(&u.name) {
-            Some(ty) if ty == u.ty => {}
-            Some(ty) => {
-                return Err(format!(
-                    "uniform {} is {} in the pack but {ty} in Horizon's",
-                    u.name, u.ty
-                ));
-            }
-            None => {
-                unknown_uniforms.insert(u.name.clone());
-            }
-        }
-    }
+    let uniforms = UniformPlan::new(vertex, fragment, spec)?;
     if spec.draw_buffers.len() > 8 {
         return Err(format!(
             "{} draw buffers, at most 8",
@@ -179,7 +290,16 @@ pub fn program_sources(
     {
         return Err(format!("unsupported host parameters {:?}", spec.host));
     }
-    let extras = Extras::new(vertex, fragment, spec);
+    let mut extras = Extras::new(vertex, fragment, spec);
+    extras.converted = uniforms.converted.clone();
+    if !uniforms.customs.is_empty() {
+        extras.custom_block = Some(spec.plan.custom_uniforms.block());
+        extras.customs = uniforms.customs.clone();
+    }
+    let fragment = &uniforms.unknown_only(fragment);
+    let mut vertex = uniforms.unknown_only(vertex);
+    let adopted = varyings::adopt_undeclared(&mut vertex, fragment);
+    let vertex = &vertex;
     // Entity extras ride after the pack's varyings: keep room for them.
     let max = spec.host.max_varyings.saturating_sub(extras.locations());
     let shared = Interface::new(vertex, fragment, spec.geometry, max)?;
@@ -203,10 +323,18 @@ pub fn program_sources(
             }
         }
     }
+    let mut notes = sampling_notes(&vertex.sample_calls, spec, extras.watershadow);
+    notes.extend(adopted);
+    notes.extend(sampling_notes(
+        &fragment.sample_calls,
+        spec,
+        extras.watershadow,
+    ));
     Ok(HostOutput {
         vertex: vs,
         fragment: fs,
         textures: textures.into_values().collect(),
-        unknown_uniforms,
+        unknown_uniforms: uniforms.unknown,
+        notes: notes.into_iter().collect(),
     })
 }

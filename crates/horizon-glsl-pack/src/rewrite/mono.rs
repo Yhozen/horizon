@@ -24,7 +24,8 @@ struct Param {
     /// Token range, without the separating commas.
     range: (usize, usize),
     name: String,
-    sampler: bool,
+    /// The sampler type (`sampler2DShadow`), for a sampler parameter.
+    sampler: Option<String>,
 }
 
 /// One definition (or prototype) of a function that has a sampler parameter.
@@ -40,7 +41,7 @@ struct Generic {
 impl Generic {
     fn sampler_positions(&self) -> Vec<usize> {
         (0..self.params.len())
-            .filter(|&k| self.params[k].sampler)
+            .filter(|&k| self.params[k].sampler.is_some())
             .collect()
     }
 }
@@ -59,9 +60,12 @@ fn clone_name(key: &Key) -> String {
 
 struct Mono<'a> {
     toks: Vec<Tok<'a>>,
-    /// Samplers declared by `uniform sampler… name;` at the top level.
-    globals: BTreeSet<String>,
+    /// Samplers declared by `uniform sampler… name;` at the top level, with their type.
+    globals: BTreeMap<String, String>,
     generics: BTreeMap<String, Vec<Generic>>,
+    /// Functions defined with no sampler parameter: a call to an overloaded
+    /// name whose sampler position holds no sampler is one of these.
+    plain: BTreeSet<String>,
 }
 
 impl Mono<'_> {
@@ -131,7 +135,11 @@ impl Mono<'_> {
             if words.len() == 1 && self.text(words[0]) == "void" {
                 continue;
             }
-            let sampler = words.iter().any(|&i| is_sampler_type(self.text(i)));
+            let sampler = words
+                .iter()
+                .map(|&i| self.text(i))
+                .find(|w| is_sampler_type(w))
+                .map(str::to_string);
             // The last identifier before any array suffix: `in sampler2D tex`, `float w[2]`.
             let before = words
                 .iter()
@@ -144,7 +152,7 @@ impl Mono<'_> {
                 .find(|t| t.kind == Kind::Ident)
                 .map(|t| t.text.to_string())
                 .unwrap_or_default();
-            if sampler && name.is_empty() {
+            if sampler.is_some() && name.is_empty() {
                 return Err(format!(
                     "unnamed sampler parameter of `{}`",
                     self.text(sig[p - 1])
@@ -156,7 +164,7 @@ impl Mono<'_> {
                 sampler,
             });
         }
-        if !params.iter().any(|q| q.sampler) {
+        if !params.iter().any(|q| q.sampler.is_some()) {
             return Ok(None);
         }
         Ok(Some(Generic {
@@ -210,8 +218,20 @@ impl Mono<'_> {
                             t.text
                         ));
                     }
+                    // `f(x, false)` beside `f(vec3, sampler2D)`: the plain overload.
+                    let plain_call = self.plain.contains(t.text)
+                        && positions.iter().any(|&k| {
+                            let words = self.sig(args[k].0, args[k].1);
+                            !matches!(words[..], [w] if {
+                                let arg = self.text(w);
+                                self.globals.contains_key(subst.get(arg).copied().unwrap_or(arg))
+                            })
+                        });
                     let mut samplers = Vec::new();
                     for &k in &positions {
+                        if plain_call {
+                            break;
+                        }
                         let words = self.sig(args[k].0, args[k].1);
                         let arg = match words[..] {
                             [w] if self.toks[w].kind == Kind::Ident => self.text(w),
@@ -224,13 +244,17 @@ impl Mono<'_> {
                             }
                         };
                         let global = subst.get(arg).copied().unwrap_or(arg);
-                        if !self.globals.contains(global) {
+                        if !self.globals.contains_key(global) {
                             return Err(format!(
                                 "`{arg}` passed to `{}` is not a global sampler",
                                 t.text
                             ));
                         }
                         samplers.push(global.to_string());
+                    }
+                    if plain_call {
+                        out.push_str(t.text);
+                        continue;
                     }
                     let key = (t.text.to_string(), n, samplers);
                     out.push_str(&clone_name(&key));
@@ -253,6 +277,27 @@ impl Mono<'_> {
         Ok(())
     }
 
+    /// The overloads a clone instantiates: those of its argument count whose
+    /// sampler parameters have the types of the globals passed
+    /// (`f(sampler2DShadow, vec3)` beside `f(sampler2D, vec3)`), else all of them.
+    fn overloads(&self, key: &Key) -> Vec<&Generic> {
+        let all: Vec<&Generic> = self.generics[&key.0]
+            .iter()
+            .filter(|g| g.params.len() == key.1)
+            .collect();
+        let exact: Vec<&Generic> = all
+            .iter()
+            .copied()
+            .filter(|g| {
+                let types = g.params.iter().filter_map(|p| p.sampler.as_deref());
+                types
+                    .zip(&key.2)
+                    .all(|(ty, global)| self.globals.get(global).map(String::as_str) == Some(ty))
+            })
+            .collect();
+        if exact.is_empty() { all } else { exact }
+    }
+
     /// Writes the clone of `g` for `key`.
     fn instantiate(
         &self,
@@ -269,7 +314,7 @@ impl Mono<'_> {
         let mut samplers = key.2.iter();
         let mut first = true;
         for p in &g.params {
-            if p.sampler {
+            if p.sampler.is_some() {
                 if let Some(s) = samplers.next() {
                     subst.insert(p.name.as_str(), s.as_str());
                 }
@@ -301,8 +346,9 @@ pub(super) fn monomorphise(src: &str) -> Result<Option<String>, String> {
     let items = top_level_items(&toks)?;
     let mut mono = Mono {
         toks,
-        globals: BTreeSet::new(),
+        globals: BTreeMap::new(),
         generics: BTreeMap::new(),
+        plain: BTreeSet::new(),
     };
     let mut generic_items = BTreeSet::new();
     for &item in &items {
@@ -317,13 +363,19 @@ pub(super) fn monomorphise(src: &str) -> Result<Option<String>, String> {
             // `uniform sampler2D a, b;`: every identifier directly before `,`, `;` or `[`.
             for w in words[t + 1..].windows(2) {
                 if matches!(w[1], "," | ";" | "[") {
-                    mono.globals.insert(w[0].to_string());
+                    mono.globals.insert(w[0].to_string(), words[t].to_string());
                 }
             }
         } else if let Some(g) = mono.generic(item)? {
             generic_items.insert(item.0);
             let name = mono.text(g.name_tok).to_string();
             mono.generics.entry(name).or_default().push(g);
+        } else if let Some(p) = words.iter().position(|w| *w == "(")
+            && p >= 2
+            && words.contains(&"{")
+            && !words[..p].iter().any(|w| matches!(*w, "=" | "struct"))
+        {
+            mono.plain.insert(words[p - 1].to_string());
         }
     }
     if mono.generics.is_empty() {
@@ -339,10 +391,8 @@ pub(super) fn monomorphise(src: &str) -> Result<Option<String>, String> {
     let mut keys = BTreeSet::new();
     while let Some(key) = found.pop() {
         if keys.insert(key.clone()) {
-            for g in &mono.generics[&key.0] {
-                if g.params.len() == key.1 {
-                    mono.instantiate(g, &key, &mut sink, &mut found)?;
-                }
+            for g in mono.overloads(&key) {
+                mono.instantiate(g, &key, &mut sink, &mut found)?;
             }
         }
     }
@@ -362,7 +412,7 @@ pub(super) fn monomorphise(src: &str) -> Result<Option<String>, String> {
         let fname = mono.text(g.name_tok);
         for key in keys
             .iter()
-            .filter(|k| k.0 == fname && k.1 == g.params.len())
+            .filter(|k| k.0 == fname && mono.overloads(k).iter().any(|o| std::ptr::eq(*o, g)))
         {
             mono.instantiate(g, key, &mut out, &mut found)?;
         }

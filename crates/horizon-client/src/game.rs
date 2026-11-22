@@ -142,6 +142,7 @@ mod screens;
 mod sculk;
 mod sculk_fixture;
 mod server_travel;
+mod shader_packs;
 mod shield;
 mod sign_edit;
 mod sniffers;
@@ -245,6 +246,24 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
 };
+
+/// The page added shader packs to the `shaderpacks` folder.
+#[cfg(target_arch = "wasm32")]
+pub fn shader_packs_changed() {
+    shader_packs::RESCAN.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A line from the page for the player (a pack it could not store or load).
+#[cfg(target_arch = "wasm32")]
+pub fn shader_pack_notice(line: String) {
+    shader_packs::notice(line);
+}
+
+/// Whether the Shader Packs page shows, where dropped files are packs.
+#[cfg(target_arch = "wasm32")]
+pub fn shader_pack_page_open() -> bool {
+    shader_packs::PAGE_OPEN.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// The event loop's flow between frames. The desktop polls; in the browser the
 /// redraw request already schedules the next animation frame, and polling would
@@ -1123,6 +1142,7 @@ impl PackResources {
                 tables,
                 biomes,
                 light,
+                pack: None,
             }),
             assets,
             render,
@@ -1263,6 +1283,8 @@ struct Game<'a> {
     /// item glows (built the first time the extra is on).
     dynamic_lights: Vec<[f32; 4]>,
     luminance: Option<horizon_client::dynamic_light::Luminance>,
+    /// The shader-pack manager (game/shader_packs.rs).
+    shader_packs: shader_packs::ShaderPacks,
     /// Name tags drawn over everything (`RenderPipelines.TEXT_SEE_THROUGH`).
     see_through_vertices: Vec<Vertex>,
     started: Instant,
@@ -10318,7 +10340,7 @@ impl Game<'_> {
         } else {
             self.gather_dynamic_lights(camera, alpha);
         }
-        self.prepare_pack_frame();
+        self.prepare_pack_frame(title);
         let frame = Frame {
             shader_pack: self.pack_frame(camera.to_array(), title),
             weather: &weather,
@@ -11093,6 +11115,13 @@ impl ApplicationHandler for Game<'_> {
                 });
             }
             self.perf.cancel_world_opening();
+            return;
+        }
+        if let WindowEvent::DroppedFile(path) = &event {
+            // Only the Shader Packs page takes files, as Iris's shader screen does.
+            if self.shader_pack_page_open() {
+                self.shader_pack_dropped(path);
+            }
             return;
         }
         if (self.pending_entry.is_some() || self.world_loader.is_some())
@@ -12085,6 +12114,7 @@ impl<'a> Game<'a> {
             entity_vertices: Vec::new(),
             dynamic_lights: Vec::new(),
             luminance: None,
+            shader_packs: shader_packs::ShaderPacks::default(),
             see_through_vertices: Vec::new(),
             health_hud: hud_layout::HealthHud::default(),
             started: now,
@@ -12941,7 +12971,6 @@ fn build_renderer(
         .iter()
         .map(|(rect, animation)| (*rect, animation.clone(), usize::MAX))
         .collect();
-    glsl_pack::install(&mut renderer, pack);
     Ok(renderer)
 }
 
@@ -13628,10 +13657,10 @@ pub async fn run_web(args: Vec<String>) -> std::result::Result<(), wasm_bindgen:
         return Ok(());
     };
     // The renderer reuses this device, so parse the opt-in before opening it.
-    horizon_client::gfx::open_web_gpu(shader_pack.path.is_some())
+    shader_pack.apply();
+    horizon_client::gfx::open_web_gpu(glsl_pack::requested())
         .await
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    shader_pack.apply();
     run_with_options(options).map_err(game_error)
 }
 

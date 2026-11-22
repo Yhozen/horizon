@@ -44,6 +44,8 @@ pub struct Rewritten {
     pub builtins: BTreeSet<String>,
     /// Calls the body makes to host sampling functions, e.g. `hz_sample_gtexture`.
     pub sample_calls: BTreeSet<String>,
+    /// Each declared sampler's full GLSL type (`sampler2D`, `usampler3D`…), by name.
+    pub sampler_types: BTreeMap<String, String>,
 }
 
 /// Compatibility-profile built-ins the host provides as plain globals named `hz_` + name.
@@ -77,6 +79,90 @@ fn listed(list: &str, word: &str) -> bool {
     list.split_whitespace().any(|w| w == word)
 }
 
+/// Built-ins naga cannot translate (`out` parameters its GLSL front end
+/// lacks; `isnan`/`isinf`, which its WGSL writer cannot write; `notEqual`,
+/// whose ordered float comparison is false for NaN where GLSL's is true), as
+/// `hz_` functions: (name, its overloads).
+const POLYFILLS: [(&str, &str); 5] = [
+    (
+        "isnan",
+        "bool hz_isnan(float x) { return (floatBitsToUint(x) & 0x7fffffffu) > 0x7f800000u; }
+bvec2 hz_isnan(vec2 x) { return greaterThan(floatBitsToUint(x) & uvec2(0x7fffffffu), uvec2(0x7f800000u)); }
+bvec3 hz_isnan(vec3 x) { return greaterThan(floatBitsToUint(x) & uvec3(0x7fffffffu), uvec3(0x7f800000u)); }
+bvec4 hz_isnan(vec4 x) { return greaterThan(floatBitsToUint(x) & uvec4(0x7fffffffu), uvec4(0x7f800000u)); }",
+    ),
+    (
+        "isinf",
+        "bool hz_isinf(float x) { return (floatBitsToUint(x) & 0x7fffffffu) == 0x7f800000u; }
+bvec2 hz_isinf(vec2 x) { return equal(floatBitsToUint(x) & uvec2(0x7fffffffu), uvec2(0x7f800000u)); }
+bvec3 hz_isinf(vec3 x) { return equal(floatBitsToUint(x) & uvec3(0x7fffffffu), uvec3(0x7f800000u)); }
+bvec4 hz_isinf(vec4 x) { return equal(floatBitsToUint(x) & uvec4(0x7fffffffu), uvec4(0x7f800000u)); }",
+    ),
+    (
+        "notEqual",
+        "bvec2 hz_notEqual(vec2 a, vec2 b) { return not(equal(a, b)); }
+bvec3 hz_notEqual(vec3 a, vec3 b) { return not(equal(a, b)); }
+bvec4 hz_notEqual(vec4 a, vec4 b) { return not(equal(a, b)); }
+bvec2 hz_notEqual(ivec2 a, ivec2 b) { return not(equal(a, b)); }
+bvec3 hz_notEqual(ivec3 a, ivec3 b) { return not(equal(a, b)); }
+bvec4 hz_notEqual(ivec4 a, ivec4 b) { return not(equal(a, b)); }
+bvec2 hz_notEqual(uvec2 a, uvec2 b) { return not(equal(a, b)); }
+bvec3 hz_notEqual(uvec3 a, uvec3 b) { return not(equal(a, b)); }
+bvec4 hz_notEqual(uvec4 a, uvec4 b) { return not(equal(a, b)); }
+bvec2 hz_notEqual(bvec2 a, bvec2 b) { return not(equal(a, b)); }
+bvec3 hz_notEqual(bvec3 a, bvec3 b) { return not(equal(a, b)); }
+bvec4 hz_notEqual(bvec4 a, bvec4 b) { return not(equal(a, b)); }",
+    ),
+    (
+        "modf",
+        "float hz_modf(float x, out float i) { i = trunc(x); return x - i; }
+vec2 hz_modf(vec2 x, out vec2 i) { i = trunc(x); return x - i; }
+vec3 hz_modf(vec3 x, out vec3 i) { i = trunc(x); return x - i; }
+vec4 hz_modf(vec4 x, out vec4 i) { i = trunc(x); return x - i; }",
+    ),
+    (
+        "frexp",
+        "float hz_frexp(float x, out int e) { e = x == 0.0 ? 0 : int(floor(log2(abs(x)))) + 1; return x * exp2(float(-e)); }
+vec2 hz_frexp(vec2 x, out ivec2 e) { float a = hz_frexp(x.x, e.x); return vec2(a, hz_frexp(x.y, e.y)); }
+vec3 hz_frexp(vec3 x, out ivec3 e) { float a = hz_frexp(x.x, e.x); float b = hz_frexp(x.y, e.y); return vec3(a, b, hz_frexp(x.z, e.z)); }
+vec4 hz_frexp(vec4 x, out ivec4 e) { float a = hz_frexp(x.x, e.x); float b = hz_frexp(x.y, e.y); float c = hz_frexp(x.z, e.z); return vec4(a, b, c, hz_frexp(x.w, e.w)); }",
+    ),
+];
+
+/// Calls of [`POLYFILLS`] renamed to their `hz_` versions, with the
+/// definitions to put ahead of the body; None when the stage calls none (or
+/// defines its own).
+fn polyfill(text: &str) -> Option<(String, BTreeSet<String>)> {
+    let toks = tokenize(text);
+    let sig: Vec<&Tok> = toks.iter().filter(|t| t.kind != Kind::Space).collect();
+    let called = |name: &str| {
+        let calls = sig
+            .windows(2)
+            .any(|w| w[0].text == name && w[1].text == "(");
+        // `float modf(`… is the pack's own function.
+        let defined = sig.windows(3).any(|w| {
+            w[1].text == name
+                && w[2].text == "("
+                && w[0].kind == Kind::Ident
+                && is_type(w[0].text, &BTreeSet::new())
+        });
+        calls && !defined
+    };
+    let used: Vec<&(&str, &str)> = POLYFILLS.iter().filter(|(n, _)| called(n)).collect();
+    if used.is_empty() {
+        return None;
+    }
+    let out = toks
+        .iter()
+        .map(|t| match used.iter().find(|(n, _)| *n == t.text) {
+            Some((n, _)) if t.kind == Kind::Ident => format!("hz_{n}"),
+            _ => t.text.to_string(),
+        })
+        .collect();
+    Some((out, used.iter().map(|(_, defs)| defs.to_string()).collect()))
+}
+
+mod compat;
 mod dead;
 mod decl;
 mod emit;
@@ -105,13 +191,19 @@ struct Ctx<'a> {
 
 /// Rewrites one preprocessed stage. See the module doc and the spec, section 3.
 pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
+    let compat = compat::apply(source, stage);
+    let source = compat.as_deref().unwrap_or(source);
     let mono = mono::monomorphise(source)?;
     let source = mono.as_deref().unwrap_or(source);
     let toks = dead::drop_dead_functions(drop_unreachable(tokenize(source)))?;
     // Token passes that need new text: each yields the stage again, tokenized anew.
     let scoped = scope::rename_shadowing(&toks)?;
-    let fixed = fixes::apply(&tokenize(&scoped))?;
-    let toks = tokenize(&fixed);
+    let sized = fixes::size_arrays(&tokenize(&scoped)).unwrap_or(scoped);
+    let stores = fixes::index_swizzle_stores(&tokenize(&sized)).unwrap_or(sized);
+    let fixed = fixes::apply(&tokenize(&stores))?;
+    let (polyfilled, polyfills) =
+        polyfill(&fixed).map_or((None, BTreeSet::new()), |(t, p)| (Some(t), p));
+    let toks = tokenize(polyfilled.as_deref().unwrap_or(&fixed));
     let structs: BTreeSet<String> = toks
         .windows(3)
         .filter(|w| w[0].text == "struct" && w[2].kind == Kind::Ident)
@@ -136,9 +228,17 @@ pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
         sampler_shadow: BTreeMap::new(),
         frag_outs: BTreeMap::new(),
         user_builtins,
-        prelude: BTreeSet::new(),
+        prelude: polyfills,
     };
     let mut body = String::new();
+    // Samplers first: a function cloned per sampler (mono.rs) may sit above
+    // the sampler's own declaration.
+    for (start, end) in top_level_items(&cx.toks)? {
+        let sig: Vec<usize> = (start..end)
+            .filter(|&i| cx.toks[i].kind != Kind::Space)
+            .collect();
+        cx.sampler_declaration(&sig);
+    }
     for (start, end) in top_level_items(&cx.toks)? {
         let sig: Vec<usize> = (start..end)
             .filter(|&i| cx.toks[i].kind != Kind::Space)
@@ -157,6 +257,23 @@ pub fn rewrite(source: &str, stage: Stage) -> Result<Rewritten, String> {
             continue;
         }
         cx.emit(start, end, &mut body)?;
+    }
+    // Struct-typed varyings: their globals go right after their struct.
+    for v in &cx.out.varyings {
+        if !structs.contains(&v.ty) {
+            continue;
+        }
+        let decl = match v.array_len {
+            Some(n) => format!(" {} {}[{n}];", v.ty, v.name),
+            None => format!(" {} {};", v.ty, v.name),
+        };
+        let at = body
+            .find(&format!("struct {} ", v.ty))
+            .or_else(|| body.find(&format!("struct {}{{", v.ty)));
+        if let Some(close) = at.and_then(|a| body[a..].find('}').map(|c| a + c)) {
+            let semi = body[close..].find(';').map_or(close + 1, |s| close + s + 1);
+            body.insert_str(semi, &decl);
+        }
     }
     let mut prelude: String = cx.prelude.iter().map(|l| format!("{l}\n")).collect();
     prelude.push_str(&body);

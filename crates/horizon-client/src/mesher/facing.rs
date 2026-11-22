@@ -4,7 +4,7 @@
 //! back side of every quad of a group the renderer skips the group's draw:
 //! the GPU would have discarded all of it after shading its vertices. The
 //! picture is unchanged; the vertex work for those quads is gone.
-use super::TerrainVertex;
+use super::{PackVertex, TerrainVertex};
 use glam::Vec3;
 
 /// Groups in buffer order: the negative sides, quads not in an axis plane
@@ -42,9 +42,10 @@ impl Default for FaceGroups {
 }
 
 impl FaceGroups {
-    /// Group arbitrary-sized terrain quads, including distant LOD tiles.
-    pub fn group(solid: &mut Vec<TerrainVertex>) -> Self {
-        group(solid)
+    /// Group arbitrary-sized terrain quads, including distant LOD tiles,
+    /// and their pack stream (empty without a pack).
+    pub fn group(solid: &mut Vec<TerrainVertex>, pack: &mut Vec<PackVertex>) -> Self {
+        group(solid, pack)
     }
 
     /// Whether group `g` can hold a front-facing quad for an eye at `eye`,
@@ -130,8 +131,10 @@ fn facing(quad: &[TerrainVertex]) -> (usize, f32) {
 
 /// Reorder `solid` by group, keeping the order of quads within a group (so
 /// coplanar quads such as a grass block's overlay still draw after their
-/// base), and return the groups.
-pub fn group(solid: &mut Vec<TerrainVertex>) -> FaceGroups {
+/// base), and return the groups. `pack`, when not empty, holds one pack
+/// vertex per vertex of `solid` and is reordered the same way.
+pub fn group(solid: &mut Vec<TerrainVertex>, pack: &mut Vec<PackVertex>) -> FaceGroups {
+    debug_assert!(pack.is_empty() || pack.len() == solid.len());
     let mut groups = FaceGroups::default();
     for (g, plane) in groups.planes.iter_mut().enumerate() {
         if g != UNALIGNED {
@@ -165,14 +168,29 @@ pub fn group(solid: &mut Vec<TerrainVertex>) -> FaceGroups {
         next[g] = start;
         start += groups.quads[g] as usize;
     }
-    let mut sorted = vec![solid[0]; solid.len()];
-    for (quad, &g) in solid.as_chunks::<4>().0.iter().zip(&faces) {
-        let at = next[g as usize] * 4;
-        sorted[at..at + 4].copy_from_slice(quad);
-        next[g as usize] += 1;
+    // Each quad's destination, applied to both streams.
+    let order: Vec<usize> = faces
+        .iter()
+        .map(|&g| {
+            let at = next[g as usize] * 4;
+            next[g as usize] += 1;
+            at
+        })
+        .collect();
+    permute(solid, &order);
+    if pack.len() == solid.len() {
+        permute(pack, &order);
     }
-    *solid = sorted;
     groups
+}
+
+/// Moves quad `i` of `vertices` to vertex `order[i]`.
+fn permute<T: Copy>(vertices: &mut Vec<T>, order: &[usize]) {
+    let mut sorted = vertices.clone();
+    for (quad, &at) in vertices.as_chunks::<4>().0.iter().zip(order) {
+        sorted[at..at + 4].copy_from_slice(quad);
+    }
+    *vertices = sorted;
 }
 
 #[cfg(test)]
@@ -247,7 +265,7 @@ mod tests {
             quad(0, 3.0, 1.0, 5),
         ]
         .concat();
-        let groups = group(&mut solid);
+        let groups = group(&mut solid, &mut Vec::new());
         let layers: Vec<u16> = solid.chunks(4).map(|q| q[0].layer).collect();
         assert_eq!(layers, [3, 4, 1, 2, 5]);
         let ranges = |eye: Vec3| {
@@ -263,5 +281,41 @@ mod tests {
         assert_eq!(ranges(Vec3::new(-10.0, 8.0, 8.0)), [(0, 2)]);
         // Within the margin of the nearest plane: still drawn.
         assert_eq!(ranges(Vec3::new(3.0, 8.0, 8.0)), [(0, 5)]);
+    }
+
+    #[test]
+    fn the_pack_stream_moves_with_its_quads() {
+        let diagonal = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [0.0, 1.0, 0.0],
+        ]
+        .map(|p| vertex(p, 4));
+        let mut solid = [
+            quad(0, 3.0, 1.0, 1),
+            quad(1, 5.0, -1.0, 3),
+            diagonal.to_vec(),
+            quad(2, 7.0, 1.0, 2),
+            quad(0, 3.0, -1.0, 5),
+        ]
+        .concat();
+        // Each pack vertex names its terrain vertex: the quad's layer and its corner.
+        let mut pack: Vec<PackVertex> = solid
+            .iter()
+            .enumerate()
+            .map(|(i, v)| PackVertex {
+                mid_uv: [v.layer, (i % 4) as u16],
+                block: 0,
+                cell: 0,
+                normal: [0; 4],
+            })
+            .collect();
+        group(&mut solid, &mut pack);
+        let layers: Vec<u16> = solid.chunks(4).map(|q| q[0].layer).collect();
+        assert_eq!(layers, [5, 3, 4, 2, 1]);
+        for (i, (v, p)) in solid.iter().zip(&pack).enumerate() {
+            assert_eq!(p.mid_uv, [v.layer, (i % 4) as u16]);
+        }
     }
 }

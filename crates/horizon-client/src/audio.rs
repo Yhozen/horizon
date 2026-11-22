@@ -564,15 +564,15 @@ impl Audio {
         } else {
             Err("no output on a dedicated server".into())
         };
-        let (stream, live) = match opened {
-            Ok(v) => (Some(v), true),
-            Err(e) => {
-                if output {
-                    log::warn!("Horizon: no sound: {e}");
-                }
-                (None, false)
-            }
-        };
+        if let Err(e) = &opened
+            && output
+        {
+            log::warn!("Horizon: no sound: {e}");
+        }
+        // `ok()`, not a match on `Ok(v)`: without the `audio` feature `Stream` is
+        // uninhabited, and building `Some(v)` would be an unreachable call.
+        let stream = opened.ok();
+        let live = stream.is_some();
         let mut engine = SoundEngine::new(registry);
         engine.loaded = live;
         Self {

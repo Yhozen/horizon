@@ -2,17 +2,20 @@
 //! passes read one side and write the other), the depth buffer and its
 //! copies (`depthtex1`, `depthtex2`), and the shadow map's textures.
 
-use horizon_glsl_pack::plan::{BufferFormat, ShadowSpec};
+use horizon_glsl_pack::plan::{BufferFormat, ShadowSpec, StorageFormat};
 
 use super::mips;
 
 use horizon_glsl_pack::schedule::Side;
 
 /// The wgpu format a pack format is stored in. 16-bit normalized formats are
-/// not render targets without adapter-specific features, so they are stored
-/// as half floats; the programs clamp what they write (`horizon_glsl_pack`'s
-/// host). colortex0 in an 8-bit format takes the world's format, so Horizon's
-/// own pipelines can draw into it for slots the pack has no program for.
+/// not render targets without adapter-specific features (WebGPU never has
+/// them), so they are stored as 32-bit floats where those filter and blend,
+/// else as half floats; the programs clamp what they write (`horizon_glsl_pack`'s
+/// host). Half floats hold `k / 65535` exactly only for small `k`: packs that
+/// pack two bytes into one 16-bit channel need the 32-bit floats. colortex0 in
+/// an 8-bit format takes the world's format, so Horizon's own pipelines can
+/// draw into it for slots the pack has no program for.
 pub(super) fn wgpu_format(
     format: BufferFormat,
     world: Option<wgpu::TextureFormat>,
@@ -21,10 +24,24 @@ pub(super) fn wgpu_format(
     use wgpu::TextureFormat as T;
     let float32 =
         features.contains(wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE);
+    // wgpu only guarantees 16-bit normalized formats as storage: rendering and
+    // blending into them come with the adapter's own format features.
+    let norm16 = features.contains(
+        wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
+            | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+    );
     match format {
         BufferFormat::R8 => T::R8Unorm,
         BufferFormat::Rg8 => T::Rg8Unorm,
         BufferFormat::Rgb8 | BufferFormat::Rgba8 => world.unwrap_or(T::Rgba8Unorm),
+        // 16-bit normalized buffers often carry bit-packed data (normals, material
+        // ids): stored exactly where the device can, else as half floats (lossy).
+        BufferFormat::R16 if norm16 => T::R16Unorm,
+        BufferFormat::Rg16 if norm16 => T::Rg16Unorm,
+        BufferFormat::Rgb16 | BufferFormat::Rgba16 if norm16 => T::Rgba16Unorm,
+        BufferFormat::R16 if float32 => T::R32Float,
+        BufferFormat::Rg16 if float32 => T::Rg32Float,
+        BufferFormat::Rgb16 | BufferFormat::Rgba16 if float32 => T::Rgba32Float,
         BufferFormat::R16 | BufferFormat::R16F => T::R16Float,
         BufferFormat::Rg16 | BufferFormat::Rg16F => T::Rg16Float,
         BufferFormat::Rgb16
@@ -42,6 +59,49 @@ pub(super) fn wgpu_format(
         }
         BufferFormat::R11G11B10F => T::Rgba16Float,
         BufferFormat::Rgb10A2 => T::Rgb10a2Unorm,
+        other => storage_format(other.storage(), float32),
+    }
+}
+
+/// The wgpu format of the crate's storage choice for every other format
+/// (snorm and packed small formats widened, integers as integer targets).
+fn storage_format(storage: StorageFormat, float32: bool) -> wgpu::TextureFormat {
+    use StorageFormat as S;
+    use wgpu::TextureFormat as T;
+    match storage {
+        S::R8Unorm => T::R8Unorm,
+        S::Rg8Unorm => T::Rg8Unorm,
+        S::Rgba8Unorm => T::Rgba8Unorm,
+        S::R16Float => T::R16Float,
+        S::Rg16Float => T::Rg16Float,
+        S::Rgba16Float => T::Rgba16Float,
+        S::R32Float if float32 => T::R32Float,
+        S::Rg32Float if float32 => T::Rg32Float,
+        S::Rgba32Float if float32 => T::Rgba32Float,
+        S::R32Float => T::R16Float,
+        S::Rg32Float => T::Rg16Float,
+        S::Rgba32Float => T::Rgba16Float,
+        S::Rg11b10Ufloat => T::Rg11b10Ufloat,
+        S::Rgb10a2Unorm => T::Rgb10a2Unorm,
+        S::Rgb10a2Uint => T::Rgb10a2Uint,
+        S::R8Sint => T::R8Sint,
+        S::Rg8Sint => T::Rg8Sint,
+        S::Rgba8Sint => T::Rgba8Sint,
+        S::R16Sint => T::R16Sint,
+        S::Rg16Sint => T::Rg16Sint,
+        S::Rgba16Sint => T::Rgba16Sint,
+        S::R32Sint => T::R32Sint,
+        S::Rg32Sint => T::Rg32Sint,
+        S::Rgba32Sint => T::Rgba32Sint,
+        S::R8Uint => T::R8Uint,
+        S::Rg8Uint => T::Rg8Uint,
+        S::Rgba8Uint => T::Rgba8Uint,
+        S::R16Uint => T::R16Uint,
+        S::Rg16Uint => T::Rg16Uint,
+        S::Rgba16Uint => T::Rgba16Uint,
+        S::R32Uint => T::R32Uint,
+        S::Rg32Uint => T::Rg32Uint,
+        S::Rgba32Uint => T::Rgba32Uint,
     }
 }
 
@@ -115,6 +175,9 @@ pub(super) struct Targets {
     pub depth: Image,
     /// Copies: `depthtex1` (no translucent terrain) and `depthtex2` (no hand).
     pub depth_copies: [Image; 2],
+    /// `depth` upright (pack targets are stored bottom row first), for
+    /// Horizon's overlays after `final` (flip.rs).
+    pub overlay_depth: Image,
 }
 
 const COLOR_USAGE: wgpu::TextureUsages = wgpu::TextureUsages::RENDER_ATTACHMENT
@@ -128,11 +191,16 @@ impl Targets {
         size: [u32; 2],
         needs: &[Need; 16],
         formats: &[wgpu::TextureFormat; 16],
+        sizes: &[horizon_glsl_pack::plan::BufferSize; 16],
         mips: &mut mips::Mips,
     ) -> Self {
+        let screen = size;
         let buffers = (0..16)
             .map(|i| {
                 let need = needs[i];
+                // `size.buffer.colortexN`: a fixed or relative size.
+                let (w, h) = sizes[i].pixels(screen[0], screen[1]);
+                let size = [w, h];
                 need.used.then(|| {
                     let levels = if need.mipmaps { mips::levels(size) } else { 1 };
                     if levels > 1 {
@@ -164,13 +232,21 @@ impl Targets {
         let copy_usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
         let depth32 = wgpu::TextureFormat::Depth32Float;
         Self {
-            size,
+            size: screen,
             buffers,
             depth: image(device, "depthtex0", size, depth32, 1, depth_usage),
             depth_copies: [
                 image(device, "depthtex1", size, depth32, 1, copy_usage),
                 image(device, "depthtex2", size, depth32, 1, copy_usage),
             ],
+            overlay_depth: image(
+                device,
+                "Shader pack overlay depth",
+                size,
+                depth32,
+                1,
+                wgpu::TextureUsages::RENDER_ATTACHMENT,
+            ),
         }
     }
 
@@ -274,5 +350,35 @@ impl ShadowTargets {
             ),
             colors,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wgpu::{Features as F, TextureFormat as T};
+
+    #[test]
+    fn sixteen_bit_unorm_buffers_keep_their_precision_where_they_can() {
+        let norm16 = F::TEXTURE_FORMAT_16BIT_NORM | F::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+        let float32 = F::FLOAT32_FILTERABLE | F::FLOAT32_BLENDABLE;
+        let rgba16 = BufferFormat::Rgba16;
+        // Native: exact unorm targets.
+        assert_eq!(wgpu_format(rgba16, None, norm16 | float32), T::Rgba16Unorm);
+        // WebGPU: 32-bit floats hold every k / 65535 (bytes packed into one channel too).
+        assert_eq!(wgpu_format(rgba16, None, float32), T::Rgba32Float);
+        assert_eq!(
+            wgpu_format(BufferFormat::Rgb16, None, float32),
+            T::Rgba32Float
+        );
+        assert_eq!(wgpu_format(BufferFormat::Rg16, None, float32), T::Rg32Float);
+        assert_eq!(wgpu_format(BufferFormat::R16, None, float32), T::R32Float);
+        // Neither: half floats.
+        assert_eq!(wgpu_format(rgba16, None, F::empty()), T::Rgba16Float);
+        // Float formats are unchanged.
+        assert_eq!(
+            wgpu_format(BufferFormat::Rgba16F, None, float32),
+            T::Rgba16Float
+        );
     }
 }

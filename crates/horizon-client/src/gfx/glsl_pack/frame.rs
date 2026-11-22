@@ -189,6 +189,7 @@ impl Renderer {
         .uniforms(frame, &pack.plan, &mut pack.history);
         self.queue
             .write_buffer(&pack.uniforms.main, 0, bytemuck::bytes_of(&uniforms.main));
+        pack.write_custom_uniforms(&self.queue, &uniforms.main);
         self.queue.write_buffer(
             &pack.uniforms.shadow,
             0,
@@ -247,6 +248,32 @@ impl Renderer {
                         color_attachments: &attachments,
                         ..Default::default()
                     });
+                    // `scale.<program>`: the pass draws into part of its targets.
+                    if let Some(scale) = pack.scales.get(&p.kind) {
+                        let size = match p.writes.first() {
+                            Some(&(b, side)) if p.kind != ProgramKind::Final => t
+                                .buffer(b)
+                                .map(|buf| buf.side(side).texture.size())
+                                .map(|e| [e.width, e.height]),
+                            _ => Some(t.size),
+                        };
+                        if let Some([w, h]) = size {
+                            let (w, h) = (w as f32, h as f32);
+                            let s = scale.scale.clamp(0.0, 1.0);
+                            let x = (scale.offset[0].clamp(0.0, 1.0) * w).min(w - 1.0);
+                            let y = (scale.offset[1].clamp(0.0, 1.0) * h).min(h - 1.0);
+                            let vw = (s * w).min(w - x).max(1.0);
+                            let vh = (s * h).min(h - y).max(1.0);
+                            // GL's offset counts from the bottom: so do the rows of pack
+                            // targets (stored bottom row first), not the upright screen.
+                            let y = if p.kind == ProgramKind::Final {
+                                (h - y - vh).max(0.0)
+                            } else {
+                                y
+                            };
+                            pass.set_viewport(x, y, vw, vh, 0.0, 1.0);
+                        }
+                    }
                     pass.set_pipeline(&program.pipeline);
                     pass.set_bind_group(0, &pack.empty_group, &[]);
                     pass.set_bind_group(1, &group, &[]);
@@ -268,6 +295,13 @@ impl Renderer {
                 }
             }
         }
+        // No `final`: colortex0 (its latest side) goes to the screen.
+        if let Some(blit) = &pack.blit
+            && let Some(b) = pack.targets().buffer(0)
+        {
+            let view = &b.side(pack.schedule.latest[0]).view;
+            blit.draw(&self.device, &self.queue, encoder, view, final_view, size);
+        }
         if let Some(debug) = &pack.debug {
             let t = pack.targets();
             let source = match debug.show {
@@ -286,6 +320,11 @@ impl Renderer {
                 debug.draw(&self.device, &self.queue, encoder, source, final_view, size);
             }
         }
+        {
+            let t = pack.targets();
+            pack.depth_flip
+                .run(&self.device, encoder, &t.depth.view, &t.overlay_depth.view);
+        }
         self.pack_overlays(&pack, encoder, frame, counts, final_view);
         self.glsl_pack = Some(pack);
     }
@@ -293,7 +332,7 @@ impl Renderer {
     fn bind_geometry(&self, pass: &mut wgpu::RenderPass<'_>, geometry: Geometry, hand: bool) {
         match geometry {
             Geometry::Terrain => {
-                pass.set_bind_group(0, &self.group, &[]);
+                pass.set_bind_group(0, &self.pack_group, &[]);
                 pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.set_vertex_buffer(1, self.instances.slice(..));
             }
@@ -453,7 +492,10 @@ impl Renderer {
         }));
         let main = &pack.uniforms.main;
         let program = |kind| pack.programs.get(&kind);
+        // The sky box only where vanilla draws a sky (the overworld): the
+        // Nether has none, the End its own textured box below.
         if !frame.title
+            && frame.skybox
             && let Some(sky) = program(ProgramKind::SkyBasic)
         {
             let group = pack.group(&self.device, sky, main, sides);
@@ -465,7 +507,9 @@ impl Renderer {
             pass.set_vertex_buffer(0, pack.sky.slice(..));
             pass.draw_indexed(0..SKY_QUADS as u32 * 6, 0, 0..1);
         }
-        if counts.celestial_vertices > 0
+        // Textured sky: the End's sky box, then the sun and moon (or the End flash).
+        let end_sky = frame.end_sky && !frame.title;
+        if (counts.celestial_vertices > 0 || end_sky)
             && let Some(sky) = program(ProgramKind::SkyTextured)
         {
             let group = pack.group(&self.device, sky, main, sides);
@@ -474,8 +518,13 @@ impl Renderer {
             pass.set_bind_group(0, &self.entity_group, &[]);
             pass.set_bind_group(1, &group, &[]);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.set_vertex_buffer(0, self.celestial_buffer.slice(..));
-            pass.draw_indexed(0..(counts.celestial_vertices / 4) * 6, 0, 0..1);
+            if end_sky {
+                self.end_sky.draw(&mut pass);
+            }
+            if counts.celestial_vertices > 0 {
+                pass.set_vertex_buffer(0, self.celestial_buffer.slice(..));
+                pass.draw_indexed(0..(counts.celestial_vertices / 4) * 6, 0, 0..1);
+            }
         }
         if let Some(terrain) = program(ProgramKind::Terrain) {
             let group = pack.group(&self.device, terrain, main, sides);
@@ -526,36 +575,8 @@ impl Renderer {
         counts: &WorldCounts,
         sides: &[Side; 16],
     ) {
-        // BoatRenderer's water patch: depth only, before translucent terrain.
-        if counts.water_mask_quads > 0 && pack.draws_horizon_pipelines() {
-            let t = pack.targets();
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Shader pack water mask"),
-                color_attachments: &[attachment(
-                    &t.buffers[0].as_ref().expect("colortex0").sides[0].target,
-                    wgpu::LoadOp::Load,
-                )],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &t.depth.view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.water_mask_pipeline);
-            self.bind_geometry(&mut pass, Geometry::Entity, false);
-            pass.draw_indexed(
-                0..counts.water_mask_quads * 6,
-                ((counts.entity_quads
-                    + counts.crumbling_quads
-                    + counts.translucent_crumbling_quads)
-                    * 4) as i32,
-                0..1,
-            );
-        }
+        // BoatRenderer's water patch (Horizon's depth-only pipeline) is not drawn: it draws
+        // upright, and pack targets are stored bottom row first.
         if counts.translucent_draws > 0
             && let Some(water) = pack.programs.get(&ProgramKind::Water)
         {

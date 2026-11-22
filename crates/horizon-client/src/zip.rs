@@ -37,6 +37,13 @@ impl Zip {
     pub fn contains(&self, name: &str) -> bool {
         self.entries.contains_key(name)
     }
+    /// The size an entry declares once read (a deflated one may not
+    /// inflate past twice this).
+    pub fn size(&self, name: &str) -> Option<u64> {
+        let &index = self.entries.get(name)?;
+        let mut archive = self.archive.clone();
+        archive.by_index_raw(index).ok().map(|e| e.size())
+    }
     pub fn read(&self, name: &str) -> io::Result<Vec<u8>> {
         let &index = self
             .entries

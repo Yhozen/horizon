@@ -25,6 +25,30 @@ pub struct BlockIds {
     /// `mc_Entity.x` of a block without an id (material [`crate::NO_MATERIAL`]):
     /// -1 for the legacy table, 0 for `block.properties`.
     pub unlisted: i32,
+    /// `block.properties` by block state: bare block name → its entries in
+    /// file order (see [`Self::state_id`]).
+    pub states: BTreeMap<String, Vec<StateRule>>,
+    /// What was read but not used, for the report: tags, other mods'
+    /// blocks, malformed entries, names listed twice.
+    pub notes: Vec<String>,
+}
+
+/// One `name:prop=v1,v2:prop2=w` entry of `block.properties`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StateRule {
+    pub id: i32,
+    /// Property → the values it matches; empty matches every state.
+    pub properties: Vec<(String, Vec<String>)>,
+}
+
+impl StateRule {
+    fn matches(&self, state: &[(&str, &str)]) -> bool {
+        self.properties.iter().all(|(p, values)| {
+            state
+                .iter()
+                .any(|(k, v)| k == p && values.iter().any(|w| w == v))
+        })
+    }
 }
 
 impl Default for BlockIds {
@@ -59,6 +83,8 @@ impl BlockIds {
             by_name: BTreeMap::new(),
             legacy: true,
             unlisted: crate::legacy_ids::UNLISTED,
+            states: BTreeMap::new(),
+            notes: Vec::new(),
         }
     }
 
@@ -80,6 +106,8 @@ impl BlockIds {
             by_name,
             legacy: false,
             unlisted,
+            states: BTreeMap::new(),
+            notes: Vec::new(),
         }
     }
 
@@ -93,6 +121,28 @@ impl BlockIds {
             self.by_name.get(name).copied()
         };
         id.unwrap_or(self.unlisted)
+    }
+
+    /// `mc_Entity.x` of a block state: `block` as in [`Self::id`], `state` its
+    /// properties (`[("axis", "y")]`). Entries that name properties
+    /// (`oak_log:axis=y`) match only those states; of the entries that match,
+    /// the one naming the most properties wins, the first in the file on a
+    /// tie. Blocks of other namespaces and unmatched states read
+    /// [`Self::unlisted`].
+    pub fn state_id(&self, block: &str, state: &[(&str, &str)]) -> i32 {
+        if self.legacy {
+            return self.id(block);
+        }
+        let name = block.strip_prefix("minecraft:").unwrap_or(block);
+        let mut best: Option<&StateRule> = None;
+        for rule in self.states.get(name).into_iter().flatten() {
+            if rule.matches(state)
+                && best.is_none_or(|b| rule.properties.len() > b.properties.len())
+            {
+                best = Some(rule);
+            }
+        }
+        best.map_or(self.unlisted, |r| r.id)
     }
 
     /// The material index of a block's geometry for the vertex tag: `fluid`
@@ -117,37 +167,356 @@ impl BlockIds {
     }
 }
 
-/// Reads `shaders/block.properties` (preprocessed: it may hold `#if` lines).
-/// No file is the legacy table ([`BlockIds::legacy`]). Block states
-/// (`name:prop=value`) map to their block's id whatever the state; the first
-/// id listing a name wins; ids that do not fit in the materials get none.
+/// Reads `shaders/block.properties`, preprocessed with `macros` (the
+/// predefined macros and the options': the file may hold `#if` and
+/// `#define`). No file is the legacy table ([`BlockIds::legacy`]). Every
+/// entry goes into [`BlockIds::states`]; for the material path
+/// ([`BlockIds::id`]) a state maps to its block's id whatever the state, the
+/// first id listing a name wins, and ids that do not fit in the materials get
+/// none.
 pub fn block_ids(
     files: &PackFiles,
-    predefined: &BTreeMap<String, String>,
+    macros: &BTreeMap<String, String>,
 ) -> Result<BlockIds, PackError> {
     const PATH: &str = "shaders/block.properties";
     let Some(text) = files.text(PATH) else {
         return Ok(BlockIds::legacy());
     };
-    let text = preprocess::preprocess_text(&text, PATH, files, predefined, &[])?;
+    let text = preprocess_properties(&text, PATH, files, macros)?;
     let mut by_name = BTreeMap::new();
+    let mut states: BTreeMap<String, Vec<StateRule>> = BTreeMap::new();
+    let mut notes = Vec::new();
+    let mut skipped = Skipped::default();
     for (key, value) in parse_properties(&text) {
-        let Some(id) = key
-            .strip_prefix("block.")
-            .and_then(|id| id.parse::<i32>().ok())
-        else {
+        let Some(id) = key.strip_prefix("block.") else {
+            continue;
+        };
+        let Ok(id) = id.parse::<i32>() else {
+            notes.push(format!("block.properties: {key} is not a number"));
             continue;
         };
         for token in value.split_whitespace() {
-            let token = token.strip_prefix("minecraft:").unwrap_or(token);
-            let name: Vec<_> = token
+            let stripped = token.strip_prefix("minecraft:").unwrap_or(token);
+            let name: Vec<_> = stripped
                 .split(':')
                 .filter(|part| !part.contains('='))
                 .collect();
             by_name.entry(name.join(":")).or_insert(id);
+            match parse_block_token(token) {
+                Ok((name, properties)) => {
+                    let rules = states.entry(name.to_string()).or_default();
+                    if rules
+                        .iter()
+                        .any(|r| r.properties == properties && r.id != id)
+                    {
+                        notes.push(format!(
+                            "block.properties: {token} is listed again under block.{id}"
+                        ));
+                    }
+                    rules.push(StateRule { id, properties });
+                }
+                Err(skip) => skipped.add("block.properties", token, skip, &mut notes),
+            }
         }
     }
-    Ok(BlockIds::from_names(by_name, 0))
+    skipped.finish("block.properties", &mut notes);
+    let mut ids = BlockIds::from_names(by_name, 0);
+    ids.states = states;
+    ids.notes = notes;
+    Ok(ids)
+}
+
+/// An id `.properties` file through the preprocessor as the packs expect:
+/// conditionals act on physical lines (a `\` before `#else` does not pull the
+/// directive into the entry), then continuations are joined and the live
+/// `#define`s expanded (packs list block groups as macros).
+pub fn preprocess_properties(
+    text: &str,
+    file: &str,
+    files: &PackFiles,
+    macros: &BTreeMap<String, String>,
+) -> Result<String, PackError> {
+    let lines: Vec<&str> = text.lines().collect();
+    let directive = |l: &str| l.trim_start().starts_with('#') && !is_comment(l);
+    // Pass 1: which lines survive the conditionals. Each content line, and
+    // each `#define`/`#undef` (kept, so later `#if`s see it), is followed or
+    // replaced by a marker the preprocessor keeps when the line is live.
+    let mut marked = String::new();
+    for (i, l) in lines.iter().enumerate() {
+        if directive(l) {
+            let d = l.trim_start()[1..].trim_start();
+            marked.push_str(l);
+            marked.push('\n');
+            if d.starts_with("define") || d.starts_with("undef") {
+                marked.push_str(&format!("hz_line_{i}\n"));
+            }
+        } else if !l.trim().is_empty() && !is_comment(l) {
+            marked.push_str(&format!("hz_line_{i}\n"));
+        }
+    }
+    let kept = preprocess::preprocess_text(&marked, file, files, macros, &[])?;
+    let live: Vec<usize> = kept
+        .split_whitespace()
+        .filter_map(|m| m.strip_prefix("hz_line_")?.parse().ok())
+        .collect();
+    // Pass 2: the live lines, continuations joined, macros expanded.
+    let mut joined = String::new();
+    let mut open = false;
+    for &i in &live {
+        let l = lines[i];
+        if directive(l) {
+            if open {
+                joined.push('\n');
+            }
+            open = false;
+            joined.push_str(l);
+            joined.push('\n');
+            continue;
+        }
+        let body = if open { l.trim_start() } else { l };
+        match body.trim_end().strip_suffix('\\') {
+            Some(rest) => {
+                joined.push_str(rest);
+                joined.push(' ');
+                open = true;
+            }
+            None => {
+                joined.push_str(body);
+                joined.push('\n');
+                open = false;
+            }
+        }
+    }
+    preprocess::preprocess_text(&joined, file, files, macros, &[])
+}
+
+/// A `#` line that is a properties comment, not a directive (`# text`,
+/// `#block.5=`): anything whose first word is not a preprocessor keyword.
+fn is_comment(line: &str) -> bool {
+    let Some(rest) = line.trim_start().strip_prefix('#') else {
+        return false;
+    };
+    let word = rest.trim_start();
+    let end = word
+        .find(|c: char| !c.is_ascii_alphabetic())
+        .unwrap_or(word.len());
+    !matches!(
+        &word[..end],
+        "if" | "ifdef"
+            | "ifndef"
+            | "elif"
+            | "else"
+            | "endif"
+            | "define"
+            | "undef"
+            | "include"
+            | "error"
+            | "warning"
+            | "pragma"
+            | "line"
+    )
+}
+
+/// Why an entry of an id file is not used.
+enum Skip<'a> {
+    Tag,
+    Namespace(&'a str),
+    Bad(&'static str),
+}
+
+/// Entries not used, summarised for the report: tags and other namespaces
+/// are counted (packs list hundreds of mod blocks), malformed entries listed.
+#[derive(Default)]
+struct Skipped {
+    tags: usize,
+    namespaces: BTreeMap<String, usize>,
+}
+
+impl Skipped {
+    fn add(&mut self, file: &str, token: &str, skip: Skip, notes: &mut Vec<String>) {
+        match skip {
+            Skip::Tag => self.tags += 1,
+            Skip::Namespace(ns) => *self.namespaces.entry(ns.to_string()).or_default() += 1,
+            Skip::Bad(why) => notes.push(format!("{file}: {token}: {why}")),
+        }
+    }
+
+    fn finish(self, file: &str, notes: &mut Vec<String>) {
+        if self.tags > 0 {
+            notes.push(format!("{file}: {} tags ignored", self.tags));
+        }
+        if !self.namespaces.is_empty() {
+            let total: usize = self.namespaces.values().sum();
+            let names: Vec<&str> = self.namespaces.keys().map(String::as_str).collect();
+            notes.push(format!(
+                "{file}: {total} entries of other namespaces ignored ({})",
+                names.join(", ")
+            ));
+        }
+    }
+}
+
+/// `[minecraft:]name[:prop=v1,v2]…` → the bare name and its property
+/// filters. Tags (`#…`, `%…`) and other namespaces are refused.
+fn parse_block_token(token: &str) -> Result<(&str, Vec<(String, Vec<String>)>), Skip<'_>> {
+    if token.starts_with(['#', '%']) {
+        return Err(Skip::Tag);
+    }
+    let mut parts = token.split(':').peekable();
+    let first = parts.next().unwrap_or("");
+    let name = match parts.peek() {
+        Some(second) if !second.contains('=') => {
+            let second = parts.next().unwrap_or("");
+            if first != "minecraft" {
+                return Err(Skip::Namespace(first));
+            }
+            second
+        }
+        _ => first,
+    };
+    if name.is_empty() || name.contains('=') {
+        return Err(Skip::Bad("no block name"));
+    }
+    let mut properties = Vec::new();
+    for part in parts {
+        let Some((p, values)) = part.split_once('=') else {
+            return Err(Skip::Bad("a property without a value"));
+        };
+        let values: Vec<String> = values
+            .split(',')
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+            .collect();
+        if p.is_empty() || values.is_empty() {
+            return Err(Skip::Bad("an empty property"));
+        }
+        properties.push((p.to_string(), values));
+    }
+    Ok((name, properties))
+}
+
+/// `entity.properties` or `item.properties`: names → `entityId` /
+/// `currentRenderedItemId` ids.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IdMap {
+    /// Bare name (`zombie`) → id; the first id listing a name wins.
+    pub by_name: BTreeMap<String, i32>,
+    /// The id of a name the file does not list, or of every name when the
+    /// pack has no file.
+    pub unlisted: i32,
+    /// Entries not used (tags, other namespaces, names listed twice).
+    pub notes: Vec<String>,
+}
+
+impl Default for IdMap {
+    /// No file: every id reads -1 (observed; format notes §9).
+    fn default() -> Self {
+        Self {
+            by_name: BTreeMap::new(),
+            unlisted: -1,
+            notes: Vec::new(),
+        }
+    }
+}
+
+impl IdMap {
+    /// The id of `name` (`zombie` or `minecraft:zombie`).
+    pub fn id(&self, name: &str) -> i32 {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        self.by_name.get(name).copied().unwrap_or(self.unlisted)
+    }
+}
+
+/// The documented id of an entity a present `entity.properties` does not
+/// list.
+pub const UNLISTED_ENTITY: i32 = 65535;
+/// The documented id of an item a present `item.properties` does not list.
+pub const UNLISTED_ITEM: i32 = -1;
+
+/// Reads `shaders/<file>` (`entity.properties` with keys `entity.<id>`, or
+/// `item.properties` with `item.<id>`), preprocessed with `macros`. No
+/// file: [`IdMap::default`]; with one, unlisted names read `unlisted`.
+pub fn id_map(
+    files: &PackFiles,
+    macros: &BTreeMap<String, String>,
+    kind: &str,
+    unlisted: i32,
+) -> Result<IdMap, PackError> {
+    let path = format!("shaders/{kind}.properties");
+    let Some(text) = files.text(&path) else {
+        return Ok(IdMap::default());
+    };
+    let text = preprocess_properties(&text, &path, files, macros)?;
+    let mut map = IdMap {
+        unlisted,
+        ..IdMap::default()
+    };
+    let prefix = format!("{kind}.");
+    let file = format!("{kind}.properties");
+    let mut skipped = Skipped::default();
+    for (key, value) in parse_properties(&text) {
+        let Some(id) = key.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Ok(id) = id.parse::<i32>() else {
+            map.notes
+                .push(format!("{kind}.properties: {key} is not a number"));
+            continue;
+        };
+        for token in value.split_whitespace() {
+            let name = match parse_block_token(token) {
+                Ok((name, props)) if props.is_empty() => name,
+                Ok(_) => {
+                    map.notes
+                        .push(format!("{kind}.properties: {token}: properties"));
+                    continue;
+                }
+                Err(skip) => {
+                    skipped.add(&file, token, skip, &mut map.notes);
+                    continue;
+                }
+            };
+            if let Some(&first) = map.by_name.get(name) {
+                if first == id {
+                    continue;
+                }
+                map.notes.push(format!(
+                    "{kind}.properties: {token} is listed again under {key}"
+                ));
+                continue;
+            }
+            map.by_name.insert(name.to_string(), id);
+        }
+    }
+    skipped.finish(&file, &mut map.notes);
+    Ok(map)
+}
+
+/// The macros `block.properties`, `entity.properties` and `item.properties`
+/// are read with: the predefined ones and the options' at the values
+/// `options` sets.
+pub fn option_macros(files: &PackFiles, options: &crate::PackOptions) -> BTreeMap<String, String> {
+    let mut macros = preprocess::predefined(options.mc_version);
+    let files = crate::options::apply(files, &options.overrides);
+    macros.extend(crate::options::macros(&crate::options::discover(&files)));
+    macros
+}
+
+/// `entity.properties` at `options`' values (see [`id_map`]); a file that
+/// fails to preprocess reads as none.
+pub fn entity_ids(files: &PackFiles, options: &crate::PackOptions) -> IdMap {
+    id_map(
+        files,
+        &option_macros(files, options),
+        "entity",
+        UNLISTED_ENTITY,
+    )
+    .unwrap_or_default()
+}
+
+/// `item.properties` at `options`' values (see [`id_map`]).
+pub fn item_ids(files: &PackFiles, options: &crate::PackOptions) -> IdMap {
+    id_map(files, &option_macros(files, options), "item", UNLISTED_ITEM).unwrap_or_default()
 }
 
 /// `key=value` lines (`\` continuations joined, `#` comments skipped).
@@ -328,6 +697,127 @@ mod tests {
         assert_eq!(
             block_ids(&PackFiles::default(), &BTreeMap::new()).unwrap(),
             BlockIds::legacy()
+        );
+    }
+
+    #[test]
+    fn block_states_most_specific_first_on_ties() {
+        let text = "block.1=oak_log\nblock.2=minecraft:oak_log:axis=y\n\
+                    block.3=oak_log:axis=x,z:stripped=true oak_log:axis=x\n\
+                    block.4=oak_log:axis=y\nblock.5=#minecraft:logs %leaves mod:log other:thing:a=b\n\
+                    block.6=:axis=y stone:axis=\nblock.70000=far_block\nblock.-2=neg\n";
+        let files = pack(&[("shaders/block.properties", text)]);
+        let ids = block_ids(&files, &BTreeMap::new()).unwrap();
+        let s = |b: &str, st: &[(&str, &str)]| ids.state_id(b, st);
+        assert_eq!(s("oak_log", &[("axis", "y")]), 2);
+        assert_eq!(s("minecraft:oak_log", &[("axis", "z")]), 1);
+        assert_eq!(s("oak_log", &[("axis", "x")]), 3);
+        assert_eq!(s("oak_log", &[("axis", "z"), ("stripped", "true")]), 3);
+        // No state: only the bare entry matches.
+        assert_eq!(s("oak_log", &[]), 1);
+        assert_eq!(s("far_block", &[]), 70000);
+        assert_eq!(s("neg", &[]), -2);
+        assert_eq!([s("mod:log", &[]), s("stone", &[]), s("air", &[])], [0; 3]);
+        let notes = ids.notes.join("\n");
+        for needle in [
+            "oak_log:axis=y is listed again",
+            "2 tags ignored",
+            "2 entries of other namespaces ignored (mod, other)",
+            ":axis=y: no block name",
+            "stone:axis=: an empty property",
+        ] {
+            assert!(notes.contains(needle), "{needle} in {notes}");
+        }
+        // The material path still reads the first id of a name.
+        assert_eq!(ids.id("oak_log"), 1);
+        // The legacy table reads the same through state_id.
+        assert_eq!(
+            BlockIds::legacy().state_id("oak_leaves", &[("distance", "1")]),
+            18
+        );
+    }
+
+    #[test]
+    fn block_properties_see_options() {
+        let text = "#ifdef FANCY_LEAVES\nblock.10=oak_leaves\n#else\nblock.11=oak_leaves\n#endif\n\
+                    #define PLANTS short_grass fern\nblock.12=PLANTS\n";
+        let files = pack(&[
+            ("shaders/block.properties", text),
+            (
+                "shaders/lib/settings.glsl",
+                "//#define FANCY_LEAVES\n#ifdef FANCY_LEAVES\n#endif\n",
+            ),
+        ]);
+        let ids = |overrides: Vec<(String, Option<String>)>| {
+            let options = crate::PackOptions {
+                overrides,
+                ..crate::PackOptions::default()
+            };
+            block_ids(&files, &option_macros(&files, &options)).unwrap()
+        };
+        let off = ids(Vec::new());
+        assert_eq!(off.state_id("oak_leaves", &[]), 11);
+        assert_eq!(off.state_id("fern", &[]), 12);
+        let on = ids(vec![("FANCY_LEAVES".into(), Some("true".into()))]);
+        assert_eq!(on.state_id("oak_leaves", &[]), 10);
+    }
+
+    #[test]
+    fn conditionals_act_on_physical_lines() {
+        // The line before `#else` ends with a continuation, as packs write.
+        let text = "# Plants\n#block.99=commented\n#ifdef OFF\nblock.1=a \\\n b \\\n#else\n\
+                    block.2=c \\\n  d:age=1,2\n#endif\nblock.3=e\n";
+        let files = pack(&[("shaders/block.properties", text)]);
+        let ids = block_ids(&files, &BTreeMap::new()).unwrap();
+        let s = |b: &str, st: &[(&str, &str)]| ids.state_id(b, st);
+        assert_eq!(
+            [
+                s("a", &[]),
+                s("b", &[]),
+                s("c", &[]),
+                s("d", &[("age", "2")]),
+                s("e", &[])
+            ],
+            [0, 0, 2, 2, 3]
+        );
+        assert_eq!(s("commented", &[]), 0);
+        assert!(ids.notes.is_empty(), "{:?}", ids.notes);
+    }
+
+    #[test]
+    fn entity_and_item_ids() {
+        let entities = "entity.10=minecraft:zombie pig\nentity.11=zombie #minecraft:skeletons mod:x \\\n  cow\n\
+                        #if MC_VERSION > 1\nentity.12=sheep\n#endif\n";
+        let files = pack(&[
+            ("shaders/entity.properties", entities),
+            (
+                "shaders/item.properties",
+                "item.5=diamond_sword minecraft:bow\n",
+            ),
+        ]);
+        let options = crate::PackOptions::default();
+        let e = entity_ids(&files, &options);
+        assert_eq!(
+            [
+                e.id("zombie"),
+                e.id("minecraft:pig"),
+                e.id("cow"),
+                e.id("sheep")
+            ],
+            [10, 10, 11, 12]
+        );
+        assert_eq!(e.id("creeper"), UNLISTED_ENTITY);
+        assert_eq!(e.notes.len(), 3, "{:?}", e.notes);
+        assert!(e.notes[2].contains("1 entries of other namespaces ignored (mod)"));
+        let i = item_ids(&files, &options);
+        assert_eq!([i.id("bow"), i.id("stick")], [5, UNLISTED_ITEM]);
+        let none = entity_ids(&PackFiles::default(), &options);
+        assert_eq!(
+            (
+                none.id("zombie"),
+                item_ids(&PackFiles::default(), &options).id("bow")
+            ),
+            (-1, -1)
         );
     }
 

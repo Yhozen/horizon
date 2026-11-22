@@ -450,12 +450,26 @@ impl GenerationScan {
         }
     }
 }
+#[derive(Clone)]
 pub struct WorkerContext {
     pub assets: Arc<crate::assets::Assets>,
     pub render: Arc<crate::assets::RenderAssets>,
     pub tables: Arc<MeshTables>,
     pub biomes: Arc<crate::biome::Biomes>,
     pub light: Arc<LightTables>,
+    /// The shader pack meshes are made for (its block ids and the
+    /// `PackVertex` stream); `None` while Horizon's shaders draw. A job reads
+    /// the context once, so each mesh is made for one pack or none.
+    pub pack: Option<Arc<crate::mesher::PackTags>>,
+}
+impl WorkerContext {
+    /// This context meshing for `pack` instead.
+    pub fn with_pack(&self, pack: Option<Arc<crate::mesher::PackTags>>) -> Arc<Self> {
+        Arc::new(Self {
+            pack,
+            ..self.clone()
+        })
+    }
 }
 /// One streaming worker: its generator state and face cache, and the job
 /// runner the worker threads (or, in the browser build, the frame) call.
@@ -514,6 +528,7 @@ fn job_runner<G: ChunkGenerator>(
                 tables: &context.tables,
                 biomes: &context.biomes,
                 visibility,
+                pack: context.pack.as_deref(),
             };
             let mesh = mesher.mesh(&borrow(&region), sy);
             faces = Some((context.tables.clone(), mesher.visibility));
@@ -654,6 +669,30 @@ impl Streaming {
                 }
             }
         }
+    }
+    /// The context mesh jobs run with.
+    pub fn context(&self) -> Arc<WorkerContext> {
+        self.shared.context.read().unwrap().clone()
+    }
+    /// Meshes for shader pack `pack` from now on (`None`: for Horizon's
+    /// shaders): like `reload_resources`, meshes in flight are dropped and
+    /// every loaded section remeshes. Nothing happens, and false is returned,
+    /// when the tags equal the current ones. The caller then drops what the
+    /// old meshes left behind: `Game::clear_lod` (distant tiles are meshed
+    /// with the context the `Lod` was made with: make the next one with
+    /// [`Self::context`]), its pending uploads, and the renderer's sections
+    /// with `Renderer::set_pack_vertex_stream(pack.is_some())`.
+    pub fn set_pack_tags(
+        &mut self,
+        world: &mut World,
+        pack: Option<Arc<crate::mesher::PackTags>>,
+    ) -> bool {
+        let context = self.context();
+        if context.pack.as_deref() == pack.as_deref() {
+            return false;
+        }
+        self.reload_resources(world, context.with_pack(pack));
+        true
     }
     /// A column received from a server, with the light it sent
     /// (`ClientPacketListener.handleLevelChunkWithLight`): nothing is

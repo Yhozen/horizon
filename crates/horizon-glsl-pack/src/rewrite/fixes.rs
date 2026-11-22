@@ -10,6 +10,10 @@
 //!   functions, other non-constant globals): naga rejects them when `const`
 //!   and silently drops the initializer otherwise. Both lose the initializer
 //!   (and `const`) and get assigned, in source order, at the start of `main`.
+//!   So do initializers with `?:` or built-ins naga cannot evaluate as
+//!   constants (`mix`, `smoothstep`…).
+//! - `discard;` with statements after it in the same block: wrapped in an
+//!   `if (true)` so naga keeps those statements.
 
 use std::collections::BTreeSet;
 
@@ -18,11 +22,26 @@ use super::lex::{Kind, Tok, is_type, top_level_items};
 use super::scope::BUILTIN_FUNCTIONS;
 use super::{NEW_BUILTINS, QUALIFIERS, listed};
 
+/// Built-in functions naga's constant evaluator does not implement (naga 30).
+const NOT_CONSTANT: &str = "mix smoothstep exp2 log2 determinant transpose inverse outerProduct \
+    reflect refract faceforward ldexp frexp modf";
+
 /// Return types worth coercing to: the built-in scalars, vectors and matrices.
 fn is_value_type(ty: &str) -> bool {
-    let base = ty.trim_start_matches(['i', 'u', 'b', 'd']);
+    let base = ty.strip_prefix(['i', 'u', 'b', 'd']).unwrap_or(ty);
+    let dims = |d: &str| {
+        let b = d.as_bytes();
+        let ok = |c: u8| (b'2'..=b'4').contains(&c);
+        matches!(b, [c] if ok(*c)) || matches!(b, [c, b'x', r] if ok(*c) && ok(*r))
+    };
     matches!(ty, "float" | "int" | "uint" | "bool" | "double")
-        || (["vec", "mat"].iter().any(|p| base.starts_with(p)))
+        || base
+            .strip_prefix("vec")
+            .is_some_and(|d| d.len() == 1 && dims(d))
+        || ty
+            .strip_prefix("mat")
+            .or_else(|| ty.strip_prefix("dmat"))
+            .is_some_and(dims)
 }
 
 fn is_ident(w: &str) -> bool {
@@ -55,6 +74,9 @@ pub(super) fn apply(toks: &[Tok]) -> Result<String, String> {
         };
         texts.push(text);
     }
+    if texts.iter().any(|t| t.contains(ZERO)) {
+        texts.insert(0, format!("float {ZERO};\n"));
+    }
     if !prologue.is_empty() {
         let main = kinds
             .iter()
@@ -67,7 +89,59 @@ pub(super) fn apply(toks: &[Tok]) -> Result<String, String> {
     Ok(texts.concat())
 }
 
-/// One function definition: `const` stripped, returns coerced.
+/// Whether the declaration in `toks` (up to its `;`) is initialised from
+/// numbers and operators only (`const int n = 6;`, `const float k = 1.0 / 3.0;`).
+fn literal_initializer(toks: &[Tok]) -> bool {
+    let decl: Vec<&Tok> = toks
+        .iter()
+        .take_while(|t| t.text != ";")
+        .filter(|t| t.kind != Kind::Space)
+        .collect();
+    let Some(eq) = decl.iter().position(|t| t.text == "=") else {
+        return false;
+    };
+    // Exactly `TYPE NAME = …` (a parameter's `const in float x` is not one).
+    eq == 2
+        && decl[..eq].iter().all(|t| t.kind == Kind::Ident)
+        && !decl[eq + 1..].is_empty()
+        && decl[eq + 1..]
+            .iter()
+            .all(|t| matches!(t.kind, Kind::Number | Kind::Punct) && t.text != "," && t.text != "?")
+}
+
+/// `(name, value)` of an integer declaration initialised from numbers and
+/// operators only (`int n = 6;` after its `const`).
+fn literal_constant<'a>(toks: &[Tok<'a>]) -> Option<(&'a str, String)> {
+    if !literal_initializer(toks) {
+        return None;
+    }
+    let decl: Vec<&Tok<'a>> = toks
+        .iter()
+        .take_while(|t| t.text != ";")
+        .filter(|t| t.kind != Kind::Space)
+        .collect();
+    let eq = decl.iter().position(|t| t.text == "=")?;
+    if eq != 2 || !matches!(decl[0].text, "int" | "uint") {
+        return None;
+    }
+    let value: Vec<&str> = decl[eq + 1..].iter().map(|t| t.text).collect();
+    Some((decl[1].text, value.join(" ")))
+}
+
+/// A float zero that naga cannot fold (a private global, zero-initialised).
+const ZERO: &str = "hz_zero";
+
+fn is_float_zero(literal: &str) -> bool {
+    let digits = literal.trim_end_matches(['f', 'F']);
+    digits.contains('.') && digits.chars().all(|c| c == '0' || c == '.')
+}
+
+/// What `discard;` becomes: naga's GLSL front end drops the statements after
+/// a bare `discard` but keeps their expressions, which then fail validation
+/// ("Expression not visited"); behind an `if` the rest of the block stays.
+const DISCARD: &str = "{ if (true) discard; }";
+
+/// One function definition: `const` stripped, returns coerced, `discard` guarded.
 fn function(toks: &[Tok]) -> String {
     let sig: Vec<usize> = (0..toks.len())
         .filter(|&i| toks[i].kind != Kind::Space)
@@ -82,13 +156,58 @@ fn function(toks: &[Tok]) -> String {
     let mut returns: Vec<i32> = Vec::new();
     let mut parens = 0i32;
     let mut skip_space = false;
-    for t in toks {
+    let mut after_discard = false;
+    let mut last = "";
+    // Literal local constants (name → value), written out where they size an
+    // array: naga only takes global constants there.
+    let mut sizes: Vec<(&str, String)> = Vec::new();
+    let mut brackets = 0i32;
+    for (at, t) in toks.iter().enumerate() {
+        match t.text {
+            "[" => brackets += 1,
+            "]" => brackets -= 1,
+            _ => {}
+        }
+        if brackets > 0
+            && t.kind == Kind::Ident
+            && let Some((_, value)) = sizes.iter().rev().find(|(n, _)| *n == t.text)
+        {
+            out.push_str(&format!("({value})"));
+            last = t.text;
+            continue;
+        }
+        if t.text == "const"
+            && let Some(constant) = literal_constant(&toks[at + 1..])
+        {
+            sizes.push(constant);
+        }
+        if t.kind != Kind::Space {
+            let prev = std::mem::replace(&mut last, t.text);
+            // `x / 0.0`: naga folds it to an infinity and refuses it; GL gives the infinity at run time.
+            if prev == "/" && t.kind == Kind::Number && is_float_zero(t.text) {
+                out.push_str(ZERO);
+                continue;
+            }
+        }
         if skip_space && t.kind == Kind::Space {
             skip_space = false;
             continue;
         }
         skip_space = false;
+        if after_discard && t.kind != Kind::Space {
+            after_discard = false;
+            if t.text == ";" {
+                continue;
+            }
+        }
         match t.text {
+            "discard" => {
+                out.push_str(DISCARD);
+                after_discard = true;
+                continue;
+            }
+            // Kept on a local whose value is a literal expression: it may size an array.
+            "const" if literal_initializer(&toks[at + 1..]) => {}
             "const" => {
                 skip_space = true;
                 continue;
@@ -160,16 +279,20 @@ fn global<'a>(
         }
     }
     decls.push(&body[start..]);
+    // naga's constant evaluator has no `?:` and lacks some built-ins: such
+    // initializers run in `main` too.
     let runtime = |init: &[&str], constants: &BTreeSet<&str>| {
-        init.iter().enumerate().any(|(k, w)| {
-            is_ident(w)
-                && !(k > 0 && init[k - 1] == ".")
-                && !is_type(w, structs)
-                && !matches!(*w, "true" | "false")
-                && !listed(BUILTIN_FUNCTIONS, w)
-                && !listed(NEW_BUILTINS, w)
-                && !constants.contains(w)
-        })
+        init.contains(&"?")
+            || init.iter().any(|w| listed(NOT_CONSTANT, w))
+            || init.iter().enumerate().any(|(k, w)| {
+                is_ident(w)
+                    && !(k > 0 && init[k - 1] == ".")
+                    && !is_type(w, structs)
+                    && !matches!(*w, "true" | "false")
+                    && !listed(BUILTIN_FUNCTIONS, w)
+                    && !listed(NEW_BUILTINS, w)
+                    && !constants.contains(w)
+            })
     };
     let mut moved = false;
     let mut kept = Vec::new();
@@ -218,4 +341,260 @@ fn global<'a>(
     text.push_str(&kept.join(", "));
     text.push(';');
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::lex::tokenize;
+    use super::apply;
+
+    #[test]
+    fn moved_initializers_keep_their_operators() {
+        let src = "uniform float u; uniform int k;\n\
+                   float g = (u < 0.5 || u >= 2.0) && u != 1.0 ? 1.0 : 0.0;\n\
+                   int h = (k >> 2) << 1; bool e = k == 3 && k <= 4;\n\
+                   void main() { }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        for op in ["||", ">=", "&&", "!=", ">>", "<<", "==", "<="] {
+            assert!(out.contains(&format!(" {op} ")), "{op} in {out}");
+        }
+        assert!(out.contains("void main() { g = "), "{out}");
+    }
+
+    #[test]
+    fn struct_returns_are_not_coerced() {
+        let src = "struct materialLAB { float r; };\nmaterialLAB f() { materialLAB m; return m; }\n\
+                   mat2x3 g() { return mat2x3(1.0); }\nvec3 h() { return 1.0; }\nvoid main() { }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        assert!(out.contains("return m;"), "{out}");
+        assert!(out.contains("return mat2x3( mat2x3(1.0));"), "{out}");
+        assert!(out.contains("return vec3( 1.0);"), "{out}");
+    }
+
+    #[test]
+    fn literal_local_constants_stay_constant() {
+        let src = "float g(const in float x) { float y = 1.0; return x + y; }\nfloat f(float x) { const int n = 6; const float k = 1.0 / 3.0; const float y = x * 2.0; \
+                   float a[n]; return k + y + a[0]; }\nvoid main() { }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        assert!(
+            out.contains("const int n = 6; const float k = 1.0 / 3.0; float y = x * 2.0;"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn division_by_literal_zero_is_left_to_run_time() {
+        let src = "void main() { gl_Position = vec4(-1.0 / 0.0, 1.0 / 0., 2.0 / 0.5, 1.0); }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        assert!(out.starts_with("float hz_zero;\n"), "{out}");
+        assert!(
+            out.contains("-1.0 / hz_zero, 1.0 / hz_zero, 2.0 / 0.5"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn code_after_discard_is_kept() {
+        let src = "uniform sampler2D tex; varying vec2 uv; uniform float a;\n\
+                   void main() { if (a > 0.5) discard; else a; discard; gl_FragColor = texture2D(tex, uv); }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        assert!(
+            out.contains("if (a > 0.5) { if (true) discard; } else"),
+            "{out}"
+        );
+        let rw = crate::rewrite::rewrite(src, crate::Stage::Fragment).unwrap();
+        assert!(
+            rw.body.contains("{ if (true) discard; } hz_gl_FragData"),
+            "{}",
+            rw.body
+        );
+    }
+
+    #[test]
+    fn ternary_constants_run_in_main() {
+        let src = "const float a = 1.0 > 0.0 ? 1.2 : 0.0;\nconst float b = a * 2.0;\n\
+                   const float c = 3.0;\nvoid main() { }\n";
+        let out = apply(&tokenize(src)).unwrap();
+        assert!(
+            out.contains("void main() { a = 1.0 > 0.0 ? 1.2 : 0.0; b = a * 2.0;"),
+            "{out}"
+        );
+        assert!(out.contains("const float c = 3.0;"), "{out}");
+        assert!(!out.contains("const float a"), "{out}");
+        let src = "const vec3 m = mix(vec3(0.0), vec3(1.0), 0.5);\nvoid main() { }\n";
+        assert!(apply(&tokenize(src)).unwrap().contains("main() { m = mix"));
+    }
+}
+
+/// Gives unsized arrays initialised by a constructor their length
+/// (`vec3[] a = vec3[](x, y)` → `vec3[2] a = vec3[2](x, y)`, also
+/// `T a[] = T[N](…)`): naga types them as run-time-sized and rejects them.
+/// None when the stage has none.
+pub(super) fn size_arrays(toks: &[Tok]) -> Option<String> {
+    let s: Vec<usize> = (0..toks.len())
+        .filter(|&i| toks[i].kind != Kind::Space)
+        .collect();
+    let t = |j: usize| s.get(j).map_or("", |&i| toks[i].text);
+    // Token index of an empty `[` → the length to write in it.
+    let mut fills: Vec<(usize, String)> = Vec::new();
+    for k in 0..s.len() {
+        let ctor = k + 1;
+        if t(k) != "=" || !is_ident(t(ctor)) || t(ctor + 1) != "[" {
+            continue;
+        }
+        // The constructor's length: none, a literal, or a constant's name.
+        let (close, given) = if t(ctor + 2) == "]" {
+            (ctor + 2, None)
+        } else if t(ctor + 3) == "]" {
+            (ctor + 3, Some(t(ctor + 2).to_string()))
+        } else {
+            continue;
+        };
+        if t(close + 1) != "(" {
+            continue;
+        }
+        // The declaration: back to the previous statement's end.
+        let start = (0..k)
+            .rev()
+            .find(|&h| matches!(t(h), ";" | "{" | "}"))
+            .map_or(0, |h| h + 1);
+        let holes: Vec<usize> = (start..k)
+            .filter(|&h| t(h) == "[" && t(h + 1) == "]")
+            .collect();
+        if holes.is_empty() && given.is_some() {
+            continue;
+        }
+        // Arguments: depth-0 commas inside the constructor's parentheses.
+        let (mut depth, mut commas, mut empty) = (0i32, 0usize, true);
+        for m in close + 1..s.len() {
+            match t(m) {
+                "(" | "[" | "{" => depth += 1,
+                ")" | "]" | "}" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                "," if depth == 1 => commas += 1,
+                _ => {}
+            }
+            if m > close + 1 {
+                empty = false;
+            }
+        }
+        let len = given
+            .clone()
+            .unwrap_or_else(|| (if empty { 0 } else { commas + 1 }).to_string());
+        fills.extend(holes.into_iter().map(|h| (s[h], len.clone())));
+        if given.is_none() {
+            fills.push((s[ctor + 1], len));
+        }
+    }
+    if fills.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    for (i, tok) in toks.iter().enumerate() {
+        out.push_str(tok.text);
+        if let Some((_, len)) = fills.iter().find(|(at, _)| *at == i) {
+            out.push_str(len);
+        }
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod array_tests {
+    use super::super::lex::tokenize;
+    use super::size_arrays;
+
+    #[test]
+    fn unsized_arrays_get_their_length() {
+        let src = "const vec3[] a = vec3[](vec3(1.0), vec3(1.0, 0.3, 0.1));\n\
+                   const vec2 b[] = vec2[3](vec2(0.0), vec2(1.0), vec2(2.0));\n\
+                   float c[2] = float[](f(1.0, 2.0), 3.0);\n\
+                   void main() { int d[] = int[](1, 2, 3, 4); }\n";
+        let out = size_arrays(&tokenize(src)).unwrap();
+        assert!(out.contains("const vec3[2] a = vec3[2]("), "{out}");
+        assert!(out.contains("const vec2 b[3] = vec2[3]("), "{out}");
+        assert!(
+            out.contains("float c[2] = float[2](f(1.0, 2.0), 3.0)"),
+            "{out}"
+        );
+        assert!(out.contains("int d[4] = int[4](1, 2, 3, 4)"), "{out}");
+        assert_eq!(size_arrays(&tokenize("float x[4]; void main() {}")), None);
+        let named = "const int n = 2; void main() { vec3[] c = vec3[n](vec3(0.0), vec3(1.0)); vec3[n] d = vec3[n](c[0], c[1]); }";
+        let out = size_arrays(&tokenize(named)).unwrap();
+        assert!(out.contains("vec3[n] c = vec3[n]("), "{out}");
+        assert!(out.contains("vec3[n] d = vec3[n](c[0]"), "{out}");
+    }
+}
+
+/// `m[i].x = v` → `m[i][0] = v`: naga's GLSL front end cannot assign to a
+/// one-component swizzle of an indexed matrix column ("Can't lookup field on
+/// this type"); the index form means the same for vectors too. None when
+/// the stage has none.
+pub(super) fn index_swizzle_stores(toks: &[Tok]) -> Option<String> {
+    let s: Vec<usize> = (0..toks.len())
+        .filter(|&i| toks[i].kind != Kind::Space)
+        .collect();
+    let t = |j: usize| s.get(j).map_or("", |&i| toks[i].text);
+    let component = |w: &str| {
+        ["xyzw", "rgba", "stpq"]
+            .iter()
+            .find_map(|set| set.find(w).filter(|_| w.len() == 1))
+    };
+    let mut swaps: Vec<(usize, usize, usize)> = Vec::new();
+    for j in 1..s.len() {
+        if t(j) == "."
+            && t(j - 1) == "]"
+            && matches!(t(j + 2), "=" | "+=" | "-=" | "*=" | "/=")
+            && let Some(k) = component(t(j + 1))
+        {
+            swaps.push((s[j], s[j + 1], k));
+        }
+    }
+    if swaps.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    let mut skip = None;
+    for (i, tok) in toks.iter().enumerate() {
+        if skip == Some(i) {
+            continue;
+        }
+        if let Some(&(_, field, k)) = swaps.iter().find(|(dot, _, _)| *dot == i) {
+            out.push_str(&format!("[{k}]"));
+            skip = Some(field);
+            continue;
+        }
+        if skip.is_some_and(|f| i < f) {
+            // Spaces between the dot and the field.
+            continue;
+        }
+        out.push_str(tok.text);
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod swizzle_tests {
+    use super::super::lex::tokenize;
+    use super::index_swizzle_stores;
+
+    #[test]
+    fn one_component_stores_into_indexed_columns() {
+        let src = "void main() { mat2 m; m[1].x = 1.0; m[0].g += 2.0; float a = m[1].x; m[1].xy = vec2(0.0); }";
+        let out = index_swizzle_stores(&tokenize(src)).unwrap();
+        assert!(
+            out.contains("m[1][0] = 1.0; m[0][1] += 2.0; float a = m[1].x; m[1].xy ="),
+            "{out}"
+        );
+        let rw = crate::rewrite::rewrite(
+            "varying vec2 c;\nvoid main() { mat2 m = mat2(1.0); m[1].y = c.x; gl_FragData[0] = vec4(m[1], 0.0, 1.0); }",
+            crate::Stage::Fragment,
+        )
+        .unwrap();
+        assert!(rw.body.contains("m[1][1] = c.x"), "{}", rw.body);
+    }
 }

@@ -11,8 +11,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::plan::{BufferFormat, Clouds, CustomTexture, PackPlan, PackProperties, TextureStage};
-use crate::{PackError, PackFiles, preprocess, properties};
+use crate::plan::{BufferFormat, FragOutput, PackPlan};
 
 /// The texture index of a colour buffer name: `colortex0..15` and the
 /// legacy names `gcolor`, `gdepth`, `gnormal`, `composite`, `gaux1..4`.
@@ -93,7 +92,7 @@ pub fn consts(text: &str) -> Vec<(String, String)> {
     out
 }
 
-fn is_ident(c: char) -> bool {
+pub(crate) fn is_ident(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
 }
 
@@ -357,164 +356,105 @@ pub fn mipmaps(raw_fragment: &str, preprocessed_fragment: &str) -> BTreeSet<u8> 
     out
 }
 
-/// What `shaders/shaders.properties` says.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ShadersProperties {
-    pub properties: PackProperties,
-    pub textures: Vec<CustomTexture>,
-    /// `program.<name>.enabled=false`: pack paths (`shaders/world0/gbuffers_clouds`).
-    pub disabled: BTreeSet<String>,
-}
-
-fn property_bool(value: &str) -> Option<bool> {
-    match value.trim() {
-        "true" | "on" => Some(true),
-        "false" | "off" => Some(false),
-        _ => None,
-    }
-}
-
-/// Reads `shaders/shaders.properties`, preprocessed with `macros` (the
-/// predefined macros and the options' values: the file may hold `#if`).
-pub fn shaders_properties(
-    files: &PackFiles,
-    macros: &BTreeMap<String, String>,
-) -> Result<ShadersProperties, PackError> {
-    const PATH: &str = "shaders/shaders.properties";
-    let mut out = ShadersProperties::default();
-    let Some(text) = files.text(PATH) else {
-        return Ok(out);
-    };
-    let text = live_lines(&text, PATH, files, macros)?;
-    let p = &mut out.properties;
-    for (key, value) in properties::parse_properties(&text) {
-        let set = |to: &mut bool| {
-            if let Some(b) = property_bool(&value) {
-                *to = b;
-            }
-        };
-        match key.as_str() {
-            "clouds" => {
-                p.clouds = match value.as_str() {
-                    "off" => Clouds::Off,
-                    "fast" => Clouds::Fast,
-                    "fancy" => Clouds::Fancy,
-                    _ => Clouds::Default,
-                }
-            }
-            "oldLighting" => set(&mut p.old_lighting),
-            "underwaterOverlay" => set(&mut p.underwater_overlay),
-            "sun" => set(&mut p.sun),
-            "moon" => set(&mut p.moon),
-            "separateAo" => set(&mut p.separate_ao),
-            "oldHandLight" => set(&mut p.old_hand_light),
-            "texture.noise" => {
-                for stage in [
-                    TextureStage::Gbuffers,
-                    TextureStage::Shadow,
-                    TextureStage::Deferred,
-                    TextureStage::Composite,
-                ] {
-                    out.textures.push(texture(stage, "noisetex", &value));
-                }
-            }
-            _ => {
-                if let Some(rest) = key.strip_prefix("texture.") {
-                    let Some((stage, sampler)) = rest.split_once('.') else {
-                        continue;
-                    };
-                    let stage = match stage {
-                        "gbuffers" => TextureStage::Gbuffers,
-                        "shadow" => TextureStage::Shadow,
-                        "deferred" => TextureStage::Deferred,
-                        "composite" => TextureStage::Composite,
-                        // prepare, shadowcomp, begin …: passes Horizon does not run.
-                        _ => continue,
-                    };
-                    out.textures.push(texture(stage, sampler, &value));
-                } else if let Some(name) = key
-                    .strip_prefix("program.")
-                    .and_then(|k| k.strip_suffix(".enabled"))
-                    && !enabled(&value, macros)
-                {
-                    out.disabled.insert(format!("shaders/{name}"));
-                }
-            }
-        }
-    }
-    Ok(out)
-}
-
-/// The lines of a `.properties` text that its `#if`s keep, unexpanded (a
-/// value such as `!FANCY` must keep its option name): each logical line goes
-/// through the preprocessor as a marker identifier and comes back as itself.
-fn live_lines(
-    text: &str,
+/// The draw buffers a fragment source's live `DRAWBUFFERS` / `RENDERTARGETS`
+/// directive names: `raw` is the source with includes expanded and comments
+/// kept; a directive in a branch its `#if`s drop does not count. When the
+/// branches cannot be evaluated, the last directive of the raw text wins.
+pub fn live_draw_buffers(
+    raw: &str,
     file: &str,
-    files: &PackFiles,
+    files: &crate::PackFiles,
     macros: &BTreeMap<String, String>,
-) -> Result<String, PackError> {
-    let mut lines = Vec::new();
-    let mut raw = text.lines();
-    while let Some(line) = raw.next() {
-        let mut line = line.to_string();
-        while line.ends_with('\\') {
-            line.pop();
-            line.push_str(raw.next().unwrap_or("").trim_start());
-        }
-        lines.push(line);
+) -> Option<Vec<u8>> {
+    match crate::shaders_properties::live_lines(raw, file, files, macros, true) {
+        Ok(live) => crate::properties::draw_buffers(&live),
+        Err(_) => crate::properties::draw_buffers(raw),
     }
-    let marked: String = lines
-        .iter()
-        .enumerate()
-        .map(|(i, l)| {
-            if l.trim_start().starts_with('#') {
-                format!("{l}\n")
-            } else {
-                format!("hz_line_{i}\n")
+}
+
+/// The fragment outputs a preprocessed fragment source declares at top
+/// level (`out vec4 color;`, `layout(location = 2) out vec2 data;`), in
+/// declaration order.
+pub fn fragment_outputs(preprocessed: &str) -> Vec<FragOutput> {
+    let mut out = Vec::new();
+    for statement in preprocessed.split(';') {
+        let s = statement
+            .rsplit(['{', '}'])
+            .next()
+            .unwrap_or(statement)
+            .trim();
+        let (location, rest) = match s.strip_prefix("layout") {
+            Some(rest) => {
+                let rest = rest.trim_start();
+                let Some(inner) = rest.strip_prefix('(') else {
+                    continue;
+                };
+                let Some(close) = inner.find(')') else {
+                    continue;
+                };
+                let location = inner[..close].split(',').find_map(|q| {
+                    let (k, v) = q.split_once('=')?;
+                    (k.trim() == "location").then(|| v.trim().parse::<u32>().ok())?
+                });
+                (location, &inner[close + 1..])
             }
-        })
-        .collect();
-    let kept = preprocess::preprocess_text(&marked, file, files, macros, &[])?;
-    Ok(kept
-        .lines()
-        .filter_map(|m| m.trim().strip_prefix("hz_line_")?.parse::<usize>().ok())
-        .map(|i| format!("{}\n", lines[i]))
-        .collect())
+            None => (None, s),
+        };
+        if rest.contains(['(', '[', '=']) {
+            continue;
+        }
+        let words: Vec<&str> = rest
+            .split(|c: char| c.is_whitespace() || c == ',')
+            .filter(|w| !w.is_empty())
+            .collect();
+        let Some(at) = words.iter().position(|w| *w == "out") else {
+            continue;
+        };
+        let before_ok = words[..at].iter().all(|w| {
+            matches!(
+                *w,
+                "flat" | "smooth" | "noperspective" | "centroid" | "invariant"
+            )
+        });
+        let mut rest = words[at + 1..]
+            .iter()
+            .skip_while(|w| matches!(**w, "highp" | "mediump" | "lowp"));
+        let (Some(ty), true) = (rest.next(), before_ok) else {
+            continue;
+        };
+        for (k, name) in rest.enumerate() {
+            out.push(FragOutput {
+                index: out.len(),
+                name: name.to_string(),
+                ty: ty.to_string(),
+                // Further names of one declaration take the next locations.
+                location: location.map(|l| l + k as u32),
+            });
+        }
+    }
+    out
 }
 
-fn texture(stage: TextureStage, sampler: &str, value: &str) -> CustomTexture {
-    // Raw textures carry a type and sizes after the path; the path comes first.
-    let path = value.split_whitespace().next().unwrap_or("");
-    let path = path.trim_start_matches('/');
-    CustomTexture {
-        stage,
-        sampler: canonical_sampler(sampler),
-        path: format!("shaders/{path}"),
-    }
+/// The highest output a fragment source writes: `gl_FragData[i]` (i < 16)
+/// or a declared output's location; `None` when it writes neither.
+pub fn highest_output(preprocessed: &str) -> Option<u8> {
+    let data = (0..16u8)
+        .rev()
+        .find(|i| preprocessed.contains(&format!("gl_FragData[{i}]")));
+    let outs = fragment_outputs(preprocessed)
+        .iter()
+        .map(|o| o.slot().min(15) as u8)
+        .max();
+    data.max(outs)
 }
 
-/// `program.X.enabled` values: `true`/`false`, or an option name with an
-/// optional `!`. Anything else counts as enabled.
-fn enabled(value: &str, macros: &BTreeMap<String, String>) -> bool {
-    let v = value.trim();
-    if let Some(b) = property_bool(v) {
-        return b;
-    }
-    let (negate, name) = match v.strip_prefix('!') {
-        Some(n) => (true, n.trim()),
-        None => (false, v),
-    };
-    if !name.is_empty() && name.chars().all(is_ident) {
-        return macros.contains_key(name) != negate;
-    }
-    true
-}
+pub use crate::shaders_properties::{ShadersProperties, shaders_properties};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plan::BufferSpec;
+    use crate::PackFiles;
+    use crate::plan::{BufferSpec, Clouds, PackProperties, TextureStage};
 
     fn plan_of(sources: &[(&str, &str)]) -> PackPlan {
         let mut plan = PackPlan::default();
@@ -682,6 +622,7 @@ mod tests {
                 moon: true,
                 separate_ao: true,
                 old_hand_light: false,
+                ..PackProperties::default()
             }
         );
         let t: Vec<_> = p
@@ -689,7 +630,7 @@ mod tests {
             .iter()
             .map(|t| (t.stage, t.sampler.as_str(), t.path.as_str()))
             .collect();
-        assert_eq!(t.len(), 7);
+        assert_eq!(t.len(), 5);
         assert_eq!(
             t[0],
             (
@@ -702,9 +643,10 @@ mod tests {
             t[1],
             (TextureStage::Composite, "colortex3", "shaders/tex/b.dat")
         );
-        assert_eq!(t[2], (TextureStage::Gbuffers, "noisetex", "shaders/n.png"));
+        assert_eq!(t[2], (TextureStage::Prepare, "colortex3", "shaders/c.png"));
+        assert_eq!(t[3], (TextureStage::All, "noisetex", "shaders/n.png"));
         assert_eq!(
-            t[6],
+            t[4],
             (TextureStage::Deferred, "shadowcolor0", "shaders/f.png")
         );
         assert_eq!(
@@ -735,5 +677,64 @@ mod tests {
         assert_eq!(canonical_sampler("gaux2"), "colortex5");
         assert_eq!(canonical_sampler("gdepthtex"), "depthtex0");
         assert_eq!(canonical_sampler("noisetex"), "noisetex");
+    }
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+    use crate::PackFiles;
+
+    #[test]
+    fn declared_outputs() {
+        let text = "uniform float x; layout(location = 3) out vec4 a; out vec3 b, c;\n\
+                    layout (location=1, index = 0) out highp float d;\nvoid f(out vec4 e) { }\n\
+                    vec4 g() { out_value = 1.0; }\nflat out int h[2];";
+        let outs: Vec<(String, String, Option<u32>, usize)> = fragment_outputs(text)
+            .into_iter()
+            .map(|o| (o.name.clone(), o.ty.clone(), o.location, o.slot()))
+            .collect();
+        let want = [
+            ("a", "vec4", Some(3), 3),
+            ("b", "vec3", None, 1),
+            ("c", "vec3", None, 2),
+            ("d", "float", Some(1), 1),
+        ];
+        assert_eq!(
+            outs,
+            want.map(|(n, t, l, s)| (n.to_string(), t.to_string(), l, s))
+        );
+        assert_eq!(
+            highest_output("gl_FragData[2] = x; gl_FragData[11] = y;"),
+            Some(11)
+        );
+        assert_eq!(highest_output(text), Some(3));
+        assert_eq!(highest_output("gl_FragColor = x;"), None);
+    }
+
+    #[test]
+    fn live_directives_only() {
+        let files = PackFiles::default();
+        let macros = BTreeMap::from([("HIGH".to_string(), "1".to_string())]);
+        let text = "#if HIGH == 1 // a comment\n/* DRAWBUFFERS:12 */\n#else\n/* DRAWBUFFERS:3 */\n#endif\n\
+                    /* note:\n#if 0\n*/\nvoid main() {}\n";
+        assert_eq!(
+            live_draw_buffers(text, "x.fsh", &files, &macros),
+            Some(vec![1, 2])
+        );
+        assert_eq!(
+            live_draw_buffers(text, "x.fsh", &files, &BTreeMap::new()),
+            Some(vec![3])
+        );
+        // Unbalanced branches: the raw text's last directive.
+        assert_eq!(
+            live_draw_buffers(
+                "#if 1\n/* RENDERTARGETS: 4,15 */\n",
+                "x.fsh",
+                &files,
+                &macros
+            ),
+            Some(vec![4, 15])
+        );
     }
 }

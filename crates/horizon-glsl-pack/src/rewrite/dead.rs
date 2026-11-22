@@ -31,8 +31,18 @@ pub(super) fn classify(toks: &[Tok], range: (usize, usize)) -> Item {
     let Some(open) = sig.iter().position(|&w| w == "(") else {
         return Item::Other;
     };
-    // `type name (`: at least a return type and a name, no `=`, no interface qualifier.
-    let head = &sig[..open];
+    // `type name (`: at least a return type and a name, no `=`, no interface
+    // qualifier; an array return type's `[N]` (`vec3[9] f(`) is skipped.
+    let mut head: Vec<&str> = Vec::new();
+    let mut in_brackets = false;
+    for &w in &sig[..open] {
+        match w {
+            "[" => in_brackets = true,
+            "]" => in_brackets = false,
+            _ if in_brackets => {}
+            _ => head.push(w),
+        }
+    }
     let is_ident = |w: &str| w.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_');
     let qualified = head.iter().any(|w| {
         matches!(

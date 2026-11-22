@@ -52,18 +52,24 @@ impl ModsState {
     /// Whether a mod runs: the chat keeps its lines for them.
     pub(super) fn running(&self) -> bool {
         #[cfg(feature = "mods")]
-        if self.mods.is_running() {
-            return true;
+        {
+            self.mods.is_running()
         }
-        false
+        #[cfg(not(feature = "mods"))]
+        {
+            false
+        }
     }
     /// Whether a mod draws a HUD panel.
     pub(super) fn has_panels(&self) -> bool {
         #[cfg(feature = "mods")]
-        if self.mods.panels().next().is_some() {
-            return true;
+        {
+            self.mods.panels().next().is_some()
         }
-        false
+        #[cfg(not(feature = "mods"))]
+        {
+            false
+        }
     }
 }
 /// How often dev mods are checked for a rebuild.

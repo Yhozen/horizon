@@ -148,6 +148,9 @@ const PAGES: Ty = Ty::Enum(&[
     "extras",
     "horizon",
     "agent",
+    "shaderpacks",
+    "shaderpack-settings",
+    "shaderpack-report",
 ]);
 
 /// `--confirm`, required by destructive commands: the player agreed.

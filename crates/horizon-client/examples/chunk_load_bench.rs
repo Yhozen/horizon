@@ -78,6 +78,7 @@ fn main() -> Result<(), Error> {
         biomes: biomes.clone(),
         assets: assets.clone(),
         render,
+        pack: None,
     });
     let terrain = VanillaTerrain::new(&root.join("worldgen"), assets.registry, &biomes, seed)?;
 
@@ -144,6 +145,7 @@ fn main() -> Result<(), Error> {
             tables: &context.tables,
             biomes: &context.biomes,
             visibility: context.tables.visibility.clone(),
+            pack: None,
         };
         vertices = 0;
         let mut hash = DefaultHasher::new();

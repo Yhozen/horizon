@@ -1357,6 +1357,8 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "naga",
+ "serde_json",
+ "zip",
 ]
 
 [[package]]

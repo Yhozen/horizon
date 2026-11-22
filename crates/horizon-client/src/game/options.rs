@@ -239,6 +239,7 @@ impl Game<'_> {
                     super::packs::open_folder(&dir);
                 }
                 Event::Credits => self.open_win_screen(false, super::win::Finish::Options),
+                Event::ShaderPacks(ev) => self.shader_pack_event(ev),
             }
         }
         Ok(())
