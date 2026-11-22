@@ -17,7 +17,14 @@ use crate::shaders_properties::ShadersProperties;
 /// Iris feature flags (`iris.features.*`) Horizon has: listed ones define
 /// `IRIS_FEATURE_<flag>` for the pack's sources and properties.
 /// `BLOCK_EMISSION_ATTRIBUTE` is `at_midBlock.w` (the terrain vertex stream).
-pub const SUPPORTED_FLAGS: &[&str] = &["BLOCK_EMISSION_ATTRIBUTE"];
+/// `SEPARATE_HARDWARE_SAMPLERS` is `shadowtex0HW` / `shadowtex1HW` (host/sampling.rs).
+pub const SUPPORTED_FLAGS: &[&str] = &[
+    "BLOCK_EMISSION_ATTRIBUTE",
+    "CUSTOM_IMAGES",
+    "SEPARATE_HARDWARE_SAMPLERS",
+];
+/// `image.*` declarations and `uniform image*` (custom images, `crate::images`).
+pub const CUSTOM_IMAGES: bool = true;
 
 /// `uniform.*` / `variable.*` in shaders.properties (custom uniforms).
 pub const CUSTOM_UNIFORMS: bool = true;
@@ -201,7 +208,7 @@ pub fn detect(files: &PackFiles, folder: &str, props: &ShadersProperties) -> Vec
     if !images.is_empty() || needs("CUSTOM_IMAGES") {
         out.push(feature(
             "custom images",
-            false,
+            CUSTOM_IMAGES,
             needs("CUSTOM_IMAGES"),
             &images,
         ));
@@ -381,7 +388,7 @@ mod tests {
                     false,
                     false
                 ),
-                ("custom images", false, false),
+                ("custom images", true, false),
                 ("storage buffers (SSBO)", false, false),
                 ("custom uniforms", true, false),
                 ("raw textures", true, false),
@@ -414,13 +421,13 @@ mod tests {
         assert_eq!(
             names(&f),
             [
-                ("custom images", false, true),
+                ("custom images", true, true),
                 ("storage buffers (SSBO)", false, true)
             ]
         );
         assert_eq!(
             refusal(&f).as_deref(),
-            Some("This pack needs custom images, which Horizon does not support yet.")
+            Some("This pack needs storage buffers (SSBO), which Horizon does not support yet.")
         );
         let p = props(&[("iris.features.required", "BLOCK_EMISSION_ATTRIBUTE")]);
         assert_eq!(refusal(&detect(&PackFiles::default(), "", &p)), None);

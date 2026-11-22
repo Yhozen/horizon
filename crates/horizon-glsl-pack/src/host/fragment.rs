@@ -201,6 +201,7 @@ pub(super) fn fragment_source(
     let mut out = format!("#version 450\n{}", uniform_block(extras));
     let sampled = sampling(&fragment.sample_calls, Stage::Fragment, spec, extras)?;
     out += &sampled.decls;
+    out += &extras.images[1];
     declare_unknown_uniforms(&mut out, fragment);
     shared.declare(&mut out, "in");
     let location = shared.next_location();

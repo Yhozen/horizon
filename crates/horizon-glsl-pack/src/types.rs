@@ -80,6 +80,15 @@ pub struct HostParams {
     /// Bytes per pixel of all colour attachments together
     /// (`maxColorAttachmentBytesPerSample`: 32 by default, 128 on most adapters).
     pub max_attachment_bytes: u32,
+    /// Storage textures one stage may bind (`maxStorageTexturesPerShaderStage`, 4 in WebGPU).
+    pub max_storage_textures: u32,
+    /// The vertex stage may write storage textures (wgpu's native-only
+    /// `VERTEX_WRITABLE_STORAGE`). Without it, image writes in vertex stages
+    /// are dropped.
+    pub vertex_storage_writes: bool,
+    /// Every image storage format may be read and written in one binding
+    /// (adapter-specific format features). Without it, only the `r32` ones.
+    pub read_write_storage: bool,
 }
 
 impl Default for HostParams {
@@ -93,6 +102,9 @@ impl Default for HostParams {
             terrain_textures: 2,
             max_draw_buffers: 8,
             max_attachment_bytes: 128,
+            max_storage_textures: 4,
+            vertex_storage_writes: false,
+            read_write_storage: false,
         }
     }
 }
@@ -115,6 +127,32 @@ pub enum TextureSource {
     Specular,
     /// A [`plan::CustomTexture`], by its index in `PackPlan::custom_textures`.
     Custom(usize),
+    /// A custom image (`PackPlan::images`) read through its sampler name.
+    Image(usize),
+}
+
+/// What a storage image binding holds; the client binds it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ImageSource {
+    /// A custom image, by its index in `PackPlan::images`.
+    Custom(usize),
+}
+
+/// One storage image a program binds in group 1, at `binding`
+/// ([`host::IMAGE_BINDING`] + its index for custom images).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImageBinding {
+    pub binding: u32,
+    pub source: ImageSource,
+    pub access: crate::rewrite::ImageAccess,
+    pub dimension: crate::images::ImageDim,
+    /// The texture's format (the same in every program).
+    pub format: crate::plan::StorageFormat,
+    /// The stages that use it.
+    pub vertex: bool,
+    pub fragment: bool,
+    /// Used by a compute program.
+    pub compute: bool,
 }
 
 /// How a pack texture is sampled; the client creates one sampler per kind.
@@ -212,6 +250,8 @@ pub struct CompiledProgram {
     pub samplers: BTreeSet<String>,
     /// Group 1 textures, by binding.
     pub textures: Vec<TextureBinding>,
+    /// Group 1 storage images, by binding.
+    pub images: Vec<ImageBinding>,
     /// Uniforms the pack declares that Horizon does not provide (read as zero).
     pub unknown_uniforms: BTreeSet<String>,
     /// Things that translated but may not look as in Iris (a sampler nothing
