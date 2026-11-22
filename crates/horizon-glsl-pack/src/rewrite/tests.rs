@@ -821,6 +821,7 @@ fn image_uniforms_become_host_functions() {
     let fs = "layout(r32ui) uniform uimage3D voxels;
 writeonly uniform image2D lighting;
 layout (rgba16f) readonly restrict uniform image2D history, other;
+uniform layout(rg8) restrict writeonly image2D edges;
 void main() {
     ivec3 size = imageSize(voxels);
     uint old = imageAtomicMax(voxels, ivec3(0), 5u);
@@ -830,7 +831,9 @@ void main() {
 ";
     let rw = rewrite(fs, Stage::Fragment).unwrap();
     let img = |n: &str| rw.images.iter().find(|i| i.name == n).unwrap();
-    assert_eq!(rw.images.len(), 4);
+    assert_eq!(rw.images.len(), 5);
+    assert_eq!(img("edges").format.as_deref(), Some("rg8"));
+    assert_eq!(img("edges").access, ImageAccess::WriteOnly);
     assert_eq!(img("voxels").ty, "uimage3D");
     assert_eq!(img("voxels").format.as_deref(), Some("r32ui"));
     assert_eq!(img("voxels").access, ImageAccess::ReadWrite);

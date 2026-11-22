@@ -46,7 +46,7 @@ fn storage_layout(format: StorageFormat) -> Option<(&'static str, &'static str)>
 
 /// The declarations and `hz_image*_colorimgN` functions of the program's
 /// `colorimgN` images, and their bindings. Custom images (`image.*`) are
-/// not bound yet.
+/// [`super::images::compute_images`]'s.
 fn color_images(
     stage: &Rewritten,
     spec: &ProgramSpec,
@@ -59,8 +59,11 @@ fn color_images(
             .name
             .strip_prefix("colorimg")
             .and_then(|n| n.parse::<u8>().ok())
-            .filter(|&n| n < 16)
-            .ok_or_else(|| format!("image `{}`: custom images are not supported yet", u.name))?;
+            .filter(|&n| n < 16);
+        // Custom images (`image.*`): host/images.rs.
+        let Some(n) = n else {
+            continue;
+        };
         let base =
             u.ty.strip_prefix(['i', 'u'])
                 .filter(|r| r.starts_with("image"))
@@ -175,6 +178,8 @@ pub fn compute_source(
     )?;
     let (images, color_images) = color_images(stage, spec)?;
     out += &images;
+    let custom = super::images::compute_images(stage, spec)?;
+    out += &custom.sources[1];
     let (body, atomics) = crate::naga_atomics::rename_calls(&stage.body)?;
     out += MEMORY_BARRIERS;
     if atomics {
@@ -191,8 +196,9 @@ pub fn compute_source(
             vertex: String::new(),
             fragment: out,
             textures: sampled.textures,
+            images: custom.bindings,
             unknown_uniforms: uniforms.unknown,
-            notes: notes.into_iter().collect(),
+            notes: notes.into_iter().chain(custom.notes).collect(),
         },
         color_images,
     ))

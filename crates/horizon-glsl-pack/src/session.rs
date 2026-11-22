@@ -581,6 +581,7 @@ impl Session {
             properties: props.properties,
             custom_textures: props.textures.clone(),
             custom_uniforms: crate::custom_uniforms::CustomUniforms::parse(&props.entries),
+            images: crate::images::parse(&props.entries).0,
             options: defaults,
             ..PackPlan::default()
         };
@@ -930,6 +931,7 @@ fn compile_program(
         vertex: vs_glsl,
         fragment: fs_glsl,
         textures,
+        images,
         unknown_uniforms,
         notes,
     } = host::program_sources(&vertex, &fragment, &spec).map_err(|m| PackError::new(program, m))?;
@@ -957,6 +959,7 @@ fn compile_program(
         draw_buffers: draw_buffers.to_vec(),
         samplers,
         textures,
+        images,
         storage,
         unknown_uniforms,
         notes,
@@ -1076,6 +1079,7 @@ fn compile_compute(
         textures: out.textures,
         storage,
         color_images,
+        images: out.images,
         workgroup_size: size,
         dispatch,
         unknown_uniforms: out.unknown_uniforms,

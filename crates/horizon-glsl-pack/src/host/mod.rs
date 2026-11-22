@@ -18,6 +18,7 @@ use crate::{BlockIds, HostParams, PackPlan, ProgramKind, Stage, TextureBinding};
 mod builtins;
 mod compute;
 mod fragment;
+mod images;
 mod sampling;
 #[cfg(test)]
 mod tests;
@@ -28,6 +29,7 @@ use builtins::*;
 pub use compute::{COLOR_IMAGE_BINDING, compute_source};
 use fragment::fragment_source;
 pub use fragment::variant;
+pub use images::{IMAGE_BINDING, IMAGE_SAMPLED_BINDING, image_functions};
 use sampling::*;
 pub use sampling::{
     COMPARE_BINDING, CUSTOM_BINDING, MIPS_BINDING, SAMPLING_OPS, SamplingCall, parse_sampling_call,
@@ -67,6 +69,8 @@ pub struct HostOutput {
     pub fragment: String,
     /// Group 1 textures of both stages, by binding.
     pub textures: Vec<TextureBinding>,
+    /// Group 1 storage images of both stages, by binding.
+    pub images: Vec<crate::ImageBinding>,
     /// Uniforms the pack declares that Horizon's block lacks: zero-valued globals.
     pub unknown_uniforms: BTreeSet<String>,
     /// Report lines about what may not look as in Iris (samplers with no texture…).
@@ -214,6 +218,8 @@ pub(super) struct Extras {
     pub(super) watershadow: bool,
     /// Entity geometry (its atlas is the shared one, not the sprite arrays).
     entity: bool,
+    /// Image declarations and functions of the vertex and fragment stages.
+    pub(super) images: [String; 2],
     /// Block members the pack declares with another type: name → its type.
     converted: BTreeMap<String, String>,
     /// The custom uniform block, when the program declares one of them.
@@ -247,6 +253,7 @@ impl Extras {
                 .chain(&fragment.samplers)
                 .any(|s| s == "watershadow"),
             entity,
+            images: Default::default(),
             converted: BTreeMap::new(),
             custom_block: None,
             customs: Vec::new(),
@@ -298,6 +305,8 @@ pub fn program_sources(
         extras.custom_block = Some(spec.plan.custom_uniforms.block());
         extras.customs = uniforms.customs.clone();
     }
+    let program_images = images::program_images(vertex, fragment, spec)?;
+    extras.images = program_images.sources.clone();
     let fragment = &uniforms.unknown_only(fragment);
     let mut vertex = uniforms.unknown_only(vertex);
     let adopted = varyings::adopt_undeclared(&mut vertex, fragment);
@@ -336,7 +345,8 @@ pub fn program_sources(
         vertex: vs,
         fragment: fs,
         textures: textures.into_values().collect(),
+        images: program_images.bindings,
         unknown_uniforms: uniforms.unknown,
-        notes: notes.into_iter().collect(),
+        notes: notes.into_iter().chain(program_images.notes).collect(),
     })
 }

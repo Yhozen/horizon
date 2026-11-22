@@ -862,3 +862,58 @@ void main() {
         "{text}"
     );
 }
+
+#[test]
+fn compute_programs_use_custom_images() {
+    use crate::compute::ComputeSlot;
+    let csh = "#version 430
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+const ivec3 workGroups = ivec3(16, 8, 16);
+layout(r32ui) uniform uimage3D voxels;
+writeonly uniform image3D light;
+uniform sampler3D lightSampler;
+void main() {
+    ivec3 p = ivec3(gl_GlobalInvocationID);
+    uint v = imageLoad(voxels, p).r;
+    imageAtomicOr(voxels, p, 1u);
+    imageStore(light, p, vec4(float(v)));
+}
+";
+    let props = "iris.features.required=CUSTOM_IMAGES COMPUTE_SHADERS
+image.voxels=none RED_INTEGER R32UI UNSIGNED_INT false false 64 32 64
+image.light=lightSampler RGBA RGBA16F HALF_FLOAT false false 64 32 64
+";
+    let fsh = "#version 120
+uniform sampler3D lightSampler;
+varying vec2 uv;
+void main() { gl_FragData[0] = texture3D(lightSampler, vec3(uv, 0.5)); }
+";
+    let files = programs(
+        &[("gbuffers_terrain", FSH), ("composite", fsh)],
+        &[
+            ("shaders/composite_a.csh", csh),
+            ("shaders/shaders.properties", props),
+        ],
+    );
+    let (pack, r) = report(&files, &PackOptions::default());
+    let pack = pack.unwrap_or_else(|| panic!("{}", r.text("x")));
+    let a = pack
+        .computes
+        .get(&ComputeSlot::from_name("composite_a").unwrap())
+        .unwrap_or_else(|| panic!("{}", r.text("x")));
+    assert_eq!(a.images.len(), 2, "{:?}", a.images);
+    assert!(a.images.iter().all(|b| b.compute && !b.fragment));
+    assert!(
+        a.wgsl.contains("texture_storage_3d<r32uint,read_write>"),
+        "{}",
+        a.wgsl
+    );
+    assert!(a.wgsl.contains("texture_storage_3d<rgba16float,write>"));
+    // The composite pass samples what the compute program wrote.
+    let c = &pack.programs[&ProgramKind::Composite(0)];
+    assert!(
+        c.textures
+            .iter()
+            .any(|t| t.source == crate::TextureSource::Image(1))
+    );
+}

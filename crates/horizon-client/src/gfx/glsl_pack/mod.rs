@@ -14,6 +14,7 @@
 mod debug;
 mod flip;
 mod frame;
+mod images;
 mod mips;
 mod pipelines;
 mod probation;
@@ -46,9 +47,42 @@ pub(super) fn device_features(shader_pack_requested: bool) -> wgpu::Features {
             // 16-bit normalized formats render and blend only with these.
             | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
             | wgpu::Features::RG11B10UFLOAT_RENDERABLE
+            // Custom images written by vertex stages (native only).
+            | wgpu::Features::VERTEX_WRITABLE_STORAGE
     } else {
         wgpu::Features::empty()
     }
+}
+
+/// Whether every custom image format may be read and written in one binding
+/// on this device (adapter-specific format features; core WebGPU allows it
+/// only for the `r32` formats).
+pub(super) fn read_write_storage(adapter: &wgpu::Adapter, device: &wgpu::Device) -> bool {
+    use horizon_glsl_pack::plan::StorageFormat as S;
+    device
+        .features()
+        .contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)
+        && [
+            S::Rgba8Unorm,
+            S::Rgba16Float,
+            S::Rg32Float,
+            S::Rgba32Float,
+            S::Rgba8Sint,
+            S::Rgba16Sint,
+            S::Rg32Sint,
+            S::Rgba32Sint,
+            S::Rgba8Uint,
+            S::Rgba16Uint,
+            S::Rg32Uint,
+            S::Rgba32Uint,
+        ]
+        .into_iter()
+        .all(|f| {
+            adapter
+                .get_texture_format_features(images::wgpu_format(f).0)
+                .flags
+                .contains(wgpu::TextureFormatFeatureFlags::STORAGE_READ_WRITE)
+        })
 }
 
 /// The uniform block, once per kind of pass (the camera's, the light's, the hand's).
@@ -80,6 +114,8 @@ pub(crate) struct PackRenderer {
     targets: Option<Targets>,
     shadow: Option<ShadowTargets>,
     textures: textures::Textures,
+    /// `image.*`: the pack's storage images.
+    images: images::Images,
     empty_group: wgpu::BindGroup,
     /// The sky box (entity vertices) for `gbuffers_skybasic`.
     sky: wgpu::Buffer,
@@ -124,6 +160,10 @@ struct Binds<'a> {
     samplers: &'a [SamplerKind],
     storage: &'a [horizon_glsl_pack::StorageBinding],
     images: &'a [horizon_glsl_pack::ColorImageBinding],
+    /// Custom images (`image.*`).
+    custom_images: &'a [horizon_glsl_pack::ImageBinding],
+    /// The render program (compute programs: `None`), for image read conflicts.
+    kind: Option<ProgramKind>,
     /// The side of each colortex the images are (the textures read `sides`).
     image_sides: [Side; 16],
     /// Gbuffers programs (not full-screen passes, not compute).
@@ -312,6 +352,14 @@ impl PackRenderer {
                 pipelines::build(device, kind, program, &state, &layouts)?,
             );
         }
+        let images = images::Images::new(device, pack)?;
+        if !plan.images.is_empty() {
+            log::info!(
+                "shader pack: {} custom images declared, {} MiB made at their fixed sizes",
+                plan.images.len(),
+                images.bytes() >> 20
+            );
+        }
         let mut computes = BTreeMap::new();
         let float32 = features
             .contains(wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE);
@@ -388,6 +436,7 @@ impl PackRenderer {
             targets: None,
             shadow,
             textures,
+            images,
             empty_group,
             sky: frame::sky_box(device),
             custom,
@@ -434,6 +483,7 @@ impl PackRenderer {
 
     /// (Re)creates the screen-sized targets.
     pub fn prepare(&mut self, device: &wgpu::Device, size: [u32; 2]) {
+        self.images.prepare(device, size);
         if self.targets.as_ref().is_some_and(|t| t.size == size) {
             return;
         }
@@ -482,6 +532,8 @@ impl PackRenderer {
             samplers: &program.samplers,
             storage: &program.storage,
             images: &[],
+            custom_images: &program.images,
+            kind: Some(program.kind),
             image_sides: *sides,
             gbuffers: !program.kind.is_fullscreen(),
             shadow: program.kind.is_shadow(),
@@ -504,6 +556,8 @@ impl PackRenderer {
             samplers: &program.samplers,
             storage: &program.storage,
             images: &program.color_images,
+            custom_images: &program.custom_images,
+            kind: None,
             image_sides: *image_sides,
             gbuffers: false,
             shadow: false,
@@ -596,9 +650,24 @@ impl PackRenderer {
                     .get(i)
                     .and_then(Option::as_ref)
                     .unwrap_or(missing),
+                TextureSource::Image(i) => self
+                    .images
+                    .view(program.kind, t.binding, i)
+                    .unwrap_or(missing),
             };
             entries.push(wgpu::BindGroupEntry {
                 binding: t.binding,
+                resource: wgpu::BindingResource::TextureView(view),
+            });
+        }
+        for b in program.custom_images {
+            let horizon_glsl_pack::ImageSource::Custom(i) = b.source;
+            let view = self
+                .images
+                .view(program.kind, b.binding, i)
+                .expect("images::Images makes every image a program binds");
+            entries.push(wgpu::BindGroupEntry {
+                binding: b.binding,
                 resource: wgpu::BindingResource::TextureView(view),
             });
         }

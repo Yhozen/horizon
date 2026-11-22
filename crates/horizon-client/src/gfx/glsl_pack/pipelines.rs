@@ -4,8 +4,8 @@
 
 use horizon_glsl_pack::host::Geometry;
 use horizon_glsl_pack::{
-    CompiledCompute, CompiledProgram, ProgramKind, SampleKind, SamplerKind, StorageBinding, TexDim,
-    TextureBinding, TextureSource,
+    CompiledCompute, CompiledProgram, ImageBinding, ProgramKind, SampleKind, SamplerKind,
+    StorageBinding, TexDim, TextureBinding, TextureSource,
 };
 
 /// A pipeline and what its bind group 1 must hold.
@@ -15,6 +15,8 @@ pub(super) struct Program {
     pub layout: wgpu::BindGroupLayout,
     pub textures: Vec<TextureBinding>,
     pub samplers: Vec<SamplerKind>,
+    /// Storage images, by binding.
+    pub images: Vec<ImageBinding>,
     /// colortex (gbuffers, full-screen) or shadowcolor (shadow) indices, by output location.
     pub draw_buffers: Vec<u8>,
     /// `bufferObject`s the program binds.
@@ -30,6 +32,8 @@ pub(super) struct ComputeProgram {
     pub samplers: Vec<SamplerKind>,
     pub storage: Vec<StorageBinding>,
     pub color_images: Vec<horizon_glsl_pack::ColorImageBinding>,
+    /// Custom images (`image.*`).
+    pub custom_images: Vec<ImageBinding>,
     pub workgroup_size: [u32; 3],
     pub dispatch: horizon_glsl_pack::compute::Dispatch,
 }
@@ -224,6 +228,18 @@ pub(super) fn build(
             samplers.push(t.sampler);
         }
     }
+    for b in &program.images {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: b.binding,
+            visibility: stages(b.vertex, b.fragment),
+            ty: wgpu::BindingType::StorageTexture {
+                access: super::images::storage_access(b.access),
+                format: super::images::wgpu_format(b.format).0,
+                view_dimension: super::images::view_dimension(b.dimension),
+            },
+            count: None,
+        });
+    }
     samplers.sort();
     for &s in &samplers {
         let vertex = program.textures.iter().any(|t| t.sampler == s && t.vertex);
@@ -345,6 +361,17 @@ pub(super) fn build(
                 program.source, limits.max_sampled_textures_per_shader_stage
             ));
         }
+        let images = program
+            .images
+            .iter()
+            .filter(|b| if vertex { b.vertex } else { b.fragment })
+            .count() as u32;
+        if images > limits.max_storage_textures_per_shader_stage {
+            return Err(format!(
+                "{}: {images} storage images in the {stage} stage, the device allows {}",
+                program.source, limits.max_storage_textures_per_shader_stage
+            ));
+        }
     }
     let sky = matches!(kind, ProgramKind::SkyBasic | ProgramKind::SkyTextured);
     let depth_stencil = (!kind.is_fullscreen()).then(|| wgpu::DepthStencilState {
@@ -408,6 +435,7 @@ pub(super) fn build(
         layout,
         textures: program.textures.clone(),
         samplers,
+        images: program.images.clone(),
         draw_buffers: program.draw_buffers.clone(),
         storage: program.storage.clone(),
     })
@@ -497,13 +525,24 @@ pub(super) fn build_compute(
             count: None,
         });
     }
+    for b in &program.images {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: b.binding,
+            visibility: compute,
+            ty: wgpu::BindingType::StorageTexture {
+                access: super::images::storage_access(b.access),
+                format: super::images::wgpu_format(b.format).0,
+                view_dimension: super::images::view_dimension(b.dimension),
+            },
+            count: None,
+        });
+    }
     let limits = device.limits();
-    if program.color_images.len() as u32 > limits.max_storage_textures_per_shader_stage {
+    let storage_images = program.color_images.len() + program.images.len();
+    if storage_images as u32 > limits.max_storage_textures_per_shader_stage {
         return Err(format!(
             "{}: {} storage images, the device allows {}",
-            program.source,
-            program.color_images.len(),
-            limits.max_storage_textures_per_shader_stage
+            program.source, storage_images, limits.max_storage_textures_per_shader_stage
         ));
     }
     if program.textures.len() as u32 > limits.max_sampled_textures_per_shader_stage {
@@ -543,6 +582,7 @@ pub(super) fn build_compute(
         samplers,
         storage: program.storage.clone(),
         color_images: program.color_images.clone(),
+        custom_images: program.images.clone(),
         workgroup_size: program.workgroup_size,
         dispatch: program.dispatch,
     })

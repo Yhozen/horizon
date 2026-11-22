@@ -15,6 +15,7 @@ pub(super) fn vertex_source(
     let mut out = format!("#version 450\n{}", uniform_block(extras));
     let sampled = sampling(&vertex.sample_calls, Stage::Vertex, spec, extras)?;
     out += &sampled.decls;
+    out += &extras.images[0];
     declare_unknown_uniforms(&mut out, vertex);
     match spec.geometry {
         Geometry::Terrain => out += TERRAIN_INPUTS,

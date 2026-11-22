@@ -17,6 +17,7 @@ pub mod directives;
 pub mod features;
 pub mod frame_math;
 pub mod host;
+pub mod images;
 pub mod legacy_ids;
 pub mod naga_atomics;
 pub mod naga_out;
