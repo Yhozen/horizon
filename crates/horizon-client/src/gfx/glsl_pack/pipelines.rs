@@ -175,13 +175,15 @@ fn pack_blend(blend: horizon_glsl_pack::plan::Blend) -> Option<wgpu::BlendState>
 /// into 32-bit float targets in the browser only with `FLOAT32_BLENDABLE`
 /// (WebGPU rejects the pipeline otherwise).
 fn blendable(format: wgpu::TextureFormat, features: wgpu::Features) -> bool {
-    if cfg!(not(target_arch = "wasm32")) {
-        return true;
-    }
+    // Integer targets never blend, natively either (Noble's RGBA32UI colortex1
+    // under the default alpha blending of gbuffers_beaconbeam: a validation error).
     let integer = matches!(
         format.sample_type(None, None),
         Some(wgpu::TextureSampleType::Sint | wgpu::TextureSampleType::Uint)
     );
+    if cfg!(not(target_arch = "wasm32")) {
+        return !integer;
+    }
     let float32 = matches!(
         format,
         wgpu::TextureFormat::R32Float
