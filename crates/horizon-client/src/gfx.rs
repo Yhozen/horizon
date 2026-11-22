@@ -3301,7 +3301,7 @@ impl Renderer {
             max_draw_buffers: limits.max_color_attachments,
             max_attachment_bytes: limits.max_color_attachment_bytes_per_sample,
             max_storage_buffers: limits.max_storage_buffers_per_shader_stage,
-            max_storage_buffer_bytes: u64::from(limits.max_storage_buffer_binding_size),
+            max_storage_buffer_bytes: limits.max_storage_buffer_binding_size,
             max_workgroup_storage: limits.max_compute_workgroup_storage_size,
             max_invocations: limits.max_compute_invocations_per_workgroup,
             max_workgroup_size: [
