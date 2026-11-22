@@ -1871,11 +1871,13 @@ impl OptionsUi {
                         Act::None,
                     )));
                 }
+                // Horizon Settings stays: it is the only way to Shader Packs.
                 let open_entries = [
                     ("options.video", Some(Page::Video)),
                     ("options.controls", Some(Page::Controls)),
                     ("options.chat", Some(Page::Chat)),
                     ("options.accessibility", Some(Page::Accessibility)),
+                    ("Horizon Settings...", Some(Page::Horizon)),
                     ("options.credits_and_attribution", Some(Page::Credits)),
                 ];
                 let full_entries = [
@@ -4862,6 +4864,11 @@ mod tests {
             &main[main.len() - 3..],
             [Page::Horizon, Page::Mods, Page::Credits]
         );
+        // The open edition (the open site) keeps Horizon Settings, the way to Shader Packs.
+        ui.open_edition = true;
+        let open = pushes(&mut ui);
+        assert_eq!(&open[open.len() - 2..], [Page::Horizon, Page::Credits]);
+        ui.open_edition = false;
         ui.push(Page::Horizon);
         assert_eq!(
             pushes(&mut ui),
