@@ -51,8 +51,10 @@ impl Protected {
                     // qualifiers too, which no local can be named anyway).
                     let interface = words()
                         .any(|w| matches!(w, "uniform" | "varying" | "attribute" | "in" | "out"));
+                    // Not the type names: `float[80] pdf` is a parameter of type `float[80]`.
                     if interface {
-                        names.extend(words().map(str::to_string));
+                        let none = BTreeSet::new();
+                        names.extend(words().filter(|w| !is_type(w, &none)).map(str::to_string));
                     }
                 }
                 Item::Empty => {}
