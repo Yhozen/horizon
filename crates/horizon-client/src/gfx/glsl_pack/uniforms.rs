@@ -88,6 +88,19 @@ fn glam4(m: [[f32; 4]; 4]) -> Mat4 {
     Mat4::from_cols_array_2d(&m)
 }
 
+/// `gbufferModelView` and `gbufferProjection` from Horizon's clip matrix
+/// (projection × bob × view). The view bob and hurt tilt go in the model-view,
+/// after the camera's rotation, as OptiFine and Iris have them
+/// (`gbufferModelViewInverse[3]` is the way from the head to the bobbing
+/// camera), so the projection is a plain perspective matrix. Vanilla keeps the
+/// bob in the projection; packs that shortcut the inverse projection (only its
+/// diagonal, or no perspective divide) then read a view direction that swings
+/// with every step: a sky that pulses while the player walks.
+fn camera_matrices(view_proj: Mat4, bob: Mat4, yaw: f32, pitch: f32) -> (Mat4, Mat4) {
+    let model_view = bob * crate::camera::view_matrix(yaw, pitch);
+    (model_view, gl_clip() * view_proj * model_view.inverse())
+}
+
 impl PackUniformInputs<'_> {
     pub fn uniforms(
         &self,
@@ -96,10 +109,8 @@ impl PackUniformInputs<'_> {
         history: &mut History,
     ) -> FrameUniforms {
         let s = self.state;
-        // gbufferModelView is the camera's rotation; view bobbing lives in
-        // the projection, as in vanilla.
-        let model_view = crate::camera::view_matrix(frame.yaw, frame.pitch);
-        let projection = gl_clip() * self.view_proj * model_view.inverse();
+        let (model_view, projection) =
+            camera_matrices(self.view_proj, frame.bob, frame.yaw, frame.pitch);
         let celestial = frame_math::celestial(
             frame.sky.sun_angle,
             frame.sky.moon_angle,
@@ -295,4 +306,45 @@ pub(super) fn shadow_clip(frame: &crate::gfx::Frame, plan: &PackPlan) -> Mat4 {
         &plan.shadow,
     );
     gl_clip().inverse() * glam4(shadow.projection) * glam4(shadow.model_view)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_view_bob_is_in_the_model_view_and_the_projection_stays_plain() {
+        let perspective = Mat4::perspective_rh(70f32.to_radians(), 16.0 / 9.0, 0.05, 512.0);
+        // A step's bob: a roll, a pitch and a shift of the eye.
+        let bob = Mat4::from_translation(glam::Vec3::new(0.05, -0.1, 0.0))
+            * Mat4::from_rotation_z(0.03)
+            * Mat4::from_rotation_x(0.05);
+        let (yaw, pitch) = (37.0, -12.0);
+        let view = crate::camera::view_matrix(yaw, pitch);
+        let view_proj = perspective * bob * view;
+        let (model_view, projection) = camera_matrices(view_proj, bob, yaw, pitch);
+        // The product draws the same picture.
+        let product = projection * model_view;
+        let expected = gl_clip() * view_proj;
+        for (a, b) in product
+            .to_cols_array()
+            .iter()
+            .zip(expected.to_cols_array())
+        {
+            assert!((a - b).abs() < 1e-4, "{product:?} != {expected:?}");
+        }
+        // The projection has no rotation and no shift left: the same as with no bob.
+        let (_, still) = camera_matrices(perspective * view, Mat4::IDENTITY, yaw, pitch);
+        for (a, b) in projection.to_cols_array().iter().zip(still.to_cols_array()) {
+            assert!((a - b).abs() < 1e-4, "{projection:?} != {still:?}");
+        }
+        // The eye's shift is the model-view's translation (gbufferModelViewInverse[3]).
+        let shift = model_view.inverse().w_axis.truncate();
+        assert!(shift.length() > 0.05, "{shift:?}");
+        // A pixel's view direction from the inverse projection, without the
+        // divide (as packs take it), does not move with the bob.
+        let inverse = projection.inverse();
+        let direction = |m: Mat4| (m * glam::Vec4::new(0.3, 0.6, -1.0, 1.0)).truncate().normalize();
+        assert!((direction(inverse) - direction(still.inverse())).length() < 1e-4);
+    }
 }

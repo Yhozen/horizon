@@ -302,8 +302,8 @@ block names exactly, for every block state.
 | `atlasSize` | size of the bound atlas, or 0 |
 | `cameraPosition` | world position, shifted in x and z by multiples of 30000 past ±30000 or on a jump over 1000 |
 | `previousCameraPosition`, `eyeAltitude` | last frame's position, with the same shift; camera y |
-| `gbufferModelView` | camera rotation only, player space to view space |
-| `gbufferProjection` | the world projection, view bobbing and hurt tilt included; no jitter (medium) |
+| `gbufferModelView` | the camera's rotation, then view bobbing and hurt tilt: player space to view space. `gbufferModelViewInverse[3]` is the way from the player's head to the bobbing camera (the public coordinate-spaces page) |
+| `gbufferProjection` | the plain perspective projection of the world: no view bobbing (vanilla multiplies the bob into its projection; packs must not see it there), no jitter |
 | `gbufferPrevious*` | last frame's matrices; identity on the first frame |
 | `shadowModelView`, `shadowProjection` | the matrices of section 6 |
 
