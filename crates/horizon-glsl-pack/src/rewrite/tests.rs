@@ -861,3 +861,15 @@ void main() {
     let err = rewrite("uniform image2D a[2];\nvoid main() {}\n", Stage::Fragment).unwrap_err();
     assert_eq!(err, "image array `a`");
 }
+
+#[test]
+fn array_types_of_parameters_and_results_keep_their_name() {
+    // A function returning `float[4]` must not make `float` a protected name
+    // (Noble's composite98 renamed the parameter type to `hz_l_float`).
+    let src = "#version 430\nfloat[4] build(float k) { float[4] p; p[0] = k; return p; }\n\
+        float mean(float[4] pdf) { return pdf[0]; }\n\
+        void main() { gl_FragData[0] = vec4(mean(build(1.0))); }\n";
+    let r = rewrite(src, Stage::Fragment).unwrap();
+    assert!(r.body.contains("float mean(float[4] pdf)"), "{}", r.body);
+    assert!(!r.body.contains("hz_l_float"), "{}", r.body);
+}

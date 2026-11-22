@@ -45,6 +45,28 @@ impl Ctx<'_> {
             return Ok(false);
         };
         let name = header.get(at + 1).copied().unwrap_or("");
+        // The block's own words: its qualifiers and layout, back from `buffer`
+        // (preprocessor lines and anything else ahead of it are kept as they are).
+        let mut first = at;
+        while first > 0 {
+            let w = header[first - 1];
+            if BUFFER_QUALIFIERS.iter().any(|(q, _)| *q == w) {
+                first -= 1;
+            } else if w == ")" {
+                let open = header[..first].iter().rposition(|w| *w == "(");
+                match open {
+                    Some(o) if o > 0 && header[o - 1] == "layout" => first = o - 1,
+                    _ => break,
+                }
+            } else {
+                break;
+            }
+        }
+        if first > 0 {
+            self.emit(sig[0], sig[first], out)?;
+        }
+        let header = &header[first..];
+        let at = at - first;
         let mut packing = "std430".to_string();
         let mut index = 0u32;
         let mut words = &header[..at];

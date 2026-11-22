@@ -802,8 +802,9 @@ impl Session {
                 unknown.extend(c.unknown_uniforms.iter().cloned());
             }
             let failed = st.compute_failed.get(slot);
+            // `composite2.csh`: apart from the full-screen slot of the same pass.
             report.programs.push(ProgramOutcome {
-                slot: slot.name(),
+                slot: format!("{}.csh", slot.name()),
                 file: st.plan.computes.get(slot).cloned(),
                 failed: failed
                     .map(|e| (format!("{path}.csh"), e.message.clone()))

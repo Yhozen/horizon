@@ -61,8 +61,11 @@ impl Protected {
         Protected { names }
     }
 
+    /// Type names never are: `float[80] pdf` is a parameter of type `float[80]`,
+    /// whatever a `float[N] f()` function made of `float`.
     fn contains(&self, name: &str) -> bool {
         !name.starts_with("gl_")
+            && !is_type(name, &BTreeSet::new())
             && (self.names.contains(name)
                 || listed(BUILTIN_FUNCTIONS, name)
                 || listed(NEW_BUILTINS, name))

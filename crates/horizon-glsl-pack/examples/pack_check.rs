@@ -291,7 +291,10 @@ fn check_pack(
             .iter()
             .any(|f| f.name == "compute shaders" && f.required);
         for outcome in &report.programs {
-            let Some(slot) = horizon_glsl_pack::compute::ComputeSlot::from_name(&outcome.slot)
+            let Some(slot) = outcome
+                .slot
+                .strip_suffix(".csh")
+                .and_then(horizon_glsl_pack::compute::ComputeSlot::from_name)
             else {
                 continue;
             };
