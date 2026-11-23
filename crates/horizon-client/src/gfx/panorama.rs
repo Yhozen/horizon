@@ -60,7 +60,28 @@ fn projection(width: u32, height: u32, yaw: f32, pitch: f32) -> Mat4 {
         * Mat4::from_rotation_y(yaw.to_radians())
 }
 
+// Upload the fixed cube once. This avoids two vertex-indexed shader-local arrays
+// when the browser compiles the panorama for a mobile Vulkan driver.
+const CORNERS: [[f32; 3]; 8] = [
+    [-1., -1., -1.],
+    [1., -1., -1.],
+    [1., 1., -1.],
+    [-1., 1., -1.],
+    [-1., -1., 1.],
+    [1., -1., 1.],
+    [1., 1., 1.],
+    [-1., 1., 1.],
+];
+const TRIANGLES: [usize; 36] = [
+    4, 7, 6, 4, 6, 5, 5, 6, 2, 5, 2, 1, 1, 2, 3, 1, 3, 0, 0, 3, 7, 0, 7, 4, 7, 3, 2, 7, 2, 6, 0, 4,
+    5, 0, 5, 1,
+];
+
 pub(super) struct Panorama {
+    vertices: wgpu::Buffer,
+    #[cfg(target_arch = "wasm32")]
+    pipeline: std::rc::Rc<std::cell::OnceCell<wgpu::RenderPipeline>>,
+    #[cfg(not(target_arch = "wasm32"))]
     pipeline: wgpu::RenderPipeline,
     group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
@@ -167,14 +188,23 @@ impl Panorama {
             bind_group_layouts: &[Some(&layout)],
             ..Default::default()
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Title panorama vertices"),
+            contents: bytemuck::cast_slice(&TRIANGLES.map(|i| CORNERS[i])),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let descriptor = wgpu::RenderPipelineDescriptor {
             label: Some("Title panorama"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_panorama"),
                 compilation_options: Default::default(),
-                buffers: &[],
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: 12,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+                })],
             },
             primitive: wgpu::PrimitiveState {
                 cull_mode: None,
@@ -200,8 +230,13 @@ impl Panorama {
             }),
             multiview_mask: None,
             cache: None,
-        });
+        };
+        #[cfg(target_arch = "wasm32")]
+        let pipeline = super::web_gpu::optional_panorama_pipeline(device, &descriptor);
+        #[cfg(not(target_arch = "wasm32"))]
+        let pipeline = device.create_render_pipeline(&descriptor);
         Self {
+            vertices,
             pipeline,
             group,
             uniform,
@@ -224,9 +259,16 @@ impl Panorama {
     }
 
     pub(super) fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
-        pass.set_pipeline(&self.pipeline);
+        #[cfg(target_arch = "wasm32")]
+        let Some(pipeline) = self.pipeline.get() else {
+            return;
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let pipeline = &self.pipeline;
+        pass.set_pipeline(pipeline);
+        pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_bind_group(0, &self.group, &[]);
-        pass.draw(0..36, 0..1);
+        pass.draw(0..TRIANGLES.len() as u32, 0..1);
     }
 }
 
