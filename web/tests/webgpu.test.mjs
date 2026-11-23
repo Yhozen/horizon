@@ -90,6 +90,41 @@ test("WebGPU startup and upload fallback in Open Creative", { skip: !site, timeo
         state.device = device;
         return device;
       };
+      if (fault === "panorama") {
+        // Simulate Dawn returning the phone's internal error for just the
+        // panorama. All other scopes and pipeline compilation run normally.
+        const scopes = [];
+        const push = GPUDevice.prototype.pushErrorScope;
+        GPUDevice.prototype.pushErrorScope = function (filter) {
+          scopes.push({ filter });
+          return push.call(this, filter);
+        };
+        const pop = GPUDevice.prototype.popErrorScope;
+        GPUDevice.prototype.popErrorScope = function () {
+          const scope = scopes.pop();
+          const verdict = pop.call(this);
+          if (!scope?.error) return verdict;
+          return verdict.then((error) => {
+            state.returnedPanoramaError = true;
+            return error ?? scope.error;
+          });
+        };
+        const create = GPUDevice.prototype.createRenderPipeline;
+        GPUDevice.prototype.createRenderPipeline = function (descriptor) {
+          if (descriptor.label === "Title panorama") {
+            const error = new GPUInternalError("CreateGraphicsPipelines failed with VK_ERROR_UNKNOWN");
+            const scope = scopes.findLast((scope) => scope.filter === "internal");
+            if (scope) scope.error = error;
+            else queueMicrotask(() => this.dispatchEvent(new GPUUncapturedErrorEvent("uncapturederror", { error })));
+          }
+          return create.call(this, descriptor);
+        };
+        const set = GPURenderPassEncoder.prototype.setPipeline;
+        GPURenderPassEncoder.prototype.setPipeline = function (pipeline) {
+          if (pipeline.label === "Title panorama") state.usedPanorama = true;
+          return set.call(this, pipeline);
+        };
+      }
       state.stages = [];
       const createPipeline = GPUDevice.prototype.createRenderPipeline;
       GPUDevice.prototype.createRenderPipeline = function (descriptor) {
@@ -164,6 +199,18 @@ test("WebGPU startup and upload fallback in Open Creative", { skip: !site, timeo
     await page.waitForFunction(() => window.horizonGame?.player, null, { timeout: 30_000 });
     const frame = await page.evaluate(() => window.horizonGame.frame);
     await page.waitForFunction((previous) => window.horizonGame.frame > previous, frame);
+  });
+
+  await t.test("the world renders when the Android driver rejects the title panorama", async (t) => {
+    const page = await open(t, "panorama");
+    await page.waitForFunction(() => window.horizonError ||
+      (window.horizonStarted && window.horizonGame?.meshed > 0), null, { timeout: 50_000 });
+    const result = await page.evaluate(() => ({
+      error: window.horizonError || null,
+      captured: !!window.gpuTest.returnedPanoramaError,
+      used: !!window.gpuTest.usedPanorama,
+    }));
+    assert.deepEqual(result, { error: null, captured: true, used: false });
   });
 
   await t.test("first-frame validation failure reaches the menu", async (t) => {

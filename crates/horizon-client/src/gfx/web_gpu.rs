@@ -65,3 +65,39 @@ pub(super) fn first_frame_submitted() {
         });
     }
 }
+
+/// The title background is optional. Until its pipeline succeeds, the title
+/// pass keeps its clear colour and still draws the menu. Scope only the driver
+/// error from pipeline creation; the startup validation and device-loss
+/// handlers still apply to the whole renderer.
+pub(super) fn optional_panorama_pipeline(
+    device: &wgpu::Device,
+    descriptor: &wgpu::RenderPipelineDescriptor<'_>,
+) -> std::rc::Rc<std::cell::OnceCell<wgpu::RenderPipeline>> {
+    // wgpu 30's web backend panics when converting a GPUInternalError returned
+    // by popErrorScope. Read this one verdict directly from the WebGPU device.
+    #[wasm_bindgen::prelude::wasm_bindgen]
+    extern "C" {
+        type ErrorScopes;
+        #[wasm_bindgen(method, js_name = pushErrorScope)]
+        fn push(this: &ErrorScopes, filter: &str);
+    }
+    let raw = device.as_webgpu().expect("browser WebGPU device");
+    raw.unchecked_ref::<ErrorScopes>().push("internal");
+    let pipeline = device.create_render_pipeline(descriptor);
+    let verdict = raw.pop_error_scope();
+    let ready = std::rc::Rc::new(std::cell::OnceCell::new());
+    let result = ready.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        match wasm_bindgen_futures::JsFuture::from(verdict).await {
+            Ok(error) => match error.into_option() {
+                None => {
+                    let _ = result.set(pipeline);
+                }
+                Some(error) => log::warn!("Title panorama disabled: {}", error.message()),
+            },
+            Err(error) => log::warn!("Title panorama error scope failed: {error:?}"),
+        }
+    });
+    ready
+}
