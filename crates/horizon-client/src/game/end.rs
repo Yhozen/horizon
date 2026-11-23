@@ -181,6 +181,9 @@ impl EyeOfEnder {
 impl Game<'_> {
     /// The environment attributes of the current dimension.
     pub(super) fn dim_environment(&self) -> &Environment {
+        if let Some(server) = self.remote.as_ref().and_then(|r| r.environment.as_ref()) {
+            return server;
+        }
         match self.dim {
             Dim::Overworld => self.res.environment(),
             Dim::Nether => self.res.nether_environment(),

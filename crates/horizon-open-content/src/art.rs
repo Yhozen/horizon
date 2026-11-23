@@ -1,6 +1,6 @@
 //! Horizon's original artwork for what the open inputs do not cover, drawn
 //! procedurally here so every pixel's origin is this generator: bedrock,
-//! breaking overlays, the interface, the sky and the player's arm.
+//! breaking overlays, the interface, the sky, precipitation and the player's arm.
 use crate::{
     Bundle, Origin, Result,
     image::{Rgba, noise},
@@ -14,6 +14,45 @@ pub fn block_texture(name: &str) -> Option<Rgba> {
         "bedrock" => Some(bedrock()),
         other => crate::art_survival::crafting_table(other),
     }
+}
+
+/// The colours a biome's temperature and downfall give grey grass and
+/// foliage textures: Horizon's own gradient, from a blue-green cold edge to a
+/// dry olive and a wet green at the hot edge. The layout is the one the
+/// client reads: x = (1 - temperature) * 255, y = (1 - downfall * temperature)
+/// * 255. Each kind is `(cold, hot and dry, hot and wet)`.
+pub fn colormap(kind: &str) -> Option<Rgba> {
+    let [cold, dry, wet]: [[f32; 3]; 3] = match kind {
+        "grass" => [
+            [128.0, 180.0, 151.0],
+            [191.0, 183.0, 85.0],
+            [71.0, 205.0, 51.0],
+        ],
+        "foliage" => [
+            [96.0, 161.0, 123.0],
+            [174.0, 164.0, 42.0],
+            [26.0, 191.0, 0.0],
+        ],
+        _ => return None,
+    };
+    let mut image = Rgba::new(256, 256);
+    for y in 0..256 {
+        for x in 0..256 {
+            let temperature = 1.0 - x as f32 / 255.0;
+            let humidity = 1.0 - y as f32 / 255.0;
+            let downfall = if temperature > 0.0 {
+                (humidity / temperature).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let channel = |i: usize| {
+                let hot = dry[i] + (wet[i] - dry[i]) * downfall;
+                (cold[i] + (hot - cold[i]) * temperature).round() as u8
+            };
+            image.set(x, y, [channel(0), channel(1), channel(2), 255]);
+        }
+    }
+    Some(image)
 }
 
 /// Dark, coarse, high-contrast stone: unmistakably the world's floor.
@@ -89,18 +128,34 @@ pub fn ui_strings() -> Vec<(&'static str, &'static str)> {
 }
 
 /// The interface, sky and player artwork.
-pub fn write(bundle: &mut Bundle) -> Result<()> {
+pub fn write(bundle: &mut Bundle, sources: &crate::sources::Sources) -> Result<()> {
     let art = Origin::Generator(GENERATOR);
     bundle.png(
         "assets/minecraft/textures/entity/player/wide/steve.png",
         &skin(),
         art.clone(),
     )?;
-    bundle.json("entity-models.json", &entity_models(), GENERATOR)?;
-    bundle.json("entity-types.json", &serde_json::json!({}), GENERATOR)?;
+    // The player's model, and every mob's (crate::mobs).
+    let (mobs, types) = crate::mobs::write(bundle, sources)?;
+    let mut models = entity_models();
+    models.as_object_mut().expect("an object").extend(mobs);
+    // The chests the block-entity renderer draws (crate::chests).
+    models
+        .as_object_mut()
+        .expect("an object")
+        .extend(crate::chests::layers());
+    bundle.json("entity-models.json", &models, GENERATOR)?;
+    bundle.json(
+        "entity-types.json",
+        &serde_json::Value::Object(types),
+        GENERATOR,
+    )?;
     gui(bundle)?;
     sky(bundle)?;
+    precipitation(bundle)?;
     crate::art_survival::write(bundle)?;
+    crate::screens::write(bundle)?;
+    crate::art_advancements::write(bundle)?;
     Ok(())
 }
 
@@ -487,6 +542,59 @@ fn sky(bundle: &mut Bundle) -> Result<()> {
         art(),
     )?;
     Ok(())
+}
+
+fn precipitation(bundle: &mut Bundle) -> Result<()> {
+    const WIDTH: u32 = 64;
+    const HEIGHT: u32 = 256;
+    let art = || Origin::Generator(GENERATOR);
+    let mut rain = Rgba::new(WIDTH, HEIGHT);
+    for i in 0..30 {
+        let x = noise(i, 0, 81) % WIDTH;
+        let y = noise(i, 1, 81) % HEIGHT;
+        let length = 10 + noise(i, 2, 81) % 20;
+        for dy in 0..length {
+            let alpha = (35 + (dy * 125) / (length - 1)) as u8;
+            rain.set(x, (y + dy) % HEIGHT, [174, 202, 239, alpha]);
+        }
+    }
+    bundle.png(
+        "assets/minecraft/textures/environment/rain.png",
+        &rain,
+        art(),
+    )?;
+
+    let mut snow = Rgba::new(WIDTH, HEIGHT);
+    for i in 0..60 {
+        let x = noise(i, 0, 83) % WIDTH;
+        let y = noise(i, 1, 83) % HEIGHT;
+        if i % 3 == 0 {
+            for (dx, dy) in [(1, 0), (WIDTH - 1, 0), (0, 1), (0, HEIGHT - 1)] {
+                snow.set((x + dx) % WIDTH, (y + dy) % HEIGHT, [232, 241, 255, 130]);
+            }
+        }
+        snow.set(x, y, [245, 250, 255, 225]);
+    }
+    bundle.png(
+        "assets/minecraft/textures/environment/snow.png",
+        &snow,
+        art(),
+    )?;
+
+    let mut splash = Rgba::new(8, 8);
+    for (x, y, alpha) in [(3, 3, 130), (4, 3, 165), (3, 4, 195), (4, 4, 225)] {
+        splash.set(x, y, [174, 202, 239, alpha]);
+    }
+    bundle.png(
+        "assets/minecraft/textures/particle/open_rain.png",
+        &splash,
+        art(),
+    )?;
+    bundle.json(
+        "assets/minecraft/particles/rain.json",
+        &serde_json::json!({"textures": ["minecraft:open_rain"]}),
+        GENERATOR,
+    )
 }
 
 /// A cuboid in model units (1/16 block) with box UV from `uv` on a 64x64

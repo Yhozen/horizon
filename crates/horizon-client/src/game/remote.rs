@@ -113,7 +113,13 @@ pub(super) struct Remote {
     status: String,
     pub(super) entity_id: i32,
     dimension: DimensionType,
+    /// The current dimension's environment as the server describes it, for
+    /// Horizon Open Creative in the dimensions its bundle does not have.
+    pub(super) environment: Option<horizon_client::environment::Environment>,
     biome_map: Vec<u16>,
+    /// The server's biomes the resources lack, by their ids past the
+    /// resources' own (`Biomes::server_ids`).
+    pub(super) server_biomes: Vec<horizon_client::biome::ServerBiome>,
     biome_bits: u8,
     view_distance: i32,
     sequence: i32,
@@ -137,6 +143,9 @@ pub(super) struct Remote {
     pub(super) menu: Option<(i32, String)>,
     /// The open menu's title as the server named it.
     pub(super) menu_title: Option<String>,
+    /// The crafting result slot as the server last set it: (window id,
+    /// stack). See `server_craft_result`.
+    craft_result: Option<(i32, Option<ItemStack>)>,
     state_id: i32,
     use_target: Option<[i32; 3]>,
     entities: HashMap<i32, Tracked>,
@@ -181,6 +190,9 @@ pub(super) struct Remote {
     /// Inventory, off hand and armour as last synchronised, for creative-mode
     /// slot updates (`creative_sync_stacks`).
     synced: Vec<Option<ItemStack>>,
+    /// The wire form of stacks the server sent that carry components, by what
+    /// they decoded to, so creative slot updates send them back whole.
+    wire_stacks: std::cell::RefCell<WireStacks>,
     decode_errors: u32,
     clock: Option<i32>,
     /// `ClientClockManager.ClientClockInstance`'s rate and partial tick for
@@ -389,7 +401,9 @@ impl Game<'_> {
             status: "Connecting to the server...".into(),
             entity_id: 0,
             dimension: DimensionType::vanilla("minecraft:overworld"),
+            environment: None,
             biome_map: Vec::new(),
+            server_biomes: Vec::new(),
             biome_bits: 7,
             view_distance: self.settings.render_distance,
             sequence: 0,
@@ -403,6 +417,7 @@ impl Game<'_> {
             predictions: HashMap::new(),
             menu: None,
             menu_title: None,
+            craft_result: None,
             state_id: 0,
             use_target: None,
             entities: HashMap::new(),
@@ -432,6 +447,7 @@ impl Game<'_> {
             death_message: None,
             player_type,
             synced: vec![None; CREATIVE_SYNCED],
+            wire_stacks: Default::default(),
             decode_errors: 0,
             clock: None,
             clock_rate: 1.0,
@@ -601,6 +617,9 @@ impl Game<'_> {
             *out.data_mut() = *data;
         }
         out.tidy();
+        if let Some(r) = self.remote.as_ref() {
+            r.wire_stacks.borrow_mut().remember(&out, s);
+        }
         Some(out)
     }
     /// The item's patched components as vanilla's `components` compound.
@@ -721,6 +740,16 @@ impl Game<'_> {
     }
     fn to_network(&self, s: &Option<ItemStack>) -> Option<Stack> {
         let s = s.as_ref()?;
+        // A vanilla client sends back the whole stack it holds. Ours decodes
+        // only some components, so a stack the server sent goes back in its
+        // wire form: its enchantments, names, contents and the rest stay.
+        if let Some(stack) = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.wire_stacks.borrow_mut().find(s))
+        {
+            return Some(stack);
+        }
         let mut stack = Stack::new(self.item_id(&s.item), s.count as i32);
         if s.damage > 0 {
             stack.added.push((
@@ -953,18 +982,17 @@ impl Game<'_> {
         }
     }
     fn set_registries(&mut self, registries: Arc<Dynamic>) {
-        let biomes: Vec<u16> = registries
+        // The server's biomes these resources lack keep their own ids, so
+        // their colours and weather come from the server (Open has plains only).
+        let (biomes, missing) = registries
             .registries
             .get("minecraft:worldgen/biome")
-            .map(|list| {
-                list.iter()
-                    .map(|(name, _)| self.res.biomes().id(name))
-                    .collect()
-            })
+            .map(|list| self.res.biomes().server_ids(list))
             .unwrap_or_default();
         if let Some(r) = self.remote.as_mut() {
             r.biome_bits = ceil_log2(biomes.len());
             r.biome_map = biomes;
+            r.server_biomes = missing;
             r.registries = registries;
         }
     }
@@ -974,6 +1002,19 @@ impl Game<'_> {
             return;
         };
         let dimension = r.registries.dimension(spawn.dimension_type);
+        // The open bundle has the overworld only: elsewhere its sky and fog
+        // come from the server's dimension type.
+        r.environment = (self.options.profile.is_open() && dimension.name != "minecraft:overworld")
+            .then(|| {
+                let data = r
+                    .registries
+                    .data("minecraft:dimension_type", spawn.dimension_type);
+                horizon_client::environment::Environment::from_dimension_type(
+                    &data
+                        .map(horizon_client::item_render::tag_json)
+                        .unwrap_or_default(),
+                )
+            });
         let same = r.dimension.name == dimension.name && keep_world;
         r.dimension = dimension;
         r.game_mode = spawn.game_type;
@@ -1622,6 +1663,22 @@ impl Game<'_> {
             _ => "inventory".into(),
         }
     }
+    /// The crafting result the server sent for the open window, when the
+    /// result slot is the server's alone: an open bundle has its own few
+    /// recipes, not the Java server's, so its grid would make nothing
+    /// (`CraftingMenu.slotChangedCraftingGrid` runs on the server only).
+    /// `None` when the grid is matched here.
+    pub(super) fn server_craft_result(&self) -> Option<Option<ItemStack>> {
+        let r = self.remote.as_ref()?;
+        if !self.options.profile.is_open() {
+            return None;
+        }
+        let open = r.menu.as_ref().map_or(0, |m| m.0);
+        Some(match &r.craft_result {
+            Some((container, item)) if *container == open => item.clone(),
+            _ => None,
+        })
+    }
     fn set_menu_slot(&mut self, container: i32, slot: i32, item: Option<ItemStack>) {
         let menu = self.open_menu_name(container);
         if menu == "minecraft:lectern" {
@@ -1637,7 +1694,16 @@ impl Game<'_> {
             return;
         };
         if internal == 200 {
-            return; // the result slot is recomputed from the grid
+            // Kept for `server_craft_result`; otherwise the result slot is
+            // recomputed from the grid.
+            // The inventory's own result while another window is open is not
+            // the one shown.
+            if let Some(r) = self.remote.as_mut()
+                && r.menu.as_ref().map_or(0, |m| m.0) == container
+            {
+                r.craft_result = Some((container, item));
+            }
+            return;
         }
         *self.slot_mut(internal) = item;
         if internal >= super::stations::INPUT && self.station.is_some() {
@@ -4718,6 +4784,9 @@ impl Game<'_> {
             r.menu_title = None;
         }
         self.mount_menu_reset();
+        if let Some(r) = self.remote.as_mut() {
+            r.craft_result = None;
+        }
         // The client's menu has no level access: what it holds is the server's.
         self.station = None;
         // AbstractContainerMenu.removed: the server gives the grid and the
@@ -4999,6 +5068,18 @@ impl Game<'_> {
             let tw = HudBatch::text_width(atlas, message);
             batch.text(atlas, message, (w - tw) / 2.0, 85.0, u32::MAX, true);
         }
+    }
+    /// Every entity the server sent and has not removed, but this client's
+    /// own player: (entity id, type name, last known position).
+    pub(super) fn remote_entities(&self) -> Vec<(i32, &str, [f64; 3])> {
+        let Some(r) = self.remote.as_ref() else {
+            return Vec::new();
+        };
+        r.entities
+            .iter()
+            .filter(|(id, _)| **id != r.entity_id)
+            .map(|(id, t)| (*id, t.kind.as_str(), t.position))
+            .collect()
     }
     /// Status for `horizon-ctl status`.
     /// The other players' entities in the level and their names (from the
@@ -5438,6 +5519,44 @@ fn in_storage_range(view_distance: i32, center: (i32, i32), x: i32, z: i32) -> b
     x.abs_diff(center.0) <= range && z.abs_diff(center.1) <= range
 }
 
+/// Recently received stacks that carry components, by the [`ItemStack`] each
+/// decoded to (count 1), newest last. Creative slot updates (`to_network`)
+/// look a stack up here so the server gets back what it sent, components this
+/// client doesn't decode included.
+#[derive(Default)]
+struct WireStacks(Vec<(ItemStack, Stack)>);
+impl WireStacks {
+    /// Enough for a full inventory, an open container and the creative screen's
+    /// carried stack with room to spare.
+    const CAPACITY: usize = 256;
+    fn key(s: &ItemStack) -> ItemStack {
+        let mut key = s.clone();
+        key.count = 1;
+        key
+    }
+    fn remember(&mut self, decoded: &ItemStack, wire: &Stack) {
+        if wire.added.is_empty() && wire.removed.is_empty() {
+            return;
+        }
+        let key = Self::key(decoded);
+        self.0.retain(|(k, _)| *k != key);
+        if self.0.len() >= Self::CAPACITY {
+            self.0.remove(0);
+        }
+        self.0.push((key, wire.clone()));
+    }
+    /// The wire form of `s` with its count, if the server sent one like it.
+    fn find(&mut self, s: &ItemStack) -> Option<Stack> {
+        let key = Self::key(s);
+        let at = self.0.iter().rposition(|(k, _)| *k == key)?;
+        let entry = self.0.remove(at);
+        let mut stack = entry.1.clone();
+        stack.count = s.count as i32;
+        self.0.push(entry);
+        Some(stack)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -5458,6 +5577,44 @@ mod tests {
     }
 
     use super::Game;
+
+    /// A stack the server sent goes back whole, with the count it has now;
+    /// one it never sent, or one changed here, does not match.
+    #[test]
+    fn creative_updates_send_received_stacks_back_whole() {
+        use super::{ItemStack, Stack, WireStacks};
+        use horizon_protocol::item::Component;
+        let mut wire = Stack::new(7, 1);
+        wire.added.push((79, Component::Raw(vec![1, 2, 3])));
+        wire.removed.push(5);
+        let mut decoded = ItemStack::new("minecraft:beehive", 1);
+        let mut stacks = WireStacks::default();
+        stacks.remember(&decoded, &Stack::new(7, 1));
+        assert!(
+            stacks.find(&decoded).is_none(),
+            "no components: nothing kept"
+        );
+        stacks.remember(&decoded, &wire);
+        decoded.count = 3;
+        let sent = stacks.find(&decoded).unwrap();
+        assert_eq!((sent.item, sent.count), (7, 3));
+        assert_eq!(
+            (sent.added, sent.removed),
+            (wire.added.clone(), wire.removed.clone())
+        );
+        decoded.damage = 1;
+        assert!(stacks.find(&decoded).is_none());
+        assert!(stacks.find(&ItemStack::new("minecraft:stone", 1)).is_none());
+        for i in 0..WireStacks::CAPACITY {
+            stacks.remember(&ItemStack::new(&format!("minecraft:item_{i}"), 1), &wire);
+        }
+        assert_eq!(stacks.0.len(), WireStacks::CAPACITY);
+        assert!(
+            stacks
+                .find(&ItemStack::new("minecraft:beehive", 1))
+                .is_none()
+        );
+    }
 
     /// Number keys and Q can arrive before the next simulation tick. Exercise
     /// their real input path, including prediction and the remembered wire slot.
@@ -5514,6 +5671,7 @@ mod tests {
             dev_mods: Vec::new(),
             server_thread: false,
             integrated: false,
+            profile: Default::default(),
         };
         let mut game = Game::new(
             &loaded.resources,

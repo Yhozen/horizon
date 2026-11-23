@@ -360,8 +360,16 @@ fn shapeless(ingredients: &[&str], result: &str, count: u32, category: &str) -> 
 pub fn recipes(blocks: &[Block]) -> Vec<(String, Value)> {
     let mut out: Vec<(String, Value)> = Vec::new();
     let m = |id: &str| format!("minecraft:{id}");
-    for b in blocks.iter().filter(|b| b.id.ends_with("_log")) {
+    for b in blocks
+        .iter()
+        .filter(|b| b.has_item() && b.id.ends_with("_log"))
+    {
         let species = b.id.trim_end_matches("_log");
+        // Stripped logs have no planks of their own.
+        let planks = format!("{species}_planks");
+        if !blocks.iter().any(|p| p.id == planks && p.has_item()) {
+            continue;
+        }
         out.push((
             format!("{species}_planks"),
             shapeless(&[&m(b.id)], &format!("{species}_planks"), 4, "building"),
@@ -544,7 +552,13 @@ pub fn loot_table(block: &Block) -> Option<Value> {
     let pools = match block.drop {
         Drop::Nothing => return None,
         Drop::Itself => {
-            json!([{"rolls": 1.0, "entries": [item(block.key())], "conditions": [explosion]}])
+            let mut entry = item(block.key());
+            if block.classes.contains(&"SlabBlock") {
+                // A double slab gives two.
+                entry["modifier"] = json!([{"type": "minecraft:set_count", "count": 2,
+                    "conditions": [{"type": "minecraft:block_state_property", "block": block.key(), "properties": {"type": "double"}}]}]);
+            }
+            json!([{"rolls": 1.0, "entries": [entry], "conditions": [explosion]}])
         }
         Drop::Item { id, min, max, ore } => {
             let mut entry = item(format!("minecraft:{id}"));
@@ -603,4 +617,140 @@ pub fn write(bundle: &mut crate::Bundle, blocks: &[Block], items: &[Item]) -> cr
         )?;
     }
     Ok(())
+}
+
+const DEFAULTS: &str = include_str!("../data/items/defaults.json");
+
+/// The components every one of Minecraft's items has by default.
+pub fn base_components() -> serde_json::Map<String, Value> {
+    let data: Value = serde_json::from_str(DEFAULTS).expect("data/items/defaults.json");
+    data["base"].as_object().cloned().unwrap_or_default()
+}
+
+/// One of Minecraft's items that is not a block, with Minecraft's default
+/// components (`data/items/defaults.json`, written by
+/// `tools/open_item_defaults.py`).
+#[derive(Clone, Debug)]
+pub struct VanillaItem {
+    /// The path of its `minecraft:` identifier.
+    pub id: &'static str,
+    /// Drawn as a tool in the hand (`item/handheld`), else flat.
+    pub handheld: bool,
+    /// Its texture under `textures/` (`item/rotten_flesh`).
+    pub texture: String,
+    /// Its default components, without the name and model `assets` adds.
+    pub components: serde_json::Map<String, Value>,
+}
+
+impl VanillaItem {
+    pub fn key(&self) -> String {
+        format!("minecraft:{}", self.id)
+    }
+    /// Its English name, from its identifier ("Rotten Flesh").
+    pub fn name(&self) -> String {
+        self.id
+            .split('_')
+            .map(|w| {
+                let mut c = w.chars();
+                c.next()
+                    .map(|f| f.to_uppercase().chain(c).collect())
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<String>>()
+            .join(" ")
+    }
+}
+
+/// Minecraft's items that are not blocks and that [`all`] does not define,
+/// in registry order.
+pub fn vanilla() -> Vec<VanillaItem> {
+    let data: Value = serde_json::from_str(DEFAULTS).expect("data/items/defaults.json");
+    let base = data["base"].as_object().cloned().unwrap_or_default();
+    let own: std::collections::HashSet<String> = all().into_iter().map(|i| i.id).collect();
+    crate::numbering::names("item")
+        .iter()
+        .filter(|id| !own.contains(**id))
+        .filter_map(|id| {
+            let entry = data["items"].get(*id)?;
+            let mut components = base.clone();
+            for (k, v) in entry["components"].as_object()? {
+                if v.is_null() {
+                    components.remove(k);
+                } else {
+                    components.insert(k.clone(), v.clone());
+                }
+            }
+            Some(VanillaItem {
+                id,
+                handheld: entry["handheld"].as_bool().unwrap_or(false),
+                texture: entry["texture"]
+                    .as_str()
+                    .map_or_else(|| format!("item/{id}"), str::to_owned),
+                components,
+            })
+        })
+        .collect()
+}
+
+/// Minecraft's default components of a block's item (`blocks` in
+/// `data/items/defaults.json`), without the name and model `assets` adds;
+/// none for a name that has no block item there.
+pub fn block_item_components(id: &str) -> Option<serde_json::Map<String, Value>> {
+    static DATA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    let data =
+        DATA.get_or_init(|| serde_json::from_str(DEFAULTS).expect("data/items/defaults.json"));
+    let entry = data["blocks"].get(id)?;
+    let mut components = data["base"].as_object().cloned().unwrap_or_default();
+    for (k, v) in entry["components"].as_object()? {
+        if v.is_null() {
+            components.remove(k);
+        } else {
+            components.insert(k.clone(), v.clone());
+        }
+    }
+    Some(components)
+}
+
+#[cfg(test)]
+mod vanilla_tests {
+    #[test]
+    fn block_items_have_minecraft_defaults() {
+        let planks = super::block_item_components("oak_planks").unwrap();
+        assert_eq!(planks["minecraft:max_stack_size"], 64);
+        assert_eq!(
+            planks["minecraft:cooking_fuel"]["burn_time"],
+            "minecraft:cooking/time_wood_blocks"
+        );
+        assert_eq!(
+            planks["minecraft:break_sound"],
+            "minecraft:entity.item.break"
+        );
+        let bed = super::block_item_components("white_bed").unwrap();
+        assert_eq!(bed["minecraft:max_stack_size"], 1);
+        assert!(
+            super::block_item_components("stick").is_none(),
+            "not a block"
+        );
+    }
+
+    #[test]
+    fn rotten_flesh_has_minecraft_food_values() {
+        let items = super::vanilla();
+        let flesh = items.iter().find(|i| i.id == "rotten_flesh").unwrap();
+        assert_eq!(flesh.name(), "Rotten Flesh");
+        assert_eq!(flesh.texture, "item/rotten_flesh");
+        assert!(!flesh.handheld);
+        let food = &flesh.components["minecraft:food"];
+        assert_eq!(
+            (food["nutrition"].as_i64(), food["saturation"].as_f64()),
+            (Some(4), Some(0.8))
+        );
+        assert_eq!(flesh.components["minecraft:max_stack_size"], 64);
+        let sword = items.iter().find(|i| i.id == "golden_sword").unwrap();
+        assert!(sword.handheld);
+        assert_eq!(sword.components["minecraft:max_stack_size"], 1);
+        // The open edition's own items keep their definitions.
+        assert!(items.iter().all(|i| i.id != "apple" && i.id != "stick"));
+        assert!(items.len() > 450, "{}", items.len());
+    }
 }

@@ -242,13 +242,16 @@ fn connection(stream: TcpStream, config: &Config, tables: &Arc<Tables>) -> Resul
     };
     let close_down = close.clone();
     let down_tables = tables.clone();
+    // Recipe display ids the server's book packets teach, for the player's picks.
+    let displays = crate::recipes::Displays::default();
+    let down_displays = displays.clone();
     let debug = config.debug;
     let name = hello.name.clone();
     // Server → player.
     let down = std::thread::Builder::new()
         .name("relay-down".into())
         .spawn(move || {
-            let mut t = translate::Clientbound::new(&down_tables);
+            let mut t = translate::Clientbound::new(&down_tables).with_displays(down_displays);
             let result = (|| -> Result<(), String> {
                 loop {
                     let (id, payload) = upstream_reader.recv().map_err(err)?;
@@ -265,7 +268,7 @@ fn connection(stream: TcpStream, config: &Config, tables: &Arc<Tables>) -> Resul
         })
         .map_err(|e| e.to_string())?;
     // Player → server.
-    let mut t = translate::Serverbound::new(tables);
+    let mut t = translate::Serverbound::new(tables).with_displays(displays);
     let up = (|| -> Result<(), String> {
         loop {
             let (id, payload) = client_reader.recv().map_err(err)?;

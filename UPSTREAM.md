@@ -6,7 +6,21 @@ Upstream repository: <https://github.com/horizon-rust/horizon>, branch `main`.
 | --- | --- |
 | Most recent backported source | [`0a9d9a871562561b1c8a5964326603f942c8c089`](https://github.com/horizon-rust/horizon/commit/0a9d9a871562561b1c8a5964326603f942c8c089) — Reject negative trim pattern holders in received recipes |
 | Main merge that introduced that source | [`85b5bcca7c79bb470b90bdb5914b413aa66fe7ae`](https://github.com/horizon-rust/horizon/commit/85b5bcca7c79bb470b90bdb5914b413aa66fe7ae) — Merge pull request #17145 from kacpherek/mod-api-merge |
-| Upstream tip assessed on 2026-11-17 | [`810f09f5bc35c33d39534a33269654075d575122`](https://github.com/horizon-rust/horizon/commit/810f09f5bc35c33d39534a33269654075d575122) |
+| Upstream tip assessed on 2026-11-17 (second pass) | [`34fcb5c361e9fba8b951f695f4e288e081d8e031`](https://github.com/horizon-rust/horizon/commit/34fcb5c361e9fba8b951f695f4e288e081d8e031) |
+
+## Licence boundary: imports stopped
+
+This fork stays under the **MIT licence**. Upstream moved to LGPL-3.0-or-later in
+[`fb1135c6020b09ba8d4645bd70b0a94a405f8ad1`](https://github.com/horizon-rust/horizon/commit/fb1135c6020b09ba8d4645bd70b0a94a405f8ad1)
+(2026-11-15). **No code, tests or comments are taken from upstream after that change.** Only code
+already MIT at upstream `fb1135c6020^` (`59dff1a36bb3a2308f120480e57a2e01c4ba1aae`) may still be
+imported; check with `git merge-base --is-ancestor <source> 59dff1a36bb3a2308f120480e57a2e01c4ba1aae`.
+Later upstream bugs may be noted as reports, and fixed independently from vanilla's behaviour and this
+fork's own code, without reading or copying upstream's patch.
+
+One recorded source, `0a9d9a871562561b1c8a5964326603f942c8c089` (a 3-line negative-holder guard), was
+authored on 2026-11-10 in a tree still licensed MIT, but entered upstream `main` after the change.
+Every other row is an ancestor of `59dff1a36b`.
 
 These are selective imports. The backport pointer does **not** mean every earlier upstream change
 is present, and the assessed tip does **not** mean its code has been imported. “Most recent” means
@@ -115,6 +129,25 @@ change `fb1135c6020b09ba8d4645bd70b0a94a405f8ad1`. Prior model-cache identity, r
 display-click, owner identity, backup and inventory fixes are preserved. Verification is recorded
 in the backport PRs. Runtime checks use isolated homes and prepared R2 resources; Java-oracle
 execution additionally requires Minecraft JARs, which those resources do not contain.
+
+### Second 2026-11-17 pass
+
+`810f09f5bc35c33d39534a33269654075d575122..34fcb5c361e9fba8b951f695f4e288e081d8e031`: 19 commits,
+mostly tooling, CI and docs. **Licence:** upstream moved from MIT to LGPL-3.0-or-later in
+`fb1135c6020b09ba8d4645bd70b0a94a405f8ad1` (2026-11-15); every commit in this range is LGPL, so none is
+copied into this MIT fork, and nothing is added to the imported-source table.
+
+- Dead mount inventory duplication (reported upstream by `da7afd64bb99586dc30fb7d8bc795df3308527ac`):
+  fixed independently from vanilla's `handleContainerClick`/`stillValid` rule, using this fork's own
+  existing range check. No upstream code or test copied.
+- Silk-touched hive bees/honey sync (`fd3142737b678255e6ff6337e3b475256b840876`): not applicable on its
+  own. Checking it found that this fork's creative `SetCreativeModeSlot` path sent only item, count and
+  damage, and the Horizon server read back only damage and enchantments, so a creative move deleted
+  names, books, colours and (from vanilla servers) every other component. Fixed independently: the
+  client returns a received stack's wire form, and the server reads back what it writes. The Horizon
+  server still sends no `bees` component, so hives keep their bees only on vanilla servers.
+- Shulker knockback (`52c6277ed9e5736e9a78a07db501db11c3f6ecff`): parity only; the fork's shulker tick
+  already zeroes its velocity. Not taken.
 
 ## Maintaining the record
 

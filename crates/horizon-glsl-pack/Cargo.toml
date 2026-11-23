@@ -1,0 +1,20 @@
+[package]
+name = "horizon-glsl-pack"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Translates OptiFine-format GLSL shader packs into WGSL for Horizon's renderer (written from the pack format, clean room)"
+
+[dependencies]
+naga = { version = "30.0.1", features = ["glsl-in", "wgsl-in", "wgsl-out"] }
+bytemuck = { version = "1.24", features = ["derive"] }
+
+[dev-dependencies]
+# `examples/pack_check.rs`: reads zipped packs, runs naga's SPIR-V writer, writes JSON.
+naga = { version = "30.0.1", features = ["spv-out"] }
+serde_json = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[lints]
+workspace = true

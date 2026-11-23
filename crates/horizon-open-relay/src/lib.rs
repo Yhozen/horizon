@@ -3,6 +3,8 @@
 //! players and vanilla's to the server (docs/open-creative.md, "Joining a
 //! Java server through the relay").
 #![forbid(unsafe_code)]
+pub mod policy;
+pub mod recipes;
 pub mod relay;
 pub mod rules;
 pub mod tables;

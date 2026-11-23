@@ -2034,6 +2034,12 @@
       "file": "licenses/CC0-1.0.txt",
       "origin": "https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt",
       "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+    },
+    {
+      "id": "CC-BY-SA-4.0",
+      "file": "licenses/CC-BY-SA-4.0.txt",
+      "origin": "https://creativecommons.org/licenses/by-sa/4.0/legalcode.txt",
+      "sha256": "28a9529c7d0bb4dc51f4bf5c116a3d16ef247a052f7591466768ddf563fd1cf5"
     }
   ],
   "fonts": [
@@ -2047,6 +2053,13 @@
       "sha256": "5219b5ad08fde84e82b4a926614766c253379757eca86f56b766b0bdbfff69af",
       "notice_sha256": "b66ba46f511a851ab09998b5a5a9fdbb102545a3864cb993095e1745996873a7",
       "author": "The Pixelify Sans Project Authors"
+    }
+  ],
+  "packs": [
+    {
+      "manifest": "packs/pixel_perfection_legacy/pack.json",
+      "sha256": "35c723f4b470c1cc783bfd18447bf9eaeb1f4d42626a9eded8e2014c81bd4eb7",
+      "enabled": true
     }
   ]
 }

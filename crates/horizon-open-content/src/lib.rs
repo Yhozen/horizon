@@ -11,13 +11,26 @@
 //! generator in this crate; [`write`] refuses anything else, and
 //! [`verify`] checks a written bundle against its provenance record.
 pub mod art;
+pub mod art_advancements;
 pub mod art_survival;
 pub mod assets;
 pub mod blocks;
+pub mod chests;
+pub mod connected;
+pub mod coverage;
+pub mod creatures;
+pub mod cubes;
 pub mod image;
 pub mod items;
 pub mod lang;
+pub mod mobs;
 pub mod network;
+pub mod numbering;
+pub mod openings;
+pub mod plants;
+pub mod screens;
+pub mod shapes;
+pub mod slabs;
 pub mod sources;
 pub mod tables;
 
@@ -73,6 +86,18 @@ impl Bundle {
         generator: &'static str,
     ) -> Result<()> {
         let mut bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
+        bytes.push(b'\n');
+        self.add(path, bytes, Origin::Generator(generator))
+    }
+    /// [`Self::json`] without the indentation, for the tables with a row per
+    /// block state or registry name.
+    pub fn compact_json(
+        &mut self,
+        path: impl Into<String>,
+        value: &Value,
+        generator: &'static str,
+    ) -> Result<()> {
+        let mut bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
         bytes.push(b'\n');
         self.add(path, bytes, Origin::Generator(generator))
     }
@@ -137,8 +162,9 @@ pub fn build(inputs: &Inputs) -> Result<Bundle> {
     tables::health(&mut bundle, &blocks)?;
     assets::write(&mut bundle, &blocks, &items, &sources)?;
     items::write(&mut bundle, &blocks, &items)?;
-    art::write(&mut bundle)?;
-    network::write(&mut bundle, &blocks)?;
+    art::write(&mut bundle, &sources)?;
+    network::write(&mut bundle)?;
+    coverage::write(&mut bundle, &blocks)?;
     sources.write_notices(&mut bundle)?;
     bundle.json(
         MANIFEST,
@@ -151,11 +177,11 @@ pub fn build(inputs: &Inputs) -> Result<Bundle> {
             "features": {
                 "available": [
                     "creative", "survival", "single_player", "multiplayer", "overworld",
-                    "first_person", "third_person", "crafting", "tools", "food"
+                    "first_person", "third_person", "crafting", "tools", "food", "weather"
                 ],
                 "unavailable": [
                     "nether", "end", "mobs", "sound", "saving_in_browser", "structures",
-                    "weather", "smelting", "fluid_flow", "random_ticks"
+                    "smelting", "random_ticks"
                 ],
             },
             "starter_hotbar": [
@@ -187,21 +213,11 @@ fn validate(bundle: &Bundle, blocks: &[blocks::Block]) -> Result<()> {
             if !bundle.contains(&path) {
                 return Err(format!("{} has no block state definition", block.id));
             }
-            // Every state picks a variant: "" for no properties, else
-            // one key per value of its single property.
             let definition: Value = serde_json::from_slice(bundle.get(&path).unwrap())
                 .map_err(|e| format!("{path}: {e}"))?;
-            let variants = definition["variants"]
-                .as_object()
-                .ok_or_else(|| format!("{path} has no variants"))?;
-            for state in block.states() {
-                let key: Vec<String> = state.iter().map(|(k, v)| format!("{k}={v}")).collect();
-                if !variants.contains_key(&key.join(",")) {
-                    return Err(format!(
-                        "{path} has no variant for state [{}]",
-                        key.join(",")
-                    ));
-                }
+            match definition["multipart"].as_array() {
+                Some(parts) => validate_multipart(&path, parts, block)?,
+                None => validate_variants(&path, &definition, block)?,
             }
         }
         for texture in block.textures() {
@@ -236,7 +252,8 @@ fn validate(bundle: &Bundle, blocks: &[blocks::Block]) -> Result<()> {
             .as_object()
             .into_iter()
             .flatten()
-            .filter_map(|(_, v)| v.as_str())
+            // A name, or a sprite object (`{"sprite": ..., "force_translucent": true}`).
+            .filter_map(|(_, v)| v.as_str().or(v["sprite"].as_str()))
         {
             if texture.starts_with('#') {
                 continue;
@@ -302,6 +319,7 @@ fn validate(bundle: &Bundle, blocks: &[blocks::Block]) -> Result<()> {
             }
         }
     }
+    let block_names: std::collections::HashSet<String> = blocks.iter().map(|b| b.key()).collect();
     for path in bundle
         .paths()
         .filter(|p| p.starts_with("data/minecraft/tags/block/"))
@@ -316,7 +334,7 @@ fn validate(bundle: &Bundle, blocks: &[blocks::Block]) -> Result<()> {
         {
             let known = match v.strip_prefix('#') {
                 Some(tag) => tag_exists("block", tag),
-                None => blocks.iter().any(|b| b.key() == v),
+                None => block_names.contains(v),
             };
             if !known {
                 return Err(format!("{path}: names the missing block {v}"));
@@ -336,6 +354,108 @@ fn validate(bundle: &Bundle, blocks: &[blocks::Block]) -> Result<()> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+/// `key=value` pairs, as a variant key or a part's condition writes them.
+fn predicate(key: &str) -> Vec<(&str, &str)> {
+    key.split(',')
+        .filter(|p| !p.is_empty())
+        .map(|p| p.split_once('=').unwrap_or((p, "")))
+        .collect()
+}
+
+fn state_key(state: &[(&str, &str)]) -> String {
+    let pairs: Vec<String> = state.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    pairs.join(",")
+}
+
+/// Every state picks a variant, as Minecraft matches them: a variant's
+/// `key=value` pairs all hold in the state ("" holds in every state).
+fn validate_variants(path: &str, definition: &Value, block: &blocks::Block) -> Result<()> {
+    let variants = definition["variants"]
+        .as_object()
+        .ok_or_else(|| format!("{path} has no variants"))?;
+    let predicates: Vec<Vec<(&str, &str)>> = variants.keys().map(|k| predicate(k)).collect();
+    for state in block.states() {
+        let matched = predicates.iter().any(|predicate| {
+            predicate
+                .iter()
+                .all(|(k, v)| state.iter().any(|(sk, sv)| sk == k && sv == v))
+        });
+        if !matched {
+            return Err(format!(
+                "{path} has no variant for state [{}]",
+                state_key(&state)
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// A multipart definition: each part's condition (`when`, every key one
+/// of the block's properties with `|`-separated values it has, or an `OR`
+/// or `AND` list of such conditions) names only real properties and values,
+/// and the default state draws at least one part (others may draw none, as
+/// a wall standing alone without its post does).
+fn validate_multipart(path: &str, parts: &[Value], block: &blocks::Block) -> Result<()> {
+    fn holds(when: &Value, state: &[(&str, &str)], block: &blocks::Block) -> Result<bool> {
+        let map = when.as_object().ok_or("a condition is not an object")?;
+        for (list, all) in [("OR", false), ("AND", true)] {
+            if let Some(terms) = map.get(list) {
+                let terms = terms.as_array().ok_or("OR and AND take a list")?;
+                let mut held = terms.iter().map(|t| holds(t, state, block));
+                return if all {
+                    held.try_fold(true, |acc, h| h.map(|h| acc && h))
+                } else {
+                    held.try_fold(false, |acc, h| h.map(|h| acc || h))
+                };
+            }
+        }
+        let mut all = true;
+        for (key, values) in map {
+            let values = values
+                .as_str()
+                .ok_or("a condition's value is not a string")?;
+            let (_, allowed) = block
+                .properties
+                .iter()
+                .find(|(k, _)| k == key)
+                .ok_or_else(|| format!("names the missing property {key}"))?;
+            let (negate, values) = match values.strip_prefix('!') {
+                Some(rest) => (true, rest),
+                None => (false, values),
+            };
+            for value in values.split('|') {
+                if !allowed.contains(&value) {
+                    return Err(format!("names the missing value {key}={value}"));
+                }
+            }
+            let current = state.iter().find(|(k, _)| k == key).map_or("", |(_, v)| v);
+            all &= values.split('|').any(|v| v == current) != negate;
+        }
+        Ok(all)
+    }
+    let states = block.states();
+    let mut drawn = vec![false; states.len()];
+    for part in parts {
+        if part["apply"].is_null() {
+            return Err(format!("{path}: a part applies no model"));
+        }
+        for (state, drawn) in states.iter().zip(&mut drawn) {
+            let applies = match part.get("when") {
+                None => true,
+                Some(when) => holds(when, state, block).map_err(|e| format!("{path}: {e}"))?,
+            };
+            *drawn |= applies;
+        }
+    }
+    if !drawn[block.default_index()] {
+        return Err(format!(
+            "{path} draws nothing in its default state [{}]",
+            state_key(&states[block.default_index()])
+        ));
     }
     Ok(())
 }
@@ -451,7 +571,8 @@ fn generators() -> Value {
         "art": "horizon-open-content::art and art_survival: original procedural artwork (interface, status bars, screens, bedrock, crafting table, sky, title, player arm)",
         "notices": "horizon-open-content::sources: the credits and notices assembled from sources.json",
         "environment": "horizon-open-content::tables: the biome, dimension and day cycle",
-        "network": "horizon-open-content::network: the registries an open server and its players share",
+        "network": "horizon-open-content::network: the registries an open server and its players share, numbered from the name lists in data/",
+        "coverage": "horizon-open-content::coverage: which registered names have content in this bundle",
         "items": "horizon-open-content::items: recipes, item tags and the recipe advancement from items.rs",
     })
 }
@@ -529,10 +650,24 @@ pub fn verify(dir: &Path) -> Result<usize> {
     Ok(found.len())
 }
 
-/// The browser's data archive of the verified bundle at `dir` (WEB.md's
-/// format: per file a little-endian u32 path length, the path, a u32 data
-/// length and the data), files in path order.
+/// The browser's data archive of the verified bundle at `dir`: [`records`]
+/// compressed with gzip (the page inflates it before the game mounts it,
+/// `inflateArchive` in web/cache.js). The per-state tables repeat almost
+/// every row, so it is a few percent of the bundle's size.
 pub fn archive(dir: &Path) -> Result<Vec<u8>> {
+    use std::io::Write as _;
+    let records = records(dir)?;
+    let mut encoder = flate2::GzBuilder::new()
+        .mtime(0)
+        .write(Vec::new(), flate2::Compression::best());
+    encoder.write_all(&records).map_err(|e| e.to_string())?;
+    encoder.finish().map_err(|e| e.to_string())
+}
+
+/// The verified bundle at `dir` as one stream of records (WEB.md's format:
+/// per file a little-endian u32 path length, the path, a u32 data length and
+/// the data), files in path order.
+pub fn records(dir: &Path) -> Result<Vec<u8>> {
     verify(dir)?;
     let mut files = Vec::new();
     walk(dir, dir, &mut files)?;
@@ -581,6 +716,142 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
     }
 
+    fn file(bundle: &Bundle, path: &str) -> Value {
+        serde_json::from_slice(bundle.get(path).unwrap()).unwrap()
+    }
+
+    /// Every name the bundle defines has Minecraft's id, and every state of
+    /// every block Minecraft's state id (from the committed lists in data/).
+    #[test]
+    fn the_bundle_numbers_everything_as_minecraft_does() {
+        let bundle = build(&Inputs::at(&repo())).unwrap();
+        let registries = file(&bundle, "registries.json");
+        let id = |registry: &str, name: &str| {
+            registries[format!("minecraft:{registry}")]["entries"][name]["protocol_id"].as_u64()
+        };
+        let expect = |registry: &str, name: &str| {
+            let short = name.strip_prefix("minecraft:").unwrap_or(name);
+            let want = numbering::names(registry).iter().position(|n| *n == short);
+            assert!(want.is_some(), "{name} is not a Minecraft {registry}");
+            assert_eq!(
+                id(registry, name),
+                want.map(|i| i as u64),
+                "{registry} {name}"
+            );
+        };
+        for registry in numbering::registries() {
+            let entries = registries[format!("minecraft:{registry}")]["entries"]
+                .as_object()
+                .unwrap();
+            assert_eq!(
+                entries.len(),
+                numbering::names(registry).len(),
+                "{registry}"
+            );
+        }
+        for block in blocks::all() {
+            expect("block", &block.key());
+        }
+        for name in file(&bundle, "items.json").as_object().unwrap().keys() {
+            expect("item", name);
+        }
+        for name in network::ENTITY_TYPES.iter().copied().chain(mobs::names()) {
+            expect("entity_type", &format!("minecraft:{name}"));
+        }
+        for (i, attribute) in file(&bundle, "attributes.json")["attributes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            let name = attribute["id"].as_str().unwrap();
+            assert_eq!(id("attribute", name), Some(i as u64), "{name}");
+        }
+        assert_eq!(
+            file(&bundle, "attributes.json")["attributes"]
+                .as_array()
+                .unwrap()
+                .len(),
+            40
+        );
+
+        // States: the product of each block's properties (keys sorted, last
+        // fastest), blocks in registry order; defaults where Minecraft's are.
+        let facts = file(&bundle, "facts.json");
+        let rows = facts["states"].as_array().unwrap();
+        let mut at = 0usize;
+        for block in numbering::blocks() {
+            let first = at;
+            let mut state = vec![0usize; block.properties.len()];
+            for _ in 0..numbering::state_count(block.properties) {
+                let row = &rows[at][4];
+                let name = format!("minecraft:{}", block.name);
+                let got_name = row.as_str().or(row["id"].as_str()).unwrap();
+                assert_eq!(got_name, name, "state {at}");
+                for (k, (key, values)) in block.properties.iter().enumerate() {
+                    assert_eq!(
+                        row["properties"][*key].as_str(),
+                        Some(values[state[k]]),
+                        "state {at} of {name}"
+                    );
+                }
+                assert_eq!(
+                    row.get("properties")
+                        .and_then(Value::as_object)
+                        .map_or(0, |p| p.len()),
+                    block.properties.len()
+                );
+                // The next state: the last property varies fastest.
+                for k in (0..state.len()).rev() {
+                    state[k] += 1;
+                    if state[k] < block.properties[k].1.len() {
+                        break;
+                    }
+                    state[k] = 0;
+                }
+                at += 1;
+            }
+            let default = block.properties.iter().fold(0, |index, (key, values)| {
+                let value = block.defaults.iter().find(|(k, _)| k == key).unwrap().1;
+                index * values.len() + values.iter().position(|v| *v == value).unwrap()
+            });
+            assert_eq!(
+                facts["defaults"][format!("minecraft:{}", block.name)].as_u64(),
+                Some((first + default) as u64),
+                "{}",
+                block.name
+            );
+        }
+        assert_eq!(at, 35_723);
+        assert_eq!(rows.len(), at, "states beyond Minecraft's");
+
+        // Coverage: content is a subset of each registry, and every block
+        // defined here has content.
+        let coverage = file(&bundle, coverage::PATH);
+        let block = &coverage["registries"]["minecraft:block"];
+        // The shorter list is written: the names with content, or those
+        // without.
+        let (key, with) = match block.get("content") {
+            Some(_) => ("content", true),
+            None => ("missing", false),
+        };
+        let listed: Vec<&str> = block[key]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        let has = |name: &str| listed.contains(&name) == with;
+        for b in blocks::defined() {
+            assert!(has(b.key().as_str()), "{}", b.id);
+        }
+        assert!(has("minecraft:lava"));
+        for (name, entry) in coverage["registries"].as_object().unwrap() {
+            let one = entry.get("content").is_some() != entry.get("missing").is_some();
+            assert!(one, "{name} lists exactly one of content and missing");
+        }
+    }
+
     #[test]
     fn the_bundle_builds_twice_to_the_same_bytes_and_verifies() {
         let a = build(&Inputs::at(&repo())).unwrap();
@@ -590,8 +861,17 @@ mod tests {
         let _ = fs::remove_dir_all(&out);
         write(&a, &out).unwrap();
         assert_eq!(verify(&out).unwrap(), a.len());
-        let packed = archive(&out).unwrap();
-        assert_eq!(packed, archive(&out).unwrap());
+        let compressed = archive(&out).unwrap();
+        assert_eq!(compressed, archive(&out).unwrap());
+        // A gzip stream of the records.
+        assert_eq!(compressed[..2], [0x1f, 0x8b]);
+        let mut packed = Vec::new();
+        std::io::Read::read_to_end(
+            &mut flate2::read::GzDecoder::new(compressed.as_slice()),
+            &mut packed,
+        )
+        .unwrap();
+        assert_eq!(packed, records(&out).unwrap());
         // Every file is one record, in path order.
         let (mut at, mut paths) = (0usize, Vec::new());
         while at < packed.len() {

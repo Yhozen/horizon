@@ -6,7 +6,13 @@ use wasm_bindgen::prelude::*;
 
 /// Panics and the log go to the browser console.
 pub fn install_hooks() {
-    console_error_panic_hook::set_once();
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    HOOK.call_once(|| {
+        std::panic::set_hook(Box::new(|info| {
+            console_error_panic_hook::hook(info);
+            horizon_client::gfx::web_gpu::report_error(&format!("Horizon stopped: {info}"));
+        }));
+    });
     if log::set_logger(&CONSOLE).is_ok() {
         log::set_max_level(log::LevelFilter::Info);
     }
@@ -72,6 +78,14 @@ fn archive_entries(archive: &[u8]) -> Result<Vec<(&str, &[u8])>, JsValue> {
 /// `art`'s English text merged over the bundle's. Only names the bundle already
 /// uses are taken, so its data, models and network numbering stay its own; the
 /// files replaced are listed in `OVERLAY` for the bundle's integrity check.
+/// The open bundle's adult mobs use Minecraft's box layout (crates/horizon-open-content's
+/// `mobs`), so another bundle's skins fit them and are laid over. Its babies are the
+/// adults' models scaled down, which a Minecraft baby skin (a layout of its own)
+/// wouldn't fit: those stay the bundle's own.
+fn is_own_layout(name: &str) -> bool {
+    name.starts_with("assets/minecraft/textures/entity/") && name.ends_with("_baby.png")
+}
+
 pub fn overlay_art(root: &std::path::Path, art: &[u8]) -> Result<usize, JsValue> {
     use horizon_core::fs::PathExt as _;
     let entries = archive_entries(art)?;
@@ -90,13 +104,12 @@ pub fn overlay_art(root: &std::path::Path, art: &[u8]) -> Result<usize, JsValue>
                 // Water's colour is the biome's in both; keep the bundle's own.
                 continue;
             }
-            let bytes = match biome_tint(stem) {
-                // The bundle's models carry no tint: wear the texture as vanilla's
-                // default biome colours would draw it.
-                Some(color) => tinted(data, color).unwrap_or_else(|| data.to_vec()),
-                None => data.to_vec(),
-            };
-            horizon_core::fs::install(&target, bytes);
+            if is_own_layout(name) {
+                continue;
+            }
+            // Grey grass and foliage textures stay grey: the bundle's models tint
+            // them, with the colormaps this archive also lays over.
+            horizon_core::fs::install(&target, data.to_vec());
             replaced.push(name.to_string());
             let meta = format!("{name}.mcmeta");
             if !names.contains(meta.as_str()) && root.join(&meta).is_file_vfs() {
@@ -104,7 +117,10 @@ pub fn overlay_art(root: &std::path::Path, art: &[u8]) -> Result<usize, JsValue>
                 replaced.push(meta);
             }
         } else if let Some(png) = name.strip_suffix(".mcmeta") {
-            if png.starts_with("assets/minecraft/textures/") && root.join(png).is_file_vfs() {
+            if png.starts_with("assets/minecraft/textures/")
+                && !is_own_layout(png)
+                && root.join(png).is_file_vfs()
+            {
                 horizon_core::fs::install(&target, data.to_vec());
                 replaced.push(name.to_string());
             }
@@ -125,69 +141,6 @@ pub fn overlay_art(root: &std::path::Path, art: &[u8]) -> Result<usize, JsValue>
         serde_json::to_vec(&replaced).unwrap_or_default(),
     );
     Ok(count)
-}
-/// The colour a grey, biome-tinted texture is drawn with in a plains-like biome
-/// (grass and foliage colours), for block textures by name.
-fn biome_tint(stem: &str) -> Option<u32> {
-    const GRASS: u32 = 0x91BD59;
-    const FOLIAGE: u32 = 0x77AB2F;
-    match stem {
-        "spruce_leaves" => Some(0x619961),
-        "birch_leaves" => Some(0x80A755),
-        "oak_leaves" | "jungle_leaves" | "acacia_leaves" | "dark_oak_leaves"
-        | "mangrove_leaves" | "vine" => Some(FOLIAGE),
-        "short_grass"
-        | "fern"
-        | "tall_grass_top"
-        | "tall_grass_bottom"
-        | "large_fern_top"
-        | "large_fern_bottom"
-        | "grass_block_top"
-        | "grass_block_side_overlay"
-        | "sugar_cane" => Some(GRASS),
-        _ => None,
-    }
-}
-/// `png` with every pixel's colour multiplied by `color` (0xRRGGBB).
-fn tinted(png_bytes: &[u8], color: u32) -> Option<Vec<u8>> {
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
-    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = decoder.read_info().ok()?;
-    let mut buf = vec![0; reader.output_buffer_size()?];
-    let info = reader.next_frame(&mut buf).ok()?;
-    let (w, h) = (info.width, info.height);
-    let rgba: Vec<u8> = match info.color_type {
-        png::ColorType::Rgba => buf[..info.buffer_size()].to_vec(),
-        png::ColorType::Rgb => buf[..info.buffer_size()]
-            .chunks(3)
-            .flat_map(|p| [p[0], p[1], p[2], 255])
-            .collect(),
-        png::ColorType::GrayscaleAlpha => buf[..info.buffer_size()]
-            .chunks(2)
-            .flat_map(|p| [p[0], p[0], p[0], p[1]])
-            .collect(),
-        png::ColorType::Grayscale => buf[..info.buffer_size()]
-            .iter()
-            .flat_map(|&g| [g, g, g, 255])
-            .collect(),
-        png::ColorType::Indexed => return None,
-    };
-    let tint = [(color >> 16) as u8, (color >> 8) as u8, color as u8];
-    let out: Vec<u8> = rgba
-        .chunks(4)
-        .flat_map(|p| {
-            let m = |c: u8, t: u8| ((u16::from(c) * u16::from(t)) / 255) as u8;
-            [m(p[0], tint[0]), m(p[1], tint[1]), m(p[2], tint[2]), p[3]]
-        })
-        .collect();
-    let mut encoded = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut encoded, w, h);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder.write_header().ok()?.write_image_data(&out).ok()?;
-    }
-    Some(encoded)
 }
 
 /// The list of files `overlay_art` replaced, beside the resources.
@@ -213,11 +166,34 @@ pub async fn start_overlaid(
         "Horizon: {files} resource files mounted at {}, {replaced} wearing the given art",
         root.display()
     );
-    horizon_client::gfx::open_web_gpu()
-        .await
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    crate::game::set_web_args(args);
-    crate::game::run().map_err(|e| JsValue::from_str(&format!("Horizon: {e}")))
+    crate::game::run_web(args).await
+}
+
+/// Puts one file into the game's file system, before `start` or while the game
+/// runs: a relative `path` starts from the game folder (`/horizon`), as the
+/// game's own do. The page restores the files it keeps (shader packs, their
+/// settings) this way, and adds the packs the player picks or drops.
+#[wasm_bindgen]
+pub fn install_file(path: String, bytes: Vec<u8>) {
+    horizon_core::fs::install(std::path::Path::new(&path), bytes);
+}
+
+/// The page added shader packs: the Shader Packs screen lists them again.
+#[wasm_bindgen]
+pub fn shader_packs_changed() {
+    crate::game::shader_packs_changed();
+}
+
+/// A line for the player from the page (a shader pack it could not store or load).
+#[wasm_bindgen]
+pub fn shader_pack_notice(line: String) {
+    crate::game::shader_pack_notice(line);
+}
+
+/// Whether the Shader Packs page shows: the page takes dropped files only then.
+#[wasm_bindgen]
+pub fn shader_pack_page_open() -> bool {
+    crate::game::shader_pack_page_open()
 }
 
 /// Mounts `archive` (tools/web/pack.py) as the prepared resources, opens WebGPU and
@@ -233,9 +209,5 @@ pub async fn start(archive: Vec<u8>, args: Vec<String>) -> Result<(), JsValue> {
         "Horizon: {files} resource files mounted at {}",
         root.display()
     );
-    horizon_client::gfx::open_web_gpu()
-        .await
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    crate::game::set_web_args(args);
-    crate::game::run().map_err(|e| JsValue::from_str(&format!("Horizon: {e}")))
+    crate::game::run_web(args).await
 }

@@ -179,6 +179,25 @@ fn add(a: [i32; 3], b: [i32; 3]) -> [i32; 3] {
 fn dist(a: [f64; 3], b: [f64; 3]) -> f64 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
 }
+/// Every attribute a player has, name to current value: its instance's value
+/// where it has one, else the player type's default (`AttributeSupplier`),
+/// both of which vanilla's `getAttributeValue` reads.
+fn player_attributes(
+    attributes: &horizon_world::attributes::live::LiveAttributes<Box<dyn FnMut() -> i32>>,
+) -> BTreeMap<String, f64> {
+    let catalog = attributes.catalog();
+    attributes
+        .keys()
+        .iter()
+        .filter_map(|key| {
+            let value = match attributes.lookup(Some(key)) {
+                Some(handle) => attributes.instance(&handle).ok()?.clone().value(),
+                None => catalog.default_base("minecraft:player", key.attribute())?,
+            };
+            Some((key.name().to_owned(), value))
+        })
+        .collect()
+}
 /// Minecraft's yaw and pitch facing from `eye` towards `at` (yaw 0 faces +Z,
 /// 90 faces -X; positive pitch looks down).
 pub(super) fn yaw_pitch(eye: [f64; 3], at: [f64; 3]) -> (f32, f32) {
@@ -479,6 +498,14 @@ impl Game<'_> {
                 "shield_cooldown": self.shield_cooldown,
                 "xp": { "level": self.experience.level, "progress": self.experience.progress, "total": self.experience.total },
                 "effects": self.potions.effects.list.iter().map(|e| json!({ "id": e.id, "duration_ticks": e.duration, "amplifier": e.amplifier })).collect::<Vec<_>>(),
+                "pose": p.pose.name(),
+                "swimming": p.swimming,
+                // Entity.wasTouchingWater (isInWater) and wasEyeInWater.
+                "in_water": p.fluids.was_touching_water,
+                "eye_in_water": p.fluids.was_eye_in_water,
+                "eye_height": p.dimensions.eye_height,
+                "dimensions": { "width": p.dimensions.width, "height": p.dimensions.height },
+                "attributes": player_attributes(&p.attributes),
             })
         });
         json!({
@@ -585,6 +612,16 @@ impl Game<'_> {
         };
         let me = [p.position.x, p.position.y, p.position.z];
         let want = kind.map(namespaced);
+        // On a client of a server: the entities the server sent that this
+        // game does not simulate itself (projectiles, vehicles, frames...).
+        let simulated: std::collections::HashSet<i64> = (self.mobs.iter().map(|m| i64::from(m.id)))
+            .chain(self.dropped.iter().map(|i| i64::from(i.id)))
+            .collect();
+        let remote: Vec<_> = self
+            .remote_entities()
+            .into_iter()
+            .filter(|(id, _, _)| !simulated.contains(&i64::from(*id)))
+            .collect();
         let mut list: Vec<(f64, Value)> = Vec::new();
         let mut push = |pos: [f64; 3], ty: &str, v: Value| {
             let d = dist(me, pos);
@@ -626,6 +663,9 @@ impl Game<'_> {
                 "minecraft:experience_orb",
                 json!({ "kind": "orb", "value": orb.value }),
             );
+        }
+        for (id, ty, pos) in remote {
+            push(pos, ty, json!({ "id": id, "kind": "remote" }));
         }
         list.sort_by(|a, b| a.0.total_cmp(&b.0));
         json!({ "entities": list.into_iter().map(|(_, v)| v).collect::<Vec<_>>() })

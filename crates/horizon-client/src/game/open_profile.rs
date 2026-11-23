@@ -28,9 +28,6 @@ pub(super) fn apply(o: &mut Options) -> Result<()> {
     if !o.dev_mods.is_empty() {
         unavailable("mods (--dev-mod)")?;
     }
-    if o.weather.is_some() {
-        unavailable("weather (--weather)")?;
-    }
     if o.dimension
         .as_deref()
         .is_some_and(|d| d != "minecraft:overworld")
@@ -145,6 +142,7 @@ const OPEN_COMMANDS: &[&str] = &[
     "time",
     "tp",
     "w",
+    "weather",
     "xp",
 ];
 
@@ -178,11 +176,12 @@ impl Game<'_> {
 }
 
 /// The game rules that keep unsupported simulation off in an open world: no
-/// weather, mobs, random block changes, fire or source-water creation.
+/// mobs, random block changes or fire spread.
 pub(super) fn hold_rules(rules: &mut horizon_client::gamerules::GameRules) {
     use horizon_client::gamerules::Value;
+    // Earlier Open builds forced this rule off and persisted it in the save.
+    rules.set("advance_weather", Value::Bool(true));
     for (rule, value) in [
-        ("advance_weather", Value::Bool(false)),
         ("spawn_mobs", Value::Bool(false)),
         ("spawn_monsters", Value::Bool(false)),
         ("spawn_patrols", Value::Bool(false)),
@@ -192,7 +191,6 @@ pub(super) fn hold_rules(rules: &mut horizon_client::gamerules::GameRules) {
         ("raids", Value::Bool(false)),
         ("random_tick_speed", Value::Int(0)),
         ("fire_spread_radius_around_player", Value::Int(0)),
-        ("water_source_conversion", Value::Bool(false)),
         ("command_blocks_work", Value::Bool(false)),
     ] {
         rules.set(rule, value);
@@ -243,6 +241,16 @@ pub(super) fn check_world(profile: ContentProfile, world: &std::path::Path) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_open_rules_allow_weather_after_upgrade() {
+        use horizon_client::gamerules::{GameRules, Value};
+        let mut rules = GameRules::default();
+        rules.set("advance_weather", Value::Bool(false));
+        hold_rules(&mut rules);
+        assert!(rules.bool("advance_weather"));
+        assert_eq!(rules.int("random_tick_speed"), 0);
+    }
 
     #[test]
     fn worlds_open_only_with_the_content_they_were_made_with() {

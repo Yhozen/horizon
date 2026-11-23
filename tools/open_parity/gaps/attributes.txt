@@ -1,0 +1,6 @@
+minecraft:attack_damage
+minecraft:below_name_distance
+minecraft:jump_strength
+minecraft:knockback_resistance
+minecraft:movement_speed
+minecraft:name_tag_distance

@@ -1244,27 +1244,79 @@ impl Game<'_> {
         }
     }
 
+    /// A creative client's stack (`SetCreativeModeSlot`), read back with every
+    /// component [`horizon_client::lan::guest::stack_to_network`] writes, so a
+    /// stack this server sent survives being moved on the creative screen.
     fn item_from_network(
         &self,
         host: &LanHost,
         stack: &Option<horizon_protocol::item::Stack>,
     ) -> Option<ItemStack> {
-        use horizon_protocol::item::{Component, component};
         let s = stack.as_ref()?;
+        Some(Self::stack_from_network(host, s, s.count.max(1) as u32))
+    }
+    fn stack_from_network(
+        host: &LanHost,
+        s: &horizon_protocol::item::Stack,
+        count: u32,
+    ) -> ItemStack {
+        use horizon_protocol::item::{Component, component};
         let name = host
             .hub
             .item_name(s.item)
             .unwrap_or_else(|| "minecraft:air".into());
-        let mut out = ItemStack::new(&name, s.count.max(1) as u32);
+        let mut out = ItemStack::new(&name, count);
         out.damage = s.damage().max(0) as u32;
+        let levels = |list: &[(i32, i32)]| -> Vec<(std::sync::Arc<str>, u32)> {
+            list.iter()
+                .filter_map(|(id, level)| {
+                    Some((
+                        host.hub.enchantment_name(*id)?.into(),
+                        (*level).max(0) as u32,
+                    ))
+                })
+                .collect()
+        };
+        let plain = |t: &horizon_world::nbt::Tag| horizon_client::entity_nbt::name_text(t).plain();
+        let int = |kind| match s.component(kind) {
+            Some(Component::Int(v)) => Some(*v),
+            _ => None,
+        };
+        let data = out.data_mut();
         if let Some(Component::Enchantments(list)) = s.component(component::ENCHANTMENTS) {
-            for (id, level) in list {
-                if let Some(e) = host.hub.enchantment_name(*id) {
-                    out.enchant(&e, *level as u32);
-                }
-            }
+            data.enchantments = levels(list);
         }
-        Some(out)
+        if let Some(Component::Enchantments(list)) = s.component(component::STORED_ENCHANTMENTS) {
+            data.stored_enchantments = levels(list);
+        }
+        data.dyed_color = int(component::DYED_COLOR);
+        data.map_id = int(component::MAP_ID);
+        data.repair_cost = int(component::REPAIR_COST).unwrap_or(0).max(0) as u32;
+        data.map_post_processing =
+            int(component::MAP_POST_PROCESSING).and_then(|v| u8::try_from(v).ok());
+        if let Some(Component::Stacks(charged)) = s.component(component::CHARGED_PROJECTILES) {
+            data.charged = charged
+                .iter()
+                .map(|c| Self::stack_from_network(host, c, c.count.max(1) as u32))
+                .collect();
+        }
+        if let Some(Component::WritableBook(pages)) = s.component(component::WRITABLE_BOOK_CONTENT)
+        {
+            data.writable_pages = pages.clone();
+        }
+        if let Some(Component::WrittenBook(b)) = s.component(component::WRITTEN_BOOK_CONTENT) {
+            data.written = Some(horizon_client::item_data::WrittenBook {
+                title: b.title.clone(),
+                author: b.author.clone(),
+                generation: u8::try_from(b.generation).unwrap_or(0),
+                pages: b.pages.iter().map(plain).collect(),
+            });
+        }
+        if let Some(Component::Text(t)) = s.component(component::CUSTOM_NAME) {
+            data.custom_name = Some(plain(t));
+        }
+        out.tidy();
+        out
     }
 
     /// `AbstractContainerMenu.removed`: what a closing player held on the

@@ -1,17 +1,22 @@
 //! The open content's blocks, authored here. Identifiers reuse the familiar
-//! `minecraft:` names the shared gameplay code looks blocks up by; the states,
-//! their numeric ids and every fact about them are this crate's own and imply
-//! no compatibility with Minecraft worlds.
+//! `minecraft:` names the shared gameplay code looks blocks up by, and the
+//! bundle numbers blocks and their states exactly as Minecraft 26.3 does
+//! ([`crate::numbering`]): every Minecraft block is registered, those this
+//! crate does not define as inert support blocks. The facts about each block
+//! are this crate's own.
+use crate::numbering::{self, BlockStates};
+use std::collections::{HashMap, HashSet};
 
 /// What a block is for in this edition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tier {
     /// In the creative palette: placeable, breakable, with an item.
     Palette,
-    /// Terrain the preset generates but players cannot pick (air, water, grass).
+    /// Terrain and fluids players cannot pick (air, water, lava, grass).
     Terrain,
-    /// Required by name by the shared loaders, never generated or offered:
-    /// one inert state with no model, item, collision or light.
+    /// A Minecraft block without content yet, registered so the numbering is
+    /// Minecraft's: never generated or offered, every state inert, with no
+    /// model, item, collision or light.
     Support,
 }
 
@@ -28,8 +33,14 @@ pub enum Form {
     Cross,
     /// A fluid surface drawn by the fluid renderer.
     Fluid,
+    /// Solid but not a full cube in some states: its shapes come from
+    /// [`crate::shapes::of`] per state (slabs, stairs).
+    Shaped,
     /// Present only so loaders resolve its name.
     Inert,
+    /// A wall, fence, gate, pane or bars: its shapes and models follow its
+    /// connections ([`crate::connected`]).
+    Connected(crate::connected::Family),
 }
 
 /// The render layer (`ChunkSectionLayer`).
@@ -63,10 +74,44 @@ pub enum Faces {
         front: &'static str,
         side: &'static str,
     },
+    /// A cube with one texture per face: down, up, north, south, west,
+    /// east (rotated by `axis` when it has one).
+    Cube([&'static str; 6]),
+    /// A log: a cube turned by `axis` whose top, lying down, is turned half
+    /// a turn (Minecraft's horizontal column).
+    Pillar([&'static str; 6]),
+    /// A cube facing its `facing` (north unturned), with another front
+    /// when `lit` (furnaces).
+    Facing {
+        faces: [&'static str; 6],
+        lit_north: &'static str,
+    },
     Cross(&'static str),
+    /// A slab: its halves' bottom, top and side, and the six faces of the
+    /// double slab (down, up, north, south, west, east).
+    Slab {
+        bottom: &'static str,
+        top: &'static str,
+        side: &'static str,
+        double: [&'static str; 6],
+    },
+    /// Stairs: the bottom, top and side of its models.
+    Stairs {
+        bottom: &'static str,
+        top: &'static str,
+        side: &'static str,
+    },
+    /// Models drawn by [`crate::plants`] from its facts file.
+    Plant,
     Fluid {
         still: &'static str,
         flow: &'static str,
+    },
+    /// Walls, fences and gates: one texture; panes and bars: the pane and
+    /// its edge.
+    Connected {
+        texture: &'static str,
+        edge: &'static str,
     },
 }
 
@@ -81,6 +126,8 @@ pub enum Sound {
     Wood,
     Glass,
     Wool,
+    /// Another of Minecraft's sound types, by name (`block.<name>.break`).
+    Named(&'static str),
     None,
 }
 impl Sound {
@@ -93,6 +140,7 @@ impl Sound {
             Self::Wood => "wood",
             Self::Glass => "glass",
             Self::Wool => "wool",
+            Self::Named(name) => name,
             Self::None => "stone",
         }
     }
@@ -181,14 +229,17 @@ pub struct Block {
     pub layer: Layer,
     pub faces: Faces,
     /// Properties in key order with their values in state order; states are
-    /// their cartesian product, the last property varying fastest.
+    /// their cartesian product, the last property varying fastest. [`defined`]
+    /// and [`all`] set them to Minecraft's.
     pub properties: &'static [(&'static str, &'static [&'static str])],
-    /// The default state's values, by key.
+    /// The default state's values, by key (Minecraft's, as `properties`).
     pub defaults: &'static [(&'static str, &'static str)],
     /// Destroy time; -1 is unbreakable outside creative.
     pub hardness: f32,
     pub resistance: f32,
     pub light: u8,
+    /// Light it gives in its `lit=true` states (furnaces).
+    pub lit_light: u8,
     /// Light it absorbs (0..=15).
     pub opacity: u8,
     pub sound: Sound,
@@ -319,6 +370,7 @@ const fn cube(
         hardness,
         resistance: hardness * 3.0,
         light: 0,
+        lit_light: 0,
         opacity: 15,
         sound,
         classes: BLOCK,
@@ -487,6 +539,7 @@ const fn plant(id: &'static str, name: &'static str, map_color: u32) -> Block {
         hardness: 0.0,
         resistance: 0.0,
         light: 0,
+        lit_light: 0,
         opacity: 0,
         sound: Sound::Grass,
         classes: BLOCK,
@@ -498,8 +551,30 @@ const fn plant(id: &'static str, name: &'static str, map_color: u32) -> Block {
     }
 }
 
-/// Every block the open content defines itself, air first, in registry order.
+/// Every block the open content defines itself, with Minecraft's properties
+/// and default state, in the order this file lists them.
 pub fn defined() -> Vec<Block> {
+    let vanilla: HashMap<&str, &BlockStates> =
+        numbering::blocks().iter().map(|b| (b.name, b)).collect();
+    let mut blocks = authored();
+    crate::cubes::add(&mut blocks);
+    crate::slabs::add(&mut blocks);
+    crate::connected::add(&mut blocks);
+    crate::plants::add(&mut blocks);
+    blocks
+        .into_iter()
+        .map(|mut block| {
+            let states = vanilla
+                .get(block.id)
+                .unwrap_or_else(|| panic!("{} is not a Minecraft 26.3 block", block.id));
+            block.properties = states.properties;
+            block.defaults = states.defaults;
+            block
+        })
+        .collect()
+}
+
+fn authored() -> Vec<Block> {
     use Category::*;
     let mut blocks = vec![
         Block {
@@ -514,6 +589,7 @@ pub fn defined() -> Vec<Block> {
             hardness: 0.0,
             resistance: 0.0,
             light: 0,
+            lit_light: 0,
             opacity: 0,
             sound: Sound::None,
             classes: &["AirBlock", "Block"],
@@ -664,29 +740,22 @@ pub fn defined() -> Vec<Block> {
         wool("purple_wool", "Purple Wool", 0x7F3FB2),
     ]);
     blocks.extend([
+        fluid("water", "Water", 0x4040FF, Layer::Translucent),
         Block {
-            id: "water",
-            name: "Water",
-            tier: Tier::Terrain,
-            form: Form::Fluid,
-            layer: Layer::Translucent,
-            faces: Faces::Fluid {
-                still: "water_still",
-                flow: "water_flow",
-            },
-            properties: LEVELS,
-            defaults: &[("level", "0")],
-            hardness: 100.0,
-            resistance: 100.0,
-            light: 0,
-            opacity: 1,
-            sound: Sound::None,
-            classes: &["LiquidBlock", "Block"],
-            map_color: 0x4040FF,
-            category: None,
-            mining: HAND,
-            drop: Drop::Nothing,
-            friction: 0.6,
+            light: 15,
+            ..fluid("lava", "Lava", 0xFF0000, Layer::Solid)
+        },
+        // Minecraft's bubble column is water to look at and to swim in (its
+        // fluid is a water source); the server pushes players up or down.
+        Block {
+            id: "bubble_column",
+            name: "Bubble Column",
+            hardness: 0.0,
+            resistance: 0.0,
+            classes: &["BubbleColumnBlock", "Block"],
+            properties: NO_PROPERTIES,
+            defaults: &[],
+            ..fluid("water", "Water", 0x4040FF, Layer::Translucent)
         },
         Block {
             tier: Tier::Terrain,
@@ -932,33 +1001,40 @@ pub fn defined() -> Vec<Block> {
     blocks
 }
 
-type Properties = &'static [(&'static str, &'static [&'static str])];
-type Defaults = &'static [(&'static str, &'static str)];
-const DISTANCE: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7"];
-const BOOLEAN: &[&str] = &["true", "false"];
-
-/// Properties a support block keeps because shared code validates them by
-/// the block's name (`FluidBlockBindings`, `ScaffoldingCollision`, ...).
-fn support_properties(id: &str) -> (Properties, Defaults) {
-    match id {
-        "lava" => (LEVELS, &[("level", "0")]),
-        "scaffolding" => (
-            &[
-                ("bottom", BOOLEAN),
-                ("distance", DISTANCE),
-                ("waterlogged", BOOLEAN),
-            ],
-            &[
-                ("bottom", "false"),
-                ("distance", "7"),
-                ("waterlogged", "false"),
-            ],
-        ),
-        _ => (NO_PROPERTIES, &[]),
+/// A fluid block (`LiquidBlock`) named as its fluid, `water` or `lava`: drawn
+/// by the fluid renderer from `<id>_still` and `<id>_flow`, with no collision
+/// or item; level 0 is the source, 1 to 7 flowing, 8 and up falling.
+fn fluid(id: &'static str, name: &'static str, map_color: u32, layer: Layer) -> Block {
+    let (still, flow) = match id {
+        "lava" => ("lava_still", "lava_flow"),
+        _ => ("water_still", "water_flow"),
+    };
+    Block {
+        id,
+        name,
+        tier: Tier::Terrain,
+        form: Form::Fluid,
+        layer,
+        faces: Faces::Fluid { still, flow },
+        properties: LEVELS,
+        defaults: &[("level", "0")],
+        hardness: 100.0,
+        resistance: 100.0,
+        light: 0,
+        lit_light: 0,
+        opacity: 1,
+        sound: Sound::None,
+        classes: &["LiquidBlock", "Block"],
+        map_color,
+        category: None,
+        mining: HAND,
+        drop: Drop::Nothing,
+        friction: 0.6,
     }
 }
 
-/// The inert stand-in for a name the shared loaders require.
+/// The inert stand-in for a Minecraft block without content ([`all`] gives
+/// it Minecraft's properties).
 pub fn support(id: &'static str) -> Block {
     let air = matches!(id, "cave_air" | "void_air");
     Block {
@@ -968,11 +1044,12 @@ pub fn support(id: &'static str) -> Block {
         form: if air { Form::Air } else { Form::Inert },
         layer: Layer::Solid,
         faces: Faces::None,
-        properties: support_properties(id).0,
-        defaults: support_properties(id).1,
+        properties: NO_PROPERTIES,
+        defaults: &[],
         hardness: 0.0,
         resistance: 0.0,
         light: 0,
+        lit_light: 0,
         opacity: 0,
         sound: Sound::None,
         classes: if air { &["AirBlock", "Block"] } else { BLOCK },
@@ -1005,15 +1082,29 @@ impl Block {
         }
         states
     }
+    /// The default state's index among [`Self::states`]: its values' places,
+    /// read as digits with the last property least significant.
     pub fn default_index(&self) -> usize {
-        self.states()
-            .iter()
-            .position(|state| {
-                state
-                    .iter()
-                    .all(|(k, v)| self.defaults.iter().any(|(dk, dv)| dk == k && dv == v))
-            })
-            .expect("a default state among the states")
+        self.properties.iter().fold(0, |index, (key, values)| {
+            let value = self
+                .defaults
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v)
+                .unwrap_or_else(|| panic!("{}: no default {key}", self.id));
+            let place = values
+                .iter()
+                .position(|v| v == value)
+                .unwrap_or_else(|| panic!("{}: default {key}={value} is not a value", self.id));
+            index * values.len() + place
+        })
+    }
+    pub fn state_count(&self) -> usize {
+        numbering::state_count(self.properties)
+    }
+    /// Whether it has a property of that name.
+    pub fn has_property(&self, key: &str) -> bool {
+        self.properties.iter().any(|(k, _)| *k == key)
     }
     pub fn is_air(&self) -> bool {
         self.form == Form::Air
@@ -1022,7 +1113,7 @@ impl Block {
         self.tier == Tier::Palette
     }
     pub fn collides(&self) -> bool {
-        matches!(self.form, Form::Cube | Form::SeeThroughCube)
+        matches!(self.form, Form::Cube | Form::SeeThroughCube | Form::Shaped)
     }
     pub fn opaque(&self) -> bool {
         self.form == Form::Cube
@@ -1030,12 +1121,33 @@ impl Block {
     /// Its outline when targeted: a full cube, the grass's smaller box, or none.
     pub fn outline(&self) -> Vec<[f64; 6]> {
         match self.form {
-            Form::Cube | Form::SeeThroughCube => vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]],
+            Form::Cube | Form::SeeThroughCube | Form::Shaped => {
+                vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]
+            }
             Form::Cross if self.id == "short_grass" => {
                 vec![[0.125, 0.0, 0.125, 0.875, 0.8125, 0.875]]
             }
             Form::Cross => vec![[0.1875, 0.0, 0.1875, 0.8125, 0.8125, 0.8125]],
             _ => Vec::new(),
+        }
+    }
+    /// The light it gives in a state.
+    pub fn emission(&self, properties: &[(&str, &str)]) -> u8 {
+        if properties.contains(&("lit", "true")) {
+            self.lit_light
+        } else {
+            self.light
+        }
+    }
+    /// The fluid it is made of (`water` or `lava`), if it is a fluid block.
+    pub fn fluid(&self) -> Option<&'static str> {
+        match self.faces {
+            Faces::Fluid {
+                still: "lava_still",
+                ..
+            } => Some("lava"),
+            Faces::Fluid { .. } => Some("water"),
+            _ => None,
         }
     }
     /// Every texture its model and fluid renderer read.
@@ -1051,28 +1163,68 @@ impl Block {
                 front,
                 side,
             } => vec![top, bottom, front, side],
+            Faces::Cube(faces) | Faces::Pillar(faces) => unique(&faces),
+            Faces::Facing { faces, lit_north } => {
+                let mut all = unique(&faces);
+                all.push(lit_north);
+                all
+            }
+            Faces::Slab {
+                bottom,
+                top,
+                side,
+                double,
+            } => {
+                let mut all = vec![bottom, top, side];
+                all.extend(double);
+                unique(&all)
+            }
+            Faces::Stairs { bottom, top, side } => unique(&[bottom, top, side]),
             Faces::Fluid { still, flow } => vec![still, flow],
+            Faces::Connected { texture, edge } => unique(&[texture, edge]),
+            Faces::Plant => crate::plants::textures(self.id),
         }
     }
 }
 
-/// The open bundle's blocks: its own, then the support stand-ins for the
-/// names the shared behaviour loader requires that it does not define.
-pub fn all() -> Vec<Block> {
-    let mut blocks = defined();
-    let mut support: Vec<&'static str> = horizon_world::level::data::NAMED_BLOCKS
-        .iter()
-        .map(|name| name.strip_prefix("minecraft:").expect("a minecraft: name"))
-        .filter(|id| !blocks.iter().any(|b| b.id == *id))
-        .collect();
-    support.sort_unstable();
-    support.dedup();
-    blocks.extend(support.into_iter().map(support_block));
-    blocks
+/// Names in first-seen order, each once.
+fn unique(names: &[&'static str]) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for name in names {
+        if !out.contains(name) {
+            out.push(*name);
+        }
+    }
+    out
 }
 
-fn support_block(id: &'static str) -> Block {
-    support(id)
+/// The open bundle's blocks in Minecraft's registry order: its own, and an
+/// inert support block for every other Minecraft block, each with
+/// Minecraft's properties, so block and state ids are Minecraft's. A name the
+/// shared loaders require that Minecraft lacks would follow, sorted.
+pub fn all() -> Vec<Block> {
+    let mut own: HashMap<&str, Block> = defined().into_iter().map(|b| (b.id, b)).collect();
+    let mut blocks: Vec<Block> = numbering::blocks()
+        .iter()
+        .map(|states| {
+            let mut block = own
+                .remove(states.name)
+                .unwrap_or_else(|| support(states.name));
+            block.properties = states.properties;
+            block.defaults = states.defaults;
+            block
+        })
+        .collect();
+    let known: HashSet<&str> = blocks.iter().map(|b| b.id).collect();
+    let mut extra: Vec<&'static str> = horizon_world::level::data::NAMED_BLOCKS
+        .iter()
+        .map(|name| name.strip_prefix("minecraft:").expect("a minecraft: name"))
+        .filter(|id| !known.contains(id))
+        .collect();
+    extra.sort_unstable();
+    extra.dedup();
+    blocks.extend(extra.into_iter().map(support));
+    blocks
 }
 
 #[cfg(test)]
@@ -1110,7 +1262,7 @@ mod tests {
     }
 
     /// The number of palette blocks (checked again by the client's test).
-    pub const PALETTE_BLOCKS: usize = 86;
+    pub const PALETTE_BLOCKS: usize = 1009;
 
     #[test]
     fn states_vary_the_last_property_fastest_and_have_a_default() {

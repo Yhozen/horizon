@@ -358,3 +358,348 @@ fn clicks_and_creative_slots_go_back_to_vanilla_items() {
 fn sb_chat() -> i32 {
     horizon_protocol::ids::play::serverbound::CHAT
 }
+
+#[test]
+fn creatures_the_bundle_lacks_show_as_a_stand_in_with_only_shared_data() {
+    use horizon_protocol::entity_data::{Value, serializer as s};
+    let t = tables();
+    let mut c = playing(&t);
+    // A parched (vanilla 5) spawns as the bundle's skeleton (open 4).
+    let play::Clientbound::AddEntity(p) = decode(send(&mut c, add_entity(9, 5, 0))) else {
+        panic!()
+    };
+    assert_eq!(p.kind, 4);
+    // Its health (Living data, 9) passes; its own data (16 and above) doesn't.
+    let data = play::Clientbound::SetEntityData(play::SetEntityData {
+        id: 9,
+        values: vec![
+            (9, s::FLOAT, Value::Float(12.0)),
+            (16, s::BOOLEAN, Value::Bool(true)),
+        ],
+    });
+    let play::Clientbound::SetEntityData(p) = decode(send(&mut c, data)) else {
+        panic!()
+    };
+    assert_eq!(p.values, vec![(9, s::FLOAT, Value::Float(12.0))]);
+    // It moves, as any shown entity does.
+    let mut w = Writer::new();
+    w.varint(9);
+    w.bytes(&[0; 7]);
+    assert!(c.translate(cb::MOVE_ENTITY_POS, &w.data).is_some());
+}
+
+#[test]
+fn attributes_take_the_bundle_numbers() {
+    let t = tables();
+    let mut c = playing(&t);
+    let snapshot = |attribute, base| play::AttributeSnapshot {
+        attribute,
+        base,
+        modifiers: vec![],
+    };
+    // Vanilla armor (0), below_name_distance (1), oxygen_bonus (2), scale (3).
+    let play::Clientbound::UpdateAttributes(p) = decode(send(
+        &mut c,
+        play::Clientbound::UpdateAttributes(play::UpdateAttributes {
+            id: 1,
+            values: vec![
+                snapshot(0, 4.0),
+                snapshot(1, 64.0),
+                snapshot(2, 1.0),
+                snapshot(3, 1.0),
+            ],
+        }),
+    )) else {
+        panic!()
+    };
+    assert_eq!(
+        p.values
+            .iter()
+            .map(|a| (a.attribute, a.base))
+            .collect::<Vec<_>>(),
+        vec![(2, 4.0), (1, 1.0), (0, 1.0)],
+        "open armor 2, oxygen_bonus 1, scale 0; below_name_distance dropped"
+    );
+    // A hidden entity's attributes stay dropped.
+    assert!(send(&mut c, add_entity(5, 0, 0)).is_none());
+    assert!(
+        send(
+            &mut c,
+            play::Clientbound::UpdateAttributes(play::UpdateAttributes {
+                id: 5,
+                values: vec![snapshot(0, 2.0)],
+            }),
+        )
+        .is_none()
+    );
+}
+
+/// Every packet id after login, as `phase/direction/name`, with its rule.
+fn every_rule() -> Vec<(String, crate::policy::Rule)> {
+    use horizon_protocol::{Direction, ids};
+    let tables = [
+        (
+            Phase::Configuration,
+            Direction::Clientbound,
+            "configuration/clientbound",
+            ids::configuration::clientbound::NAMES,
+        ),
+        (
+            Phase::Configuration,
+            Direction::Serverbound,
+            "configuration/serverbound",
+            ids::configuration::serverbound::NAMES,
+        ),
+        (
+            Phase::Play,
+            Direction::Clientbound,
+            "play/clientbound",
+            ids::play::clientbound::NAMES,
+        ),
+        (
+            Phase::Play,
+            Direction::Serverbound,
+            "play/serverbound",
+            ids::play::serverbound::NAMES,
+        ),
+    ];
+    let mut out = Vec::new();
+    for (phase, direction, prefix, names) in tables {
+        for (id, name) in names.iter().enumerate() {
+            let rule = crate::policy::policy(phase, direction, id as i32);
+            out.push((format!("{prefix}/{name}"), rule));
+        }
+    }
+    out
+}
+
+fn listed(text: &str) -> Vec<String> {
+    let lines: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(String::from)
+        .collect();
+    let mut sorted = lines.clone();
+    sorted.sort();
+    assert_eq!(lines, sorted, "keep the list sorted");
+    lines
+}
+
+/// The dropped packets are exactly `dropped.txt`, and every built-in registry
+/// a forwarded packet carries is renumbered or a known gap (`gaps.txt`): a
+/// packet newly passed or dropped, or a new gap, shows up here.
+#[test]
+fn every_packet_has_a_policy_and_the_lists_match() {
+    use crate::policy::{Policy, TRANSLATED};
+    let rules = every_rule();
+    assert_eq!(
+        rules.len(),
+        21 + 10 + 144 + 69,
+        "protocol 777 packet counts"
+    );
+    let mut dropped: Vec<String> = rules
+        .iter()
+        .filter(|(_, r)| r.policy == Policy::Drop)
+        .map(|(n, _)| n.clone())
+        .collect();
+    dropped.sort();
+    let mut gaps: Vec<String> = Vec::new();
+    for (name, rule) in &rules {
+        if rule.policy == Policy::Drop {
+            assert!(
+                rule.carries.is_empty(),
+                "{name} is dropped: it carries nothing"
+            );
+        }
+        for registry in rule.carries {
+            let renumbered = rule.policy == Policy::Translate && TRANSLATED.contains(registry);
+            if !renumbered {
+                gaps.push(format!("{name} {registry}"));
+            }
+        }
+    }
+    gaps.sort();
+    let show = |v: &[String]| v.join("\n") + "\n";
+    assert_eq!(
+        show(&dropped),
+        show(&listed(include_str!("dropped.txt"))),
+        "dropped packets differ from src/dropped.txt; the left side is the new list"
+    );
+    assert_eq!(
+        show(&gaps),
+        show(&listed(include_str!("gaps.txt"))),
+        "registry gaps differ from src/gaps.txt; the left side is the new list"
+    );
+}
+
+#[test]
+fn clicks_send_component_ids_back() {
+    let t = tables();
+    let mut s = Serverbound::new(&t);
+    assert!(s.translate(3, &[]).is_some(), "finish configuration");
+    let click = play::Serverbound::ContainerClick(play::ContainerClick {
+        container: 0,
+        state: 1,
+        slot: 36,
+        button: 0,
+        input: 0,
+        changed: vec![],
+        carried: Some(Hashed {
+            item: 4,
+            count: 1,
+            // max_stack_size (1) has a vanilla twin; 7 is no open component.
+            added: vec![(1, 123), (7, 456)],
+            removed: vec![0, 7],
+        }),
+    });
+    let (id, payload) = split(&click.encode());
+    let (id, payload) = split(&s.translate(id, &payload).unwrap());
+    let play::Serverbound::ContainerClick(p) = play::Serverbound::decode(id, &payload).unwrap()
+    else {
+        panic!()
+    };
+    let carried = p.carried.unwrap();
+    assert_eq!((carried.added, carried.removed), (vec![(1, 123)], vec![0]));
+}
+
+/// Recipe book displays take the id of the bundle's recipe that draws the
+/// same, the rest are left out, and the player's pick goes back by the
+/// server's id.
+#[test]
+fn recipe_displays_take_the_bundle_ids_and_picks_go_back() {
+    use horizon_protocol::packets::recipes::{
+        PlaceRecipe, RecipeBookAdd, RecipeBookEntry, RecipeBookRemove, RecipeDisplay, SlotDisplay,
+    };
+    let mut t = tables();
+    let recipes = [
+        (
+            "minecraft:a_stone",
+            serde_json::json!({"type": "minecraft:crafting_shapeless",
+                "ingredients": ["minecraft:oak_log"], "result": {"id": "minecraft:stone"}}),
+        ),
+        (
+            "minecraft:b_other",
+            serde_json::json!({"type": "minecraft:crafting_shapeless",
+                "ingredients": ["minecraft:stone"], "result": {"id": "minecraft:oak_log"}}),
+        ),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v))
+    .collect();
+    t.book = crate::recipes::OpenBook::from_recipes(&recipes);
+    let displays = crate::recipes::Displays::default();
+    let mut c = playing(&t).with_displays(displays.clone());
+    let mut s = Serverbound::new(&t).with_displays(displays);
+    assert!(s.translate(3, &[]).is_some(), "finish configuration");
+    // Vanilla items: 1 stone, 3 oak_log, 4 torch; open: 1 stone, 2 oak_log.
+    let entry = |id, ingredient, result| RecipeBookEntry {
+        id,
+        display: RecipeDisplay::Shapeless {
+            ingredients: vec![SlotDisplay::Item(ingredient)],
+            result: SlotDisplay::ItemStack(Stack::new(result, 1)),
+            station: SlotDisplay::Empty,
+        },
+        group: 0,
+        category: 2,
+        requirements: None,
+        flags: 0,
+    };
+    let add = play::Clientbound::RecipeBookAdd(RecipeBookAdd {
+        entries: vec![entry(7, 3, 1), entry(8, 4, 1), entry(9, 1, 3)],
+        replace: true,
+    });
+    let play::Clientbound::RecipeBookAdd(out) = decode(send(&mut c, add)) else {
+        panic!()
+    };
+    assert_eq!(out.entries.len(), 2, "the torch recipe is not the bundle's");
+    assert_eq!((out.entries[0].id, out.entries[1].id), (0, 1));
+    let RecipeDisplay::Shapeless { ingredients, .. } = &out.entries[0].display else {
+        panic!()
+    };
+    assert_eq!(ingredients, &vec![SlotDisplay::Item(2)], "open oak_log");
+    let pick = |s: &mut Serverbound, recipe| {
+        let (id, payload) = split(
+            &play::Serverbound::PlaceRecipe(PlaceRecipe {
+                container: 1,
+                recipe,
+                use_max: false,
+            })
+            .encode(),
+        );
+        s.translate(id, &payload).map(|out| {
+            let (id, payload) = split(&out);
+            match play::Serverbound::decode(id, &payload).unwrap() {
+                play::Serverbound::PlaceRecipe(p) => p.recipe,
+                _ => panic!(),
+            }
+        })
+    };
+    assert_eq!(pick(&mut s, 0), Some(7));
+    assert_eq!(pick(&mut s, 1), Some(9));
+    assert_eq!(pick(&mut s, 5), None, "never sent");
+    let remove = play::Clientbound::RecipeBookRemove(RecipeBookRemove { ids: vec![8, 9] });
+    let play::Clientbound::RecipeBookRemove(out) = decode(send(&mut c, remove)) else {
+        panic!()
+    };
+    assert_eq!(out.ids, vec![1]);
+    assert_eq!(pick(&mut s, 1), None, "removed");
+}
+
+#[test]
+fn advancement_icons_take_the_bundle_items() {
+    let t = tables();
+    let mut c = playing(&t);
+    let text = |s: &str| horizon_world::nbt::Tag::String(s.into());
+    let advancement = |id: &str, icon: Option<Stack>| play::Advancement {
+        id: id.into(),
+        parent: None,
+        display: icon.map(|icon| play::AdvancementDisplay {
+            title: text("Title"),
+            description: text("Description"),
+            icon,
+            frame: 2,
+            show_toast: true,
+            hidden: false,
+            background: Some("minecraft:gui/advancements/backgrounds/stone".into()),
+        }),
+        requirements: vec![vec!["done".into()]],
+        telemetry: false,
+        x: 1.0,
+        y: 0.5,
+    };
+    let packet = play::UpdateAdvancements {
+        reset: true,
+        added: vec![
+            // Vanilla's golden apple (2) is the bundle's apple (4) in the fixture.
+            advancement("minecraft:story/root", Some(Stack::new(2, 1))),
+            advancement("minecraft:recipes/root", None),
+        ],
+        removed: vec!["minecraft:story/gone".into()],
+        progress: vec![(
+            "minecraft:story/root".into(),
+            vec![("done".into(), Some(7))],
+        )],
+        show: true,
+    };
+    let play::Clientbound::UpdateAdvancements(p) = decode(send(
+        &mut c,
+        play::Clientbound::UpdateAdvancements(packet.clone()),
+    )) else {
+        panic!("advancements pass")
+    };
+    let icon = &p.added[0].display.as_ref().unwrap().icon;
+    assert_eq!((icon.item, icon.count), (4, 1));
+    // Everything but the icon is as the server sent it.
+    let mut expected = packet;
+    expected.added[0].display.as_mut().unwrap().icon = icon.clone();
+    assert_eq!(p, expected);
+    // The selected tab carries no number: it passes as it came.
+    let mut w = Writer::new();
+    w.bool(true);
+    w.string("minecraft:story/root");
+    assert_eq!(
+        c.translate(cb::SELECT_ADVANCEMENTS_TAB, &w.data),
+        Some(body(cb::SELECT_ADVANCEMENTS_TAB, &w.data))
+    );
+}

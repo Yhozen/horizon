@@ -162,7 +162,7 @@ Horizon can't sign in to a Microsoft account yet, so it can't join online-mode s
 
 [MIT](LICENSE), for the project's original work only. Dependencies keep their own licences. Minecraft is a trademark of Mojang Synergies AB; Minecraft code and assets belong to Mojang and Microsoft and are covered by the [Minecraft EULA](https://www.minecraft.net/en-us/eula). Decompiled game source and prepared resources stay on your machine and are never published.
 
-Third-party credits and licenses: [Third-party notices](THIRD_PARTY_NOTICES.md).
+Third-party credits and licenses: [Third-party notices](THIRD_PARTY_NOTICES.md). Which licence covers which folder (the MIT code, the fonts, and the Horizon Open artwork and bundle under Creative Commons): [legal/LICENSING.md](legal/LICENSING.md).
 
 ## Author
 

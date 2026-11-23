@@ -3,7 +3,8 @@
 //! beside glass and leaves, back faces, cardinal shading and max(self, above)
 //! light.
 use super::{
-    Info, MeshTables, Padded, SectionMesh, TerrainVertex, lighting, pack_coords, pack_rgb, pi,
+    Info, MeshTables, PackTags, Padded, SectionMesh, TerrainVertex, direction_normal, lighting,
+    pack_cell, pack_coords, pack_quad, pack_rgb, pi, quad_normal,
 };
 use horizon_core::{
     geometry::{Axis, Direction, VoxelShape, trig},
@@ -188,8 +189,10 @@ impl FluidFlowWorld for FlowView<'_> {
     }
 }
 /// Emits one fluid cell at section-relative `[x, y, z]`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn tesselate(
     tables: &MeshTables,
+    pack: Option<&PackTags>,
     nether: bool,
     pad: &Padded,
     water_color: u32,
@@ -299,17 +302,27 @@ pub(super) fn tesselate(
     } else {
         (tables.lava_still, tables.lava_flow, None)
     };
-    let target = if water {
-        &mut out.translucent
-    } else {
-        &mut out.solid
-    };
+    let (target, target_pack) = out.layer(water);
+    // The pack's id of the fluid block, the surface's cell and the block's light.
+    let tag = pack.map(|p| {
+        let block = if water { p.water } else { p.lava };
+        (block, pack_cell([x, y, z], true), me.emission)
+    });
     let mut quad =
-        |v: [([f32; 3], [f32; 2]); 4], layer: u16, color: u32, light: u16, back: bool| {
+        |v: [([f32; 3], [f32; 2]); 4], layer: u16, color: u32, light: u16, back: bool, d: D| {
             let vertex = |(pos, uv)| TerrainVertex::new(pos, uv, layer, color, light);
-            target.extend(v.map(vertex));
+            let mut push = |v: [([f32; 3], [f32; 2]); 4], facing: [f32; 3]| {
+                target.extend(v.map(vertex));
+                if let Some((block, cell, emission)) = tag {
+                    let normal = quad_normal(v.map(|(p, _)| p), facing);
+                    let quad = &target[target.len() - 4..];
+                    target_pack.extend(pack_quad(quad, block, cell, normal, emission));
+                }
+            };
+            let facing = direction_normal(d);
+            push(v, facing);
             if back {
-                target.extend([v[0], v[3], v[2], v[1]].map(vertex));
+                push([v[0], v[3], v[2], v[1]], facing.map(|c| -c));
             }
         };
     let (fx, fy, fz) = (x as f32, y as f32, z as f32);
@@ -360,6 +373,7 @@ pub(super) fn tesselate(
             color(lighting::cardinal(nether, D::Up)),
             light([x, y, z]),
             backward,
+            D::Up,
         );
     }
     if render_down {
@@ -375,6 +389,7 @@ pub(super) fn tesselate(
             color(lighting::cardinal(nether, D::Down)),
             light([x, y - 1, z]),
             false,
+            D::Down,
         );
     }
     let side_light = light([x, y, z]);
@@ -429,6 +444,12 @@ pub(super) fn tesselate(
             color(up_shade * side),
             side_light,
             !is_overlay,
+            match d {
+                Direction::North => D::North,
+                Direction::South => D::South,
+                Direction::West => D::West,
+                _ => D::East,
+            },
         );
     }
 }

@@ -323,6 +323,12 @@ pub const LABELS: &[(&str, &str)] = &[
     ("commands.time.query.daytime", "The time of day is %s"),
     ("commands.time.no_default_clock", "This world has no clock"),
     ("commands.time.no_time_marker_found", "No such time of day"),
+    ("commands.weather.set.clear", "The skies are clearing"),
+    ("commands.weather.set.rain", "Rain is moving in"),
+    (
+        "commands.weather.set.thunder",
+        "A thunderstorm is moving in",
+    ),
     (
         "commands.time.pause.already_paused",
         "Time is already paused",
@@ -453,6 +459,19 @@ pub const SURVIVAL: &[(&str, &str)] = &[
     ("entity.minecraft.item", "Item"),
     ("entity.minecraft.experience_orb", "Experience Orb"),
     ("entity.minecraft.falling_block", "Falling Block"),
+    ("entity.minecraft.zombie", "Zombie"),
+    ("entity.minecraft.husk", "Husk"),
+    ("entity.minecraft.drowned", "Drowned"),
+    ("entity.minecraft.skeleton", "Skeleton"),
+    ("entity.minecraft.stray", "Stray"),
+    ("entity.minecraft.spider", "Spider"),
+    ("entity.minecraft.cave_spider", "Cave Spider"),
+    ("entity.minecraft.creeper", "Creeper"),
+    ("entity.minecraft.enderman", "Enderman"),
+    ("entity.minecraft.cow", "Cow"),
+    ("entity.minecraft.pig", "Pig"),
+    ("entity.minecraft.sheep", "Sheep"),
+    ("entity.minecraft.chicken", "Chicken"),
     ("gameMode.survival", "Survival"),
     ("gameMode.creative", "Creative"),
     ("gameMode.adventure", "Adventure"),
@@ -1547,8 +1566,633 @@ pub fn key_names() -> Vec<(String, String)> {
     out
 }
 
+// EVERY KEY
+//
+// Beyond the hand-written labels above, the bundle has an English line for every key
+// Minecraft's interface can show: the names of everything in the registries (from the name
+// lists in `data/registries/`, title-cased from the id) and every other key of
+// `data/lang/keys.txt` (written by `tools/open_lang_keys.py`, with each key's placeholders in
+// order), worded here by rules on the key or by the short table below. The placeholders are
+// Minecraft's, in Minecraft's order, as the client formats them so.
+
+/// Every key the generator writes besides the registry names, with its placeholders.
+const KEYS: &str = include_str!("../data/lang/keys.txt");
+
+/// Short English for keys whose rule-made wording would read poorly, by key.
+const PROSE: &[(&str, &str)] = &[
+    ("container.barrel", "Barrel"),
+    ("container.beacon", "Beacon"),
+    ("container.beehive.bees", "Bees: %s of %s"),
+    ("container.beehive.honey", "Honey: %s of %s"),
+    ("container.blast_furnace", "Blast Furnace"),
+    ("container.brewing", "Brewing Stand"),
+    ("container.cartography_table", "Cartography Table"),
+    ("container.chest", "Chest"),
+    ("container.chestDouble", "Large Chest"),
+    ("container.crafter", "Crafter"),
+    ("container.crafting", "Crafting"),
+    ("container.creative", "Pick an Item"),
+    ("container.dispenser", "Dispenser"),
+    ("container.dropper", "Dropper"),
+    ("container.enchant", "Enchant"),
+    ("container.enchant.clue", "%s . . . ?"),
+    ("container.enchant.lapis.many", "%s Lapis Lazuli"),
+    ("container.enchant.lapis.one", "1 Lapis Lazuli"),
+    ("container.enchant.level.many", "%s Enchantment Levels"),
+    ("container.enchant.level.one", "1 Enchantment Level"),
+    ("container.enchant.level.requirement", "Needs level %s"),
+    ("container.enderchest", "Ender Chest"),
+    ("container.furnace", "Furnace"),
+    ("container.grindstone_title", "Repair and Disenchant"),
+    ("container.hopper", "Hopper"),
+    ("container.inventory", "Inventory"),
+    ("container.isLocked", "%s is locked."),
+    ("container.lectern", "Lectern"),
+    ("container.loom", "Loom"),
+    ("container.repair", "Repair and Rename"),
+    ("container.repair.cost", "Cost: %1$s levels"),
+    ("container.repair.expensive", "Too costly"),
+    ("container.shulkerBox", "Shulker Box"),
+    ("container.shulkerBox.itemCount", "%s x%s"),
+    ("container.shulkerBox.more", "and %s more..."),
+    ("container.shulkerBox.unknownContents", "???????"),
+    ("container.smoker", "Smoker"),
+    (
+        "container.spectatorCantOpen",
+        "Can't open: nothing has been generated here yet.",
+    ),
+    ("container.stonecutter", "Stonecutter"),
+    ("container.upgrade", "Upgrade Gear"),
+    (
+        "container.upgrade.error_tooltip",
+        "This item can't be upgraded this way",
+    ),
+    (
+        "container.upgrade.missing_template_tooltip",
+        "Add a smithing template",
+    ),
+    ("merchant.deprecated", "Villagers restock twice a day."),
+    ("merchant.level.1", "Novice"),
+    ("merchant.level.2", "Apprentice"),
+    ("merchant.level.3", "Journeyman"),
+    ("merchant.level.4", "Expert"),
+    ("merchant.level.5", "Master"),
+    ("merchant.title", "%s - %s"),
+    ("merchant.trades", "Trades"),
+    ("menu.disconnect", "Leave"),
+    ("menu.multiplayer", "Multiplayer"),
+    ("menu.quit", "Quit"),
+    ("menu.returnToMenu", "Save and Quit to Title"),
+    ("menu.savingChunks", "Saving chunks"),
+    ("menu.shareToLan", "Open to LAN"),
+    ("menu.singleplayer", "Singleplayer"),
+    (
+        "block.minecraft.spawn.not_valid",
+        "You have no home bed or charged respawn anchor",
+    ),
+    ("chat.type.text", "<%s> %s"),
+    ("chat.type.announcement", "[%s] %s"),
+    ("chat.type.emote", "* %s %s"),
+    ("chat.type.admin", "[%s: %s]"),
+    ("multiplayer.player.joined", "%s joined the game"),
+    ("multiplayer.player.left", "%s left the game"),
+    ("item.durability", "Durability: %s / %s"),
+    ("item.dyed", "Dyed"),
+    ("item.unbreakable", "Unbreakable"),
+    ("item.nbt_tags", "NBT: %s tag(s)"),
+    ("enchantment.level.1", "I"),
+    ("enchantment.level.2", "II"),
+    ("enchantment.level.3", "III"),
+    ("enchantment.level.4", "IV"),
+    ("enchantment.level.5", "V"),
+    ("enchantment.level.6", "VI"),
+    ("enchantment.level.7", "VII"),
+    ("enchantment.level.8", "VIII"),
+    ("enchantment.level.9", "IX"),
+    ("enchantment.level.10", "X"),
+    ("potion.withAmplifier", "%s %s"),
+    ("potion.withDuration", "%s (%s)"),
+];
+
+/// Words written other than by plain title case.
+const WORDS: &[(&str, &str)] = &[
+    ("tnt", "TNT"),
+    ("of", "of"),
+    ("the", "the"),
+    ("on", "on"),
+    ("a", "a"),
+    ("and", "and"),
+    ("with", "with"),
+    ("in", "in"),
+    ("o", "o'"),
+    ("lan", "LAN"),
+    ("ui", "UI"),
+    ("gui", "GUI"),
+    ("fov", "FOV"),
+    ("hud", "HUD"),
+    ("nbt", "NBT"),
+    ("snbt", "SNBT"),
+    ("url", "URL"),
+    ("id", "ID"),
+    ("uuid", "UUID"),
+    ("xp", "XP"),
+    ("or", "or"),
+    ("to", "to"),
+    ("for", "for"),
+    ("at", "at"),
+    ("by", "by"),
+];
+
+/// Names that title case gets wrong, by registry key.
+const NAMES: &[(&str, &str)] = &[
+    ("block.minecraft.jack_o_lantern", "Jack o'Lantern"),
+    ("item.minecraft.tnt_minecart", "Minecart with TNT"),
+    ("item.minecraft.chest_minecart", "Minecart with Chest"),
+    ("item.minecraft.furnace_minecart", "Minecart with Furnace"),
+    ("item.minecraft.hopper_minecart", "Minecart with Hopper"),
+    (
+        "item.minecraft.command_block_minecart",
+        "Minecart with Command Block",
+    ),
+    ("entity.minecraft.tnt_minecart", "Minecart with TNT"),
+    ("entity.minecraft.chest_minecart", "Minecart with Chest"),
+    ("entity.minecraft.furnace_minecart", "Minecart with Furnace"),
+    ("entity.minecraft.hopper_minecart", "Minecart with Hopper"),
+    (
+        "entity.minecraft.command_block_minecart",
+        "Minecart with Command Block",
+    ),
+    ("entity.minecraft.spawner_minecart", "Minecart with Spawner"),
+    ("entity.minecraft.tnt", "Primed TNT"),
+    ("entity.minecraft.item", "Item"),
+    ("entity.minecraft.player", "Player"),
+];
+
+/// Verbs for the subtitles' last word: "Zombie groans".
+const SOUNDS: &[(&str, &str)] = &[
+    ("ambient", "is heard"),
+    ("hurt", "hurts"),
+    ("death", "dies"),
+    ("step", "steps"),
+    ("attack", "attacks"),
+    ("break", "breaks"),
+    ("place", "is placed"),
+    ("hit", "is hit"),
+    ("fall", "falls"),
+    ("eat", "eats"),
+    ("drink", "drinks"),
+    ("open", "opens"),
+    ("close", "closes"),
+    ("shoot", "shoots"),
+    ("throw", "is thrown"),
+    ("land", "lands"),
+    ("jump", "jumps"),
+    ("swim", "swims"),
+    ("splash", "splashes"),
+    ("growl", "growls"),
+    ("hiss", "hisses"),
+    ("roar", "roars"),
+    ("idle", "idles"),
+    ("use", "is used"),
+    ("equip", "is equipped"),
+    ("fill", "fills"),
+    ("empty", "empties"),
+    ("burn", "burns"),
+    ("extinguish", "goes out"),
+    ("flap", "flaps"),
+    ("fly", "flies"),
+    ("spawn", "appears"),
+    ("explode", "explodes"),
+    ("primed", "fizzes"),
+    ("ignite", "ignites"),
+    ("teleport", "teleports"),
+    ("hurt_drown", "drowns"),
+    ("stare", "stares"),
+    ("scream", "screams"),
+];
+
+/// Last segments that say little alone: the segment before them names the thing.
+const VAGUE: &[&str] = &[
+    "title",
+    "name",
+    "tooltip",
+    "description",
+    "desc",
+    "button",
+    "label",
+    "info",
+    "hint",
+    "success",
+    "failed",
+    "failure",
+    "single",
+    "multiple",
+    "text",
+    "message",
+    "query",
+    "set",
+    "get",
+    "value",
+    "narration",
+    "header",
+    "footer",
+    "invalid",
+    "unknown",
+    "error",
+    "empty",
+    "none",
+    "all",
+    "on",
+    "off",
+    "short",
+    "long",
+    "line1",
+    "line2",
+    "line3",
+    "detail",
+    "details",
+    "prompt",
+    "confirm",
+    "toggle",
+    "status",
+    "entry",
+    "entries",
+    "list",
+    "count",
+    "one",
+    "many",
+];
+
+/// A key segment as words: `selectWorld` and `select_world` are both "select world".
+fn words(segment: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for part in segment.split(['_', '-']) {
+        let mut word = String::new();
+        for c in part.chars() {
+            if c.is_ascii_uppercase() && !word.is_empty() {
+                out.push(std::mem::take(&mut word));
+            }
+            word.push(c.to_ascii_lowercase());
+        }
+        if !word.is_empty() {
+            out.push(word);
+        }
+    }
+    out
+}
+
+/// One word in a title: capitalised, but for the small words and acronyms of `WORDS`.
+fn title_word(word: &str, first: bool) -> String {
+    if let Some((_, w)) = WORDS.iter().find(|(k, _)| *k == word) {
+        if first {
+            let mut c = w.chars();
+            return c
+                .next()
+                .map(|f| f.to_uppercase().chain(c).collect())
+                .unwrap_or_default();
+        }
+        return (*w).to_owned();
+    }
+    let mut c = word.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
+}
+
+/// `rotten_flesh` → "Rotten Flesh".
+pub fn title_case(id: &str) -> String {
+    words(id)
+        .iter()
+        .enumerate()
+        .map(|(i, w)| title_word(w, i == 0))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Words in sentence case: the first capitalised.
+fn sentence(words: &[String]) -> String {
+    let text = words.join(" ");
+    let mut c = text.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
+}
+
+/// A key's placeholders in order (`%s`, `%2$s`), as Java's formatter reads them.
+pub fn placeholders(text: &str) -> Vec<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if bytes.get(i + 1) == Some(&b'%') {
+                i += 2;
+                continue;
+            }
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j > i + 1 && bytes.get(j) == Some(&b'$') {
+                j += 1;
+            } else {
+                j = i + 1;
+            }
+            if j < bytes.len() && bytes[j].is_ascii_alphabetic() {
+                out.push(text[i..=j].to_owned());
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The English for `key`, whose placeholders are `slots` in order.
+fn english(key: &str, slots: &[&str]) -> String {
+    if let Some((_, text)) = PROSE.iter().find(|(k, _)| *k == key) {
+        return (*text).to_owned();
+    }
+    let segments: Vec<&str> = key.split('.').collect();
+    let last = segments[segments.len() - 1];
+    // A sound's subtitle: the thing, then what it does.
+    if segments[0] == "subtitles" && segments.len() >= 3 {
+        let thing = title_case(segments[segments.len() - 2]);
+        let verb = SOUNDS
+            .iter()
+            .find(|(k, _)| *k == last)
+            .map(|(_, v)| (*v).to_owned())
+            .unwrap_or_else(|| words(last).join(" "));
+        return with_slots(format!("{thing} {verb}"), slots);
+    }
+    // A death message: the one who died, how, then by whom and with what.
+    if segments[0] == "death" && segments.len() >= 3 && !slots.is_empty() {
+        let how = words(segments[2]).join(" ");
+        let mut text = format!("{} died: {how}", slots[0]);
+        for (i, slot) in slots.iter().enumerate().skip(1) {
+            text.push_str(match i {
+                1 => " by ",
+                2 => " using ",
+                _ => ", ",
+            });
+            text.push_str(slot);
+        }
+        return text;
+    }
+    // Potions and tipped arrows: "Splash Potion of Swiftness".
+    if let ["item", "minecraft", kind, "effect", effect] = segments[..] {
+        let kind = if kind == "tipped_arrow" {
+            "arrow"
+        } else {
+            kind
+        };
+        return format!("{} of {}", title_case(kind), title_case(effect));
+    }
+    // Banner patterns: "Orange Creeper".
+    if let ["block", "minecraft", "banner", pattern, color] = segments[..] {
+        return format!("{} {}", title_case(color), title_case(pattern));
+    }
+    // Names of things under a `minecraft` segment: a title.
+    if let Some(at) = segments.iter().position(|s| *s == "minecraft") {
+        let tail = &segments[at + 1..];
+        if !tail.is_empty() && slots.is_empty() {
+            let name = tail
+                .iter()
+                .filter(|s| !VAGUE.contains(s))
+                .map(|s| title_case(s))
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !name.is_empty() {
+                return name;
+            }
+        }
+    }
+    // Anything else: its last meaningful segments.
+    let mut from = segments.len() - 1;
+    while from > 1 && (VAGUE.contains(&segments[from]) || segments[from].len() <= 1) {
+        from -= 1;
+    }
+    let mut ws: Vec<String> = segments[from..]
+        .iter()
+        .filter(|s| !VAGUE.contains(s) || from == segments.len() - 1)
+        .flat_map(|s| words(s))
+        .collect();
+    if ws.is_empty() {
+        ws = words(last);
+    }
+    let text = if slots.is_empty() && ws.len() <= 4 {
+        ws.iter()
+            .enumerate()
+            .map(|(i, w)| title_word(w, i == 0))
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        sentence(&ws)
+    };
+    with_slots(text, slots)
+}
+
+/// `text` followed by its placeholders, so each is shown where the key expects one.
+fn with_slots(text: String, slots: &[&str]) -> String {
+    if slots.is_empty() {
+        text
+    } else {
+        format!("{text}: {}", slots.join(", "))
+    }
+}
+
+/// The registry names' keys and their English, title-cased from the ids.
+pub fn registry_keys() -> Vec<(String, String)> {
+    use crate::numbering::names;
+    let blocks = names("block");
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut add = |prefix: &str, id: &str| {
+        let key = format!("{prefix}{id}");
+        let name = NAMES
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| (*v).to_owned())
+            .unwrap_or_else(|| title_case(id));
+        out.push((key, name));
+    };
+    for b in blocks {
+        add("block.minecraft.", b);
+    }
+    for i in names("item").iter().filter(|i| !blocks.contains(i)) {
+        add("item.minecraft.", i);
+    }
+    for (registry, prefix) in [
+        ("entity_type", "entity.minecraft."),
+        ("mob_effect", "effect.minecraft."),
+        ("attribute", "attribute.name."),
+        ("villager_profession", "entity.minecraft.villager."),
+        ("custom_stat", "stat.minecraft."),
+        ("stat_type", "stat_type.minecraft."),
+    ] {
+        for id in names(registry) {
+            add(prefix, id);
+        }
+    }
+    out
+}
+
+/// A block's or item's English name by its id (`minecraft:` optional), as `registry_keys`
+/// writes it: for the creative palette's search lines.
+pub fn display_name(id: &str) -> String {
+    let id = id.strip_prefix("minecraft:").unwrap_or(id);
+    let block = format!("block.minecraft.{id}");
+    let item = format!("item.minecraft.{id}");
+    NAMES
+        .iter()
+        .find(|(k, _)| *k == block || *k == item)
+        .map(|(_, v)| (*v).to_owned())
+        .unwrap_or_else(|| title_case(id))
+}
+
+/// Every other key and its English.
+pub fn other_keys() -> impl Iterator<Item = (String, String)> {
+    KEYS.lines().filter(|l| !l.is_empty()).map(|line| {
+        let (key, slots) = line.split_once('\t').unwrap_or((line, ""));
+        let slots: Vec<&str> = slots.split(' ').filter(|s| !s.is_empty()).collect();
+        (key.to_owned(), english(key, &slots))
+    })
+}
+
+/// Adds every key `lang` lacks, and names every block and item by its id: the bundle's
+/// older names (Minetest Game's: "Pine Needles", "Papyrus") give way to Minecraft's ids
+/// title-cased, as the art now draws them. The hand-written labels are kept.
+pub fn fill(lang: &mut std::collections::BTreeMap<String, String>) {
+    for (key, text) in other_keys() {
+        lang.entry(key).or_insert(text);
+    }
+    for (key, text) in registry_keys() {
+        if key.starts_with("block.") || key.starts_with("item.") {
+            lang.insert(key, text);
+        } else {
+            lang.entry(key).or_insert(text);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// Every written line keeps its key's placeholders, in order.
+    #[test]
+    fn every_line_keeps_its_placeholders() {
+        let signatures: std::collections::HashMap<&str, Vec<&str>> = KEYS
+            .lines()
+            .map(|l| {
+                let (k, s) = l.split_once('\t').unwrap_or((l, ""));
+                (k, s.split(' ').filter(|s| !s.is_empty()).collect())
+            })
+            .collect();
+        for (key, text) in other_keys() {
+            assert_eq!(
+                placeholders(&text),
+                signatures[key.as_str()],
+                "{key}: {text}"
+            );
+        }
+        for (key, _) in PROSE {
+            assert!(signatures.contains_key(key), "{key} is not a key");
+        }
+        for (key, text) in registry_keys() {
+            assert!(placeholders(&text).is_empty(), "{key}: {text}");
+        }
+    }
+
+    #[test]
+    fn names_are_title_cased_from_ids() {
+        assert_eq!(title_case("rotten_flesh"), "Rotten Flesh");
+        assert_eq!(title_case("bucket_of_axolotl"), "Bucket of Axolotl");
+        assert_eq!(title_case("tnt"), "TNT");
+        assert_eq!(
+            placeholders("%1$s hit %2$s for 100%% with %s"),
+            ["%1$s", "%2$s", "%s"]
+        );
+    }
+
+    /// Hand-written labels (above) that place their arguments by index, in the order English
+    /// reads best, or name the arguments Horizon's own server sends: their placeholders
+    /// differ from Minecraft's line on purpose.
+    const BY_INDEX: &[&str] = &[
+        "argument.resource.not_found",
+        "argument.resource_or_id.no_such_element",
+        "argument.resource_selector.not_found",
+        "argument.resource_tag.not_found",
+        "commands.clear.test.multiple",
+        "commands.clear.test.single",
+        "commands.experience.set.levels.success.multiple",
+        "commands.experience.set.levels.success.single",
+        "commands.experience.set.points.success.multiple",
+        "commands.experience.set.points.success.single",
+        "commands.setworldspawn.success",
+        "commands.spawnpoint.success.multiple",
+        "commands.spawnpoint.success.single",
+        "commands.time.no_default_clock",
+        "commands.time.no_time_marker_found",
+        "commands.time.pause.already_paused",
+        "commands.time.pause.already_running",
+        "commands.time.set.absolute",
+        "commands.time.set.already_at_time",
+        "commands.time.set.already_at_time_marker",
+        "commands.time.set.time_marker",
+        "difficulty.lock.question",
+    ];
+
+    /// Against the player's own Minecraft English (when `.local` has it): every key covered,
+    /// and every line with the same placeholders in the same order.
+    #[test]
+    fn every_vanilla_key_is_covered_with_its_placeholders() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3/assets/minecraft/lang/en_us.json");
+        let Ok(bytes) = std::fs::read(&path) else {
+            eprintln!("skipped: no {}", path.display());
+            return;
+        };
+        let vanilla: std::collections::BTreeMap<String, String> =
+            serde_json::from_slice(&bytes).unwrap();
+        // As the bundle writes it: the hand-written labels, then every other key.
+        let mut ours: std::collections::BTreeMap<String, String> = LABELS
+            .iter()
+            .chain(SURVIVAL)
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .chain(key_names())
+            .collect();
+        fill(&mut ours);
+        let (mut missing, mut differing) = (Vec::new(), Vec::new());
+        for (key, text) in &vanilla {
+            match ours.get(key) {
+                Some(line)
+                    if placeholders(line) != placeholders(text)
+                        && !BY_INDEX.contains(&key.as_str()) =>
+                {
+                    differing.push(format!(
+                        "{key}: {line:?} has {:?}, Minecraft {:?}",
+                        placeholders(line),
+                        placeholders(text)
+                    ))
+                }
+                Some(_) => {}
+                None => missing.push(key.as_str()),
+            }
+        }
+        assert!(
+            differing.is_empty(),
+            "placeholders differ:\n{}",
+            differing.join("\n")
+        );
+        assert!(
+            missing.is_empty(),
+            "{} keys missing: {:?}",
+            missing.len(),
+            &missing[..missing.len().min(20)]
+        );
+    }
+
     #[test]
     fn every_label_is_written_once() {
         let mut keys: Vec<&str> = super::LABELS

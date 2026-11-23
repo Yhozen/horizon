@@ -65,14 +65,84 @@ fn tex(name: &str) -> String {
     format!("minecraft:block/{name}")
 }
 
+/// The blocks Minecraft's `BlockColors` tint (the client tints them by name):
+/// grass, ferns, sugar cane and leaves. Their grey pack textures need the
+/// faces Minecraft's models tint to carry `tintindex` 0.
+const TINTED: &[&str] = &[
+    "grass_block",
+    "short_grass",
+    "fern",
+    "sugar_cane",
+    "oak_leaves",
+    "spruce_leaves",
+    "birch_leaves",
+    "jungle_leaves",
+    "acacia_leaves",
+    "dark_oak_leaves",
+    "mangrove_leaves",
+];
+
+/// Textures a pack must not replace: water's colour is in Minetest Game's
+/// art, and the biome's water tint stays white.
+const KEEP_MEDIA: &[&str] = &["water_still", "water_flow"];
+
+/// The grass block's side overlay, drawn tinted over its side as Minecraft's
+/// model does.
+const GRASS_OVERLAY: &str = "grass_block_side_overlay";
+
+/// How a block's grey textures are tinted.
+#[derive(Clone, Copy, Default)]
+struct Tinting {
+    /// Its tinted faces carry `tintindex` 0.
+    tint: bool,
+    /// The grass block draws `GRASS_OVERLAY` over its sides.
+    overlay: bool,
+}
+
+fn tinted(mut face: Value, tint: bool) -> Value {
+    if tint {
+        face["tintindex"] = json!(0);
+    }
+    face
+}
+
+/// The tint of a tinted block's item. Grass, ferns and sugar cane take the
+/// grass colormap at a fixed climate; spruce and birch leaves the constants
+/// the client tints them with in the world; other leaves the foliage
+/// colormap's colour at that climate.
+fn item_tint(id: &str) -> Value {
+    let argb =
+        |rgb: u32| json!({"type": "minecraft:constant", "value": (0xFF00_0000 | rgb) as i32});
+    match id {
+        "spruce_leaves" => argb(0x61_9961),
+        "birch_leaves" => argb(0x80_A755),
+        id if id.ends_with("_leaves") => {
+            let map = crate::art::colormap("foliage").expect("foliage colormap");
+            // temperature 0.5, downfall 1.0
+            let [r, g, b, _] = map.get(127, 127);
+            argb(u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b))
+        }
+        _ => json!({"type": "minecraft:grass", "temperature": 0.5, "downfall": 1.0}),
+    }
+}
+
 /// The block's model (or models: logs have one per axis) and its block-state
 /// definition.
-fn models(block: &Block) -> (Vec<(String, Value)>, Option<Value>) {
+fn models(block: &Block, tinting: Tinting) -> (Vec<(String, Value)>, Option<Value>) {
     let id = block.id;
+    if let Some(models) = crate::cubes::variant_models(block) {
+        return models;
+    }
     let all = ["down", "up", "north", "south", "west", "east"];
     match block.faces {
         Faces::All(t) => {
-            let model = cube_model([("all", tex(t))].into(), all.map(|d| (d, "all")));
+            let mut model = cube_model([("all", tex(t))].into(), all.map(|d| (d, "all")));
+            if tinting.tint {
+                // Leaves: every face, as Minecraft's `block/leaves`.
+                for d in all {
+                    model["elements"][0]["faces"][d]["tintindex"] = json!(0);
+                }
+            }
             (
                 vec![(format!("block/{id}"), model)],
                 Some(json!({"variants": {"": {"model": format!("minecraft:block/{id}")}}})),
@@ -96,6 +166,23 @@ fn models(block: &Block) -> (Vec<(String, Value)>, Option<Value>) {
                     ("east", "side"),
                 ],
             );
+            let mut model = model;
+            if tinting.tint {
+                // Minecraft's grass block: the top tinted, and a second cube
+                // drawing the tinted overlay on the four sides.
+                model["elements"][0]["faces"]["up"]["tintindex"] = json!(0);
+            }
+            if tinting.overlay {
+                model["textures"]["overlay"] = json!(tex(GRASS_OVERLAY));
+                let sides = ["north", "south", "west", "east"]
+                    .map(|d| (d, tinted(face("#overlay", Some(d)), tinting.tint)));
+                let faces: serde_json::Map<String, Value> =
+                    sides.into_iter().map(|(d, f)| (d.to_owned(), f)).collect();
+                model["elements"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!({"from": [0, 0, 0], "to": [16, 16, 16], "faces": faces}));
+            }
             (
                 vec![(format!("block/{id}"), model)],
                 Some(json!({"variants": {"": {"model": format!("minecraft:block/{id}")}}})),
@@ -148,7 +235,7 @@ fn models(block: &Block) -> (Vec<(String, Value)>, Option<Value>) {
                     ("east", "side"),
                 ],
             );
-            if block.properties.is_empty() {
+            if !block.has_property("axis") {
                 // A column that never turns (bookshelf, cactus).
                 return (
                     vec![(format!("block/{id}"), model)],
@@ -181,19 +268,117 @@ fn models(block: &Block) -> (Vec<(String, Value)>, Option<Value>) {
                     plane([8.0, 0.0, 0.8], [8.0, 16.0, 15.2], 45.0),
                 ],
             });
-            let model = fix_cross(model);
+            let mut model = fix_cross(model);
+            if tinting.tint {
+                // Minecraft's `block/tinted_cross`: both sides of both planes.
+                for element in model["elements"].as_array_mut().unwrap() {
+                    for (_, f) in element["faces"].as_object_mut().unwrap() {
+                        f["tintindex"] = json!(0);
+                    }
+                }
+            }
             (
                 vec![(format!("block/{id}"), model)],
                 Some(json!({"variants": {"": {"model": format!("minecraft:block/{id}")}}})),
             )
         }
-        Faces::Fluid { still, .. } => {
-            // Fluids draw through the fluid renderer; the model gives particles.
-            let model = json!({"textures": {"particle": tex(still)}});
-            (vec![(format!("block/{id}"), model)], None)
+        Faces::Cube(faces) | Faces::Pillar(faces) => {
+            let mut model = six_model(faces);
+            crate::cubes::dress(id, &mut model, TINTED.contains(&id), tinting.tint);
+            let model_id = format!("minecraft:block/{id}");
+            let mut models = vec![(format!("block/{id}"), model.clone())];
+            let lying = if let Faces::Pillar(_) = block.faces {
+                let mut lying = model;
+                lying["elements"][0]["faces"]["up"]["rotation"] = json!(180);
+                models.push((format!("block/{id}_horizontal"), lying));
+                format!("{model_id}_horizontal")
+            } else {
+                model_id.clone()
+            };
+            let definition = if block.has_property("axis") {
+                json!({"variants": {
+                    "axis=x": {"model": lying, "x": 90, "y": 90},
+                    "axis=y": {"model": model_id},
+                    "axis=z": {"model": lying, "x": 90},
+                }})
+            } else {
+                json!({"variants": {"": crate::cubes::variants(id, &model_id)}})
+            };
+            (models, Some(definition))
         }
+        Faces::Facing { faces, lit_north } => {
+            let mut lit = faces;
+            lit[2] = lit_north;
+            let mut variants = serde_json::Map::new();
+            for (facing, y) in [("north", 0), ("east", 90), ("south", 180), ("west", 270)] {
+                for state in ["false", "true"] {
+                    let model = if state == "true" {
+                        format!("minecraft:block/{id}_on")
+                    } else {
+                        format!("minecraft:block/{id}")
+                    };
+                    let mut variant = json!({"model": model});
+                    if y != 0 {
+                        variant["y"] = json!(y);
+                    }
+                    let key = if block.has_property("lit") {
+                        format!("facing={facing},lit={state}")
+                    } else if state == "false" {
+                        format!("facing={facing}")
+                    } else {
+                        continue;
+                    };
+                    variants.insert(key, variant);
+                }
+            }
+            (
+                vec![
+                    (format!("block/{id}"), six_model(faces)),
+                    (format!("block/{id}_on"), six_model(lit)),
+                ],
+                Some(json!({"variants": variants})),
+            )
+        }
+        Faces::Connected { .. } => {
+            let Form::Connected(family) = block.form else {
+                unreachable!("{id} has connected faces")
+            };
+            let (models, definition) = crate::connected::models(block, family);
+            (models, Some(definition))
+        }
+        Faces::Fluid { still, .. } => {
+            // Fluids draw through the fluid renderer; the model, one per
+            // fluid as Minecraft's `block/water` and `block/lava`, gives
+            // particles. A bubble column uses water's.
+            let fluid = block.fluid().unwrap_or(id);
+            let models = if fluid == id {
+                let model = json!({"textures": {"particle": tex(still)}});
+                vec![(format!("block/{id}"), model)]
+            } else {
+                Vec::new()
+            };
+            (
+                models,
+                Some(json!({"variants": {"": {"model": format!("minecraft:block/{fluid}")}}})),
+            )
+        }
+        Faces::Slab { .. } | Faces::Stairs { .. } => {
+            let (models, definition) = crate::slabs::models(block);
+            (models, Some(definition))
+        }
+        Faces::Plant => crate::plants::models(block),
         Faces::None => (Vec::new(), None),
     }
+}
+
+/// A unit cube with a texture per face: down, up, north, south, west, east.
+pub(crate) fn six_model(faces: [&str; 6]) -> Value {
+    let dirs = ["down", "up", "north", "south", "west", "east"];
+    let mut textures: BTreeMap<&str, String> =
+        dirs.iter().zip(faces).map(|(d, t)| (*d, tex(t))).collect();
+    // Minecraft's particle is the side (north for the oriented blocks).
+    textures.insert("particle", tex(faces[2]));
+    cube_model(textures, dirs.map(|d| (d, d)))
 }
 
 /// The second plane of a cross faces east and west.
@@ -217,6 +402,13 @@ pub fn write(
     )?;
     // Flat items: the built-in extrusion with this edition's transforms;
     // tools are held along the hand.
+    for (name, model) in crate::connected::templates() {
+        bundle.json(
+            format!("assets/minecraft/models/block/open_{name}.json"),
+            &model,
+            GENERATOR,
+        )?;
+    }
     bundle.json(
         "assets/minecraft/models/item/generated.json",
         &generated_model(),
@@ -228,12 +420,45 @@ pub fn write(
         GENERATOR,
     )?;
 
-    let mut textures = BTreeMap::new();
-    for block in blocks.iter().filter(|b| b.tier != Tier::Support) {
-        for texture in block.textures() {
-            textures.insert(texture, block.layer);
+    let block_texture = |t: &str| format!("assets/minecraft/textures/block/{t}.png");
+    let from_pack = |t: &str| {
+        !KEEP_MEDIA.contains(&t)
+            && sources
+                .input(&block_texture(t))
+                .is_some_and(|m| m.pack.is_some())
+    };
+    let tinting = |block: &Block| {
+        if !TINTED.contains(&block.id) {
+            return Tinting::default();
         }
-        let (models, definition) = models(block);
+        match block.faces {
+            Faces::Grass { top, .. } => Tinting {
+                tint: from_pack(top),
+                overlay: from_pack(GRASS_OVERLAY),
+            },
+            Faces::All(t) | Faces::Cross(t) | Faces::Cube([t, ..]) => Tinting {
+                tint: from_pack(t),
+                overlay: false,
+            },
+            _ => Tinting::default(),
+        }
+    };
+    let mut textures = BTreeMap::new();
+    let mut colors = BTreeMap::new();
+    for block in blocks.iter().filter(|b| b.tier != Tier::Support) {
+        for texture in block
+            .textures()
+            .into_iter()
+            .chain(crate::cubes::variant_textures(block.id))
+        {
+            textures.insert(texture, block.layer);
+            colors.entry(texture).or_insert(block.map_color);
+        }
+        let tinting = tinting(block);
+        if tinting.overlay {
+            textures.insert(GRASS_OVERLAY, block.layer);
+        }
+        let (models, definition) = models(block, tinting);
         for (path, model) in models {
             bundle.json(
                 format!("assets/minecraft/models/{path}.json"),
@@ -251,30 +476,55 @@ pub fn write(
     }
     // Block textures: an open input, else Horizon's own art.
     for texture in textures.keys() {
-        let destination = format!("assets/minecraft/textures/block/{texture}.png");
-        if sources.provides(&destination) {
-            let (mut image, origin) = sources.image(&destination)?;
-            if let Some(base) = overlay_base(texture) {
+        let destination = block_texture(texture);
+        let input = if KEEP_MEDIA.contains(texture) {
+            sources.media_input(&destination)
+        } else {
+            sources.input(&destination)
+        };
+        if let Some(input) = input {
+            let (mut image, origin) = Sources::decode(input)?;
+            if input.pack.is_none()
+                && let Some(base) = overlay_base(texture)
+            {
                 // Minetest Game draws these as overlays: the grass side on
-                // dirt, the minerals on stone.
-                let (base, _) =
-                    sources.image(&format!("assets/minecraft/textures/block/{base}.png"))?;
+                // dirt, the minerals on stone. A pack's are whole textures.
+                let (base, _) = sources.image(&block_texture(base))?;
                 image = over(&image, &base);
             }
             bundle.png(destination.clone(), &image, origin)?;
-            if image.height > image.width {
+            let meta = format!("{destination}.mcmeta");
+            if input.pack.is_some() {
+                // A pack's animation metadata, as it ships it.
+                if let Some((bytes, origin)) = sources.raw(&meta) {
+                    bundle.add(meta, bytes.to_vec(), origin)?;
+                }
+            } else if image.height > image.width {
                 bundle.json(
                     format!("{destination}.mcmeta"),
                     &json!({"animation": {"frametime": 2, "interpolate": false}}),
                     GENERATOR,
                 )?;
             }
+        } else if let Some(image) = crate::art::block_texture(texture) {
+            bundle.png(destination, &image, Origin::Generator("art"))?;
         } else {
-            let image = crate::art::block_texture(texture)
-                .ok_or_else(|| format!("no open input or original art for {destination}"))?;
+            // A placeholder in the block's map colour until there is art,
+            // speckled by its name: two placeholders are never the same
+            // image (an atlas would draw both with one sprite).
+            let rgb = colors.get(texture).copied().unwrap_or(0x808080);
+            let color = [(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, 255];
+            let seed = texture
+                .bytes()
+                .fold(7u32, |h, b| h.wrapping_mul(31) ^ u32::from(b));
+            let image = match bed_placeholder(texture, blocks) {
+                Some(image) => image,
+                None => speckle_seeded(color, seed),
+            };
             bundle.png(destination, &image, Origin::Generator("art"))?;
         }
     }
+    crate::chests::write(bundle, sources)?;
     // Breaking overlays: original art.
     for stage in 0..10 {
         bundle.png(
@@ -283,27 +533,28 @@ pub fn write(
             Origin::Generator("art"),
         )?;
     }
-    // The fluid renderer reads lava's sprites too; lava never appears, so
-    // these are plain original fills.
-    for name in ["lava_still", "lava_flow", "water_overlay"] {
-        let color = if name == "water_overlay" {
-            [40, 80, 200, 160]
-        } else {
-            [210, 90, 20, 255]
-        };
-        bundle.png(
-            format!("assets/minecraft/textures/block/{name}.png"),
-            &speckle(color),
-            Origin::Generator("art"),
-        )?;
-    }
+    // The fluid renderer also reads water's overlay (water seen through
+    // glass): a plain original fill, as the biome's water tint is white.
+    bundle.png(
+        "assets/minecraft/textures/block/water_overlay.png",
+        &speckle([40, 80, 200, 160]),
+        Origin::Generator("art"),
+    )?;
 
     // Items: definitions, prototypes and translations.
     let mut prototypes = BTreeMap::new();
-    prototypes.insert(
-        "minecraft:air".to_owned(),
-        json!({"minecraft:max_stack_size": 64, "minecraft:item_model": "minecraft:air"}),
-    );
+    let mut air = json!({
+        "minecraft:max_stack_size": 64,
+        "minecraft:item_model": "minecraft:air",
+        "minecraft:item_name": {"translate": "block.minecraft.air"},
+    });
+    if let (Some(a), Some(defaults)) = (
+        air.as_object_mut(),
+        crate::items::block_item_components("air"),
+    ) {
+        a.extend(defaults);
+    }
+    prototypes.insert("minecraft:air".to_owned(), air);
     let mut lang = BTreeMap::new();
     for block in blocks.iter().filter(|b| b.tier != Tier::Support) {
         lang.insert(
@@ -313,8 +564,33 @@ pub fn write(
         if !block.has_item() {
             continue;
         }
-        // Plants are drawn flat in the hand and the inventory.
-        let model = if let Faces::Cross(texture) = block.faces {
+        if let Some(plant) = crate::plants::plant(block.id).filter(|_| block.faces == Faces::Plant)
+        {
+            plant_item(bundle, sources, block, plant, &mut prototypes)?;
+            lang.insert(
+                format!("item.minecraft.{}", block.id),
+                block.name.to_owned(),
+            );
+            continue;
+        }
+        // Plants, panes and bars are drawn flat in the hand and the
+        // inventory; fences and walls have an inventory model.
+        let flat = match (block.form, block.faces) {
+            (_, Faces::Cross(texture)) => Some(texture),
+            (Form::Connected(family), Faces::Connected { texture, .. }) => {
+                crate::connected::item_model(block, family)
+                    .is_none()
+                    .then_some(texture)
+            }
+            _ => None,
+        };
+        let connected = match block.form {
+            Form::Connected(family) => crate::connected::item_model(block, family),
+            _ => None,
+        };
+        let model = if let Some(model) = connected {
+            model
+        } else if let Some(texture) = flat {
             let path = format!("item/{}", block.id);
             bundle.json(
                 format!("assets/minecraft/models/{path}.json"),
@@ -325,20 +601,29 @@ pub fn write(
         } else {
             format!("minecraft:block/{}", block.id)
         };
+        let mut item_model = json!({"type": "minecraft:model", "model": model});
+        if tinting(block).tint {
+            item_model["tints"] = json!([item_tint(block.id)]);
+        }
         bundle.json(
             format!("assets/minecraft/items/{}.json", block.id),
-            &json!({"model": {"type": "minecraft:model", "model": model}}),
+            &json!({"model": item_model}),
             GENERATOR,
         )?;
-        prototypes.insert(
-            block.key(),
-            json!({
-                "minecraft:max_stack_size": 64,
-                "minecraft:item_model": block.key(),
-                "minecraft:item_name": {"translate": format!("block.minecraft.{}", block.id)},
-                "minecraft:rarity": "common",
-            }),
-        );
+        let mut prototype = json!({
+            "minecraft:max_stack_size": 64,
+            "minecraft:item_model": block.key(),
+            "minecraft:item_name": {"translate": format!("block.minecraft.{}", block.id)},
+            "minecraft:rarity": "common",
+        });
+        // Minecraft's defaults (stack size, fuel, compost...), where it has the item.
+        if let (Some(p), Some(defaults)) = (
+            prototype.as_object_mut(),
+            crate::items::block_item_components(block.id),
+        ) {
+            p.extend(defaults);
+        }
+        prototypes.insert(block.key(), prototype);
         lang.insert(
             format!("item.minecraft.{}", block.id),
             block.name.to_owned(),
@@ -380,6 +665,7 @@ pub fn write(
         let (image, origin) = sources.image(&destination)?;
         bundle.png(destination, &image, origin)?;
     }
+    vanilla_items(bundle, sources, &mut prototypes, &mut lang)?;
     bundle.json("items.json", &json!(prototypes), GENERATOR)?;
 
     // The creative palette: one tab per category, then search and the
@@ -395,6 +681,12 @@ pub fn write(
             2
         }
     };
+    // Definition order is blocks.rs's, not the registry's.
+    let defined: BTreeMap<&str, usize> = crate::blocks::defined()
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.id, i))
+        .collect();
     let mut palette: Vec<(Category, String, String)> = Vec::new();
     for category in Category::ALL {
         let mut entries: Vec<(&str, String)> = blocks
@@ -402,7 +694,7 @@ pub fn write(
             .filter(|b| b.has_item() && b.category == Some(category))
             .map(|b| (b.id, b.name.to_owned()))
             .collect();
-        entries.sort_by_key(|(id, _)| rank(id));
+        entries.sort_by_key(|(id, _)| (rank(id), defined.get(id).copied()));
         entries.extend(
             items
                 .iter()
@@ -443,7 +735,7 @@ pub fn write(
         "title": "Search",
         "icon": stack("minecraft:glass"),
         "items": palette.iter().map(|(_, id, _)| stack(id)).collect::<Vec<_>>(),
-        "lines": palette.iter().map(|(_, _, name)| vec![name.clone()]).collect::<Vec<_>>(),
+        "lines": palette.iter().map(|(_, id, _)| vec![crate::lang::display_name(id)]).collect::<Vec<_>>(),
         "tags": palette.iter().map(|_| Vec::<String>::new()).collect::<Vec<_>>(),
     }));
     tabs.push(json!({
@@ -469,8 +761,9 @@ pub fn write(
         lang.insert((*key).to_owned(), (*value).to_owned());
     }
     lang.extend(crate::lang::key_names());
+    crate::lang::fill(&mut lang);
     bundle.json("assets/minecraft/lang/en_us.json", &json!(lang), GENERATOR)?;
-    let _ = (Form::Air, Layer::Solid);
+    let _ = Layer::Solid;
     Ok(())
 }
 
@@ -514,11 +807,46 @@ fn handheld_model() -> Value {
     })
 }
 
-fn speckle(color: [u8; 4]) -> Rgba {
+/// A bed face's placeholder (`red_bed_head_up`): the cover in its wool's
+/// colour, the planks below it in the oak planks' colour, each side its own
+/// pattern so no two bed faces share a sprite.
+fn bed_placeholder(texture: &str, blocks: &[Block]) -> Option<Rgba> {
+    // `bed_down` and `bed_head_north` are every bed's: the frame's wood.
+    let (dye, side) = texture
+        .split_once("_bed_")
+        .or_else(|| Some(("", texture.strip_prefix("bed_")?)))?;
+    let rgb = match blocks.iter().find(|b| b.id == format!("{dye}_wool")) {
+        Some(wool) => wool.map_color,
+        None if dye.is_empty() => 0x8F7748,
+        None => return None,
+    };
+    let cover = [(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8];
+    let seed = side
+        .bytes()
+        .fold(dye.len() as u32, |h, b| h.wrapping_mul(31) + u32::from(b));
     let mut image = Rgba::new(16, 16);
     for y in 0..16 {
         for x in 0..16 {
-            let n = (noise(x, y, 7) % 24) as i32 - 12;
+            let n = (noise(x, y, seed) % 24) as i32 - 12;
+            let c = |v: u8| (v as i32 + n).clamp(0, 255) as u8;
+            // The sides show the cover above the frame (rows 7 to 12).
+            let wood = !side.ends_with("up") && y >= 10;
+            let base = if wood { [143, 119, 72] } else { cover };
+            image.set(x, y, [c(base[0]), c(base[1]), c(base[2]), 255]);
+        }
+    }
+    Some(image)
+}
+
+fn speckle(color: [u8; 4]) -> Rgba {
+    speckle_seeded(color, 7)
+}
+
+fn speckle_seeded(color: [u8; 4], seed: u32) -> Rgba {
+    let mut image = Rgba::new(16, 16);
+    for y in 0..16 {
+        for x in 0..16 {
+            let n = (noise(x, y, seed) % 24) as i32 - 12;
             let c = |v: u8| (v as i32 + n).clamp(0, 255) as u8;
             image.set(x, y, [c(color[0]), c(color[1]), c(color[2]), color[3]]);
         }
@@ -538,4 +866,254 @@ fn over(top: &Rgba, bottom: &Rgba) -> Rgba {
         }
     }
     out
+}
+
+/// Minecraft's items that are not blocks (`items::vanilla`): a model on
+/// `item/generated` or `item/handheld` with the item's own texture, the item
+/// definition, a prototype with Minecraft's default components, and a name.
+/// The texture comes from an open input (an enabled pack) when one provides
+/// it, else a generated placeholder icon.
+fn vanilla_items(
+    bundle: &mut Bundle,
+    sources: &Sources,
+    prototypes: &mut BTreeMap<String, Value>,
+    lang: &mut BTreeMap<String, String>,
+) -> Result<()> {
+    for item in crate::items::vanilla() {
+        let path = format!("item/{}", item.id);
+        let parent = if item.handheld {
+            "minecraft:item/handheld"
+        } else {
+            "minecraft:item/generated"
+        };
+        bundle.json(
+            format!("assets/minecraft/models/{path}.json"),
+            &json!({"parent": parent, "textures": {"layer0": format!("minecraft:{}", item.texture)}}),
+            GENERATOR,
+        )?;
+        bundle.json(
+            format!("assets/minecraft/items/{}.json", item.id),
+            &json!({"model": {"type": "minecraft:model", "model": format!("minecraft:{path}")}}),
+            GENERATOR,
+        )?;
+        let destination = format!("assets/minecraft/textures/{}.png", item.texture);
+        if !bundle.contains(&destination) {
+            let (image, origin) = if sources.provides(&destination) {
+                sources.image(&destination)?
+            } else {
+                (placeholder_icon(item.id), Origin::Generator("art"))
+            };
+            bundle.png(destination, &image, origin)?;
+        }
+        let mut prototype = item.components.clone();
+        // Tool rules may only name block tags the bundle has.
+        if let Some(rules) = prototype
+            .get_mut("minecraft:tool")
+            .and_then(|t| t.get_mut("rules"))
+            .and_then(Value::as_array_mut)
+        {
+            rules.retain(|rule| {
+                rule["blocks"]
+                    .as_str()
+                    .and_then(|b| b.strip_prefix('#'))
+                    .is_none_or(|tag| {
+                        let (namespace, path) = tag.split_once(':').unwrap_or(("minecraft", tag));
+                        bundle.contains(&format!("data/{namespace}/tags/block/{path}.json"))
+                    })
+            });
+        }
+        prototype.insert("minecraft:item_model".into(), json!(item.key()));
+        prototype.insert(
+            "minecraft:item_name".into(),
+            json!({"translate": format!("item.minecraft.{}", item.id)}),
+        );
+        prototypes.insert(item.key(), Value::Object(prototype));
+        lang.insert(format!("item.minecraft.{}", item.id), item.name());
+    }
+    Ok(())
+}
+
+/// A plant's own item ([`crate::plants`]): flat, on `item/generated`, with
+/// Minecraft's texture name (a block texture, or an item texture from an
+/// open input or a placeholder icon) and tints, and Minecraft's default
+/// components.
+fn plant_item(
+    bundle: &mut Bundle,
+    sources: &Sources,
+    block: &Block,
+    plant: &crate::plants::Plant,
+    prototypes: &mut BTreeMap<String, Value>,
+) -> Result<()> {
+    let id = block.id;
+    if let Some(definition) = &plant.item_definition {
+        // A special model draws over its base: a model with the block's
+        // particle and this edition's transforms (waxed copper shares the
+        // unwaxed chest's).
+        let base = definition["base"].as_str().map(|b| {
+            let path = b.strip_prefix("minecraft:").unwrap_or(b);
+            format!("assets/minecraft/models/{path}.json")
+        });
+        if let Some(file) = base.filter(|file| !bundle.contains(file)) {
+            let particle = crate::plants::particle(id).unwrap_or("oak_planks");
+            bundle.json(
+                file,
+                &json!({"parent": "minecraft:block/open_base", "textures": {"particle": tex(particle)}}),
+                GENERATOR,
+            )?;
+        }
+        bundle.json(
+            format!("assets/minecraft/items/{id}.json"),
+            &json!({"model": definition}),
+            GENERATOR,
+        )?;
+        return plant_prototype(block, plant, prototypes);
+    }
+    let (texture, tints) = plant
+        .item_model
+        .clone()
+        .unwrap_or((Box::leak(format!("block/{id}").into_boxed_str()), None));
+    let path = format!("item/{id}");
+    bundle.json(
+        format!("assets/minecraft/models/{path}.json"),
+        &json!({"parent": "minecraft:item/generated", "textures": {"layer0": format!("minecraft:{texture}")}}),
+        GENERATOR,
+    )?;
+    let destination = format!("assets/minecraft/textures/{texture}.png");
+    if !bundle.contains(&destination) {
+        let (image, origin) = if sources.provides(&destination) {
+            sources.image(&destination)?
+        } else {
+            (placeholder_icon(id), Origin::Generator("art"))
+        };
+        bundle.png(destination, &image, origin)?;
+    }
+    let mut item_model = json!({"type": "minecraft:model", "model": format!("minecraft:{path}")});
+    if let Some(tints) = tints {
+        item_model["tints"] = tints;
+    }
+    bundle.json(
+        format!("assets/minecraft/items/{id}.json"),
+        &json!({"model": item_model}),
+        GENERATOR,
+    )?;
+    plant_prototype(block, plant, prototypes)
+}
+
+/// A plant's item prototype: Minecraft's default components.
+fn plant_prototype(
+    block: &Block,
+    plant: &crate::plants::Plant,
+    prototypes: &mut BTreeMap<String, Value>,
+) -> Result<()> {
+    let id = block.id;
+    let mut prototype = crate::items::base_components();
+    prototype.insert(
+        "minecraft:item_name".into(),
+        json!({"translate": format!("block.minecraft.{id}")}),
+    );
+    // Minecraft's own name key where it differs (`item.minecraft.nether_wart`).
+    prototype.extend(plant.components.clone());
+    prototype.insert("minecraft:item_model".into(), json!(block.key()));
+    prototypes.insert(block.key(), Value::Object(prototype));
+    Ok(())
+}
+
+/// A flat 16x16 icon for an item no open input draws yet: a rounded tile in
+/// a colour of its own, with a darker rim and a light corner.
+fn placeholder_icon(id: &str) -> Rgba {
+    let hash = id.bytes().fold(2166136261u32, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(16777619)
+    });
+    let hue = (hash % 360) as f32;
+    // HSV with fixed saturation and value, to RGB.
+    let (s, v) = (0.55f32, 0.85f32);
+    let c = v * s;
+    let x = c * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
+    let (r, g, b) = match (hue / 60.0) as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = v - c;
+    let base = [r + m, g + m, b + m].map(|f| (f * 255.0) as u8);
+    let shade = |k: f32| [base[0], base[1], base[2]].map(|v| (f32::from(v) * k) as u8);
+    let (rim, light) = (shade(0.55), shade(1.2));
+    let mut image = Rgba::new(16, 16);
+    for y in 3..13u32 {
+        for x in 3..13u32 {
+            // Cut the corners for a rounded tile.
+            let corner = (x == 3 || x == 12) && (y == 3 || y == 12);
+            if corner {
+                continue;
+            }
+            let edge = x == 3 || x == 12 || y == 3 || y == 12;
+            let lit = (x == 5 || y == 5) && x < 8 && y < 8 && x >= 5 && y >= 5;
+            let rgb = if edge {
+                rim
+            } else if lit {
+                light
+            } else {
+                base
+            };
+            image.set(x, y, [rgb[0], rgb[1], rgb[2], 255]);
+        }
+    }
+    image
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Inputs, Origin, build};
+    use serde_json::Value;
+    use std::path::Path;
+
+    #[test]
+    fn the_pack_textures_are_tinted_as_minecraft_tints_them() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let bundle = build(&Inputs::at(&repo)).unwrap();
+        let json = |path: &str| -> Value {
+            serde_json::from_slice(bundle.get(path).unwrap_or_else(|| panic!("{path}"))).unwrap()
+        };
+        let input = |path: &str| match &bundle.files[path].1 {
+            Origin::Input(input) => input.clone(),
+            Origin::Generator(g) => format!("generator {g}"),
+        };
+        let grass = json("assets/minecraft/models/block/grass_block.json");
+        assert_eq!(grass["elements"][0]["faces"]["up"]["tintindex"], 0);
+        assert!(grass["elements"][0]["faces"]["north"]["tintindex"].is_null());
+        assert_eq!(
+            grass["elements"][1]["faces"]["north"]["texture"],
+            "#overlay"
+        );
+        assert_eq!(grass["elements"][1]["faces"]["north"]["tintindex"], 0);
+        let overlay = "assets/minecraft/textures/block/grass_block_side_overlay.png";
+        assert!(input(overlay).starts_with("packs/"));
+        // The pack's grass side is whole: not composited over dirt.
+        let side = "assets/minecraft/textures/block/grass_block_side.png";
+        assert!(input(side).starts_with("packs/"));
+        let leaves = json("assets/minecraft/models/block/oak_leaves.json");
+        for face in ["down", "up", "north", "south", "west", "east"] {
+            assert_eq!(leaves["elements"][0]["faces"][face]["tintindex"], 0);
+        }
+        let fern = json("assets/minecraft/models/block/fern.json");
+        assert_eq!(fern["elements"][1]["faces"]["east"]["tintindex"], 0);
+        assert_eq!(
+            json("assets/minecraft/items/fern.json")["model"]["tints"][0]["type"],
+            "minecraft:grass"
+        );
+        assert_eq!(
+            json("assets/minecraft/items/oak_leaves.json")["model"]["tints"][0]["type"],
+            "minecraft:constant"
+        );
+        // Untinted blocks stay untinted; water keeps Minetest Game's art.
+        let stone = json("assets/minecraft/models/block/stone.json");
+        assert!(stone["elements"][0]["faces"]["up"]["tintindex"].is_null());
+        assert!(input("assets/minecraft/textures/block/water_still.png").starts_with("media/"));
+        // The biome reads its grass colour from the colormap.
+        let plains = json("data/minecraft/worldgen/biome/plains.json");
+        assert!(plains["effects"]["grass_color"].is_null());
+    }
 }

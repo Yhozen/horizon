@@ -148,6 +148,9 @@ const PAGES: Ty = Ty::Enum(&[
     "extras",
     "horizon",
     "agent",
+    "shaderpacks",
+    "shaderpack-settings",
+    "shaderpack-report",
 ]);
 
 /// `--confirm`, required by destructive commands: the player agreed.
@@ -234,13 +237,13 @@ pub const COMMANDS: &[Cmd] = &[
         ["horizon-ctl screenshot view.png"], &[], mcp: true, local: false),
     // Observe
     cmd!("state", Observe, "state", "player, world, screen and crosshair target in one reply",
-        "position, block_pos, eye, yaw, pitch, velocity, on_ground, health, food, saturation, xp, effects, gamemode, dimension, time, weather, the screen or title menu, the held item, what the crosshair points at and whether an action is running.",
+        "position, block_pos, eye, yaw, pitch, velocity, on_ground, health, food, saturation, xp, effects, pose, swimming, in_water, eye_in_water, eye_height, dimensions (width, height), attributes (name to current value), gamemode, dimension, time, weather, the screen or title menu, the held item, what the crosshair points at and whether an action is running.",
         ["horizon-ctl state"], &[], mcp: true, local: false),
     cmd!("looking-at", Observe, "looking-at", "the block or entity under the crosshair",
         "kind is block, entity or none; a block has pos, state, face, point and distance; an entity has id, type, health and distance.",
         ["horizon-ctl looking-at"], &[], mcp: true, local: false),
-    cmd!("entities", Observe, "entities [RADIUS] [TYPE]", "mobs, dropped items and experience orbs near the player, nearest first",
-        "RADIUS defaults to 32. TYPE filters by entity type (pig, minecraft:item, ...). Mobs have an id for look-at entity and attack.",
+    cmd!("entities", Observe, "entities [RADIUS] [TYPE]", "mobs, dropped items, experience orbs and other entities near the player, nearest first",
+        "RADIUS defaults to 32. TYPE filters by entity type (pig, minecraft:item, ...). Mobs have an id for look-at entity and attack. On a client of a server, every other entity the server sent is listed too, with kind remote, its id, type and position.",
         ["horizon-ctl entities", "horizon-ctl entities 16 cow", "horizon-ctl entities 8 item"],
         &[opt("radius", Ty::Num, "search radius in blocks (default 32)"), opt("type", Ty::Str, "entity type filter")], mcp: true, local: false),
     cmd!("block", Observe, "block X Y Z", "the block state at a position", "",

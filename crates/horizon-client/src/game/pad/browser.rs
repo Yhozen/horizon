@@ -40,20 +40,27 @@ fn gamepads() -> Vec<web_sys::Gamepad> {
 }
 
 fn read_pad(pad: &web_sys::Gamepad) -> PadState {
-    let buttons: Vec<(bool, f32)> = pad
-        .buttons()
-        .iter()
-        .map(|b| {
-            b.dyn_into::<web_sys::GamepadButton>()
-                .map_or((false, 0.0), |b| (b.pressed(), b.value() as f32))
-        })
-        .collect();
-    let axes: Vec<f32> = pad
-        .axes()
-        .iter()
-        .map(|a| a.as_f64().unwrap_or(0.0) as f32)
-        .collect();
+    // Fixed buffers: this runs every frame, and the standard mapping has 16 buttons and 4 axes
+    // that count (more are ignored).
+    let mut buttons = [(false, 0.0); 16];
+    for (slot, b) in buttons.iter_mut().zip(pad.buttons().iter()) {
+        if let Ok(b) = b.dyn_into::<web_sys::GamepadButton>() {
+            *slot = (b.pressed(), b.value() as f32);
+        }
+    }
+    let mut axes = [0.0; 4];
+    for (slot, a) in axes.iter_mut().zip(pad.axes().iter()) {
+        *slot = a.as_f64().unwrap_or(0.0) as f32;
+    }
     gamepad::standard_state(&buttons, &axes)
+}
+
+/// The tab is in the background: browsers stop updating pads there, so their last state would
+/// hold buttons and sticks until the player came back.
+fn hidden() -> bool {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .is_some_and(|d| d.hidden())
 }
 
 /// Pushed far enough to make this the pad in use, as gilrs' backend does on its events.
@@ -68,6 +75,10 @@ fn touched(state: &PadState) -> bool {
 impl Pads {
     /// Read every connected pad, note connections, and return the active pad's state.
     pub(super) fn read(&mut self) -> PadState {
+        // Everything released while hidden; the first poll back reads the pads afresh.
+        if hidden() {
+            return PadState::default();
+        }
         let mut now = Vec::new();
         let mut active = None;
         for pad in gamepads() {

@@ -674,3 +674,44 @@ mod tests {
         assert_eq!(title("enchanted_golden_apple"), "Enchanted Golden Apple");
     }
 }
+
+/// Mobs the open bundle has no model for, shown as the open mob nearest in shape, so a
+/// creature that can hurt a player is never invisible. The stand-in keeps only the data
+/// every mob shares (`ENTITY_DATA_SHARED`), not the original's own.
+const STAND_INS: &[(&str, &[&str])] = &[("minecraft:skeleton", &["parched"])];
+
+/// Entity data entries below this index belong to every mob (Entity, LivingEntity and
+/// Mob: flags, health, effects...); a stand-in gets only those.
+pub const ENTITY_DATA_SHARED: u8 = 16;
+
+/// The open mob that stands in for a vanilla mob the bundle lacks, by name.
+pub fn stand_in(name: &str) -> Option<&'static str> {
+    let short = name.strip_prefix("minecraft:")?;
+    STAND_INS
+        .iter()
+        .find(|(_, names)| names.contains(&short))
+        .map(|(open, _)| *open)
+}
+
+#[cfg(test)]
+mod stand_in_tests {
+    use super::*;
+
+    #[test]
+    fn mobs_the_bundle_lacks_stand_in_by_shape_and_others_stay_hidden() {
+        assert_eq!(stand_in("minecraft:parched"), Some("minecraft:skeleton"));
+        // The bundle's own mobs need none (its creatures too); unrelated shapes get none.
+        assert_eq!(stand_in("minecraft:zombie"), None);
+        assert_eq!(stand_in("minecraft:pillager"), None);
+        assert_eq!(stand_in("minecraft:horse"), None);
+        assert_eq!(stand_in("minecraft:ender_dragon"), None);
+        assert_eq!(stand_in("zombie_villager"), None);
+        // No mob is listed twice.
+        let mut seen = std::collections::HashSet::new();
+        for (_, names) in STAND_INS {
+            for n in *names {
+                assert!(seen.insert(*n), "{n} stands in twice");
+            }
+        }
+    }
+}

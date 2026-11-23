@@ -104,3 +104,14 @@ test("a release may carry the shared open bundle, and it is checked like the oth
   release.assets.sharedResources.url = "/assets/elsewhere/horizon-open-data.bin";
   assert.throws(() => validateRelease(release), /sharedResources/);
 });
+
+test("the open archive is inflated before mounting, other archives pass unchanged", async () => {
+  const { gzipSync } = await import("node:zlib");
+  const { inflateArchive } = await import("../cache.js");
+  const records = Buffer.from("\u0004\u0000\u0000\u0000a.js\u0001\u0000\u0000\u0000x");
+  const gz = gzipSync(records);
+  const inflated = await inflateArchive(gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.length));
+  assert.deepEqual(Buffer.from(inflated), records);
+  const plain = records.buffer.slice(records.byteOffset, records.byteOffset + records.length);
+  assert.equal(await inflateArchive(plain), plain);
+});

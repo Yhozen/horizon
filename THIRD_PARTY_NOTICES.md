@@ -48,3 +48,13 @@ by The Pixelify Sans Project Authors, licensed under the SIL Open Font License 1
 `crates/horizon-theme/icons/pixel/*.svg` are icons from
 [Pixelarticons](https://github.com/halfmage/pixelarticons) by Gerrit Halfmann, under the MIT
 license (`crates/horizon-theme/icons/pixel/LICENSE-pixelarticons.txt`).
+
+## Pixel Perfection Legacy
+
+`content/open/packs/pixel_perfection_legacy/` holds textures from
+[Pixel Perfection Legacy](https://modrinth.com/resourcepack/pixel-perfection-legacy) 26.3-97.2, the
+update by Nova_Wostra (with textures by freejusticehere and HexaBlu) of Pixel Perfection by
+XSSheep, under CC BY-SA 4.0 (`content/open/licenses/CC-BY-SA-4.0.txt`). The files are unchanged;
+files that look taken from Minecraft are left out. `pack.json` lists the source, the licence
+evidence, every file and every exclusion; `pack.txt` is the pack's own credits. See
+[legal/LICENSING.md](legal/LICENSING.md#horizon-open-content).

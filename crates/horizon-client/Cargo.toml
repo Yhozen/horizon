@@ -11,6 +11,7 @@ description = "Horizon native development client"
 # std::time on native; the page clock in the browser build (WEB.md), where std's panics.
 web-time = "1.1"
 horizon-assets = { path = "../horizon-assets" }
+horizon-glsl-pack = { path = "../horizon-glsl-pack" }
 horizon-core = { path = "../horizon-core" }
 # The server thread ahead of the workers (MinecraftServer.spin's Thread.setPriority).
 horizon-threads = { path = "../horizon-threads" }
@@ -70,7 +71,7 @@ rustls-pki-types = { version = "1", features = ["web"] }
 chrono = { version = "0.4.42", default-features = false, features = ["wasmbind"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "Element", "console", "Performance", "Location", "Url", "WebSocket", "BinaryType", "MessageEvent", "CloseEvent", "Navigator", "Gamepad", "GamepadButton", "GamepadMappingType"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "Element", "console", "Performance", "Location", "Url", "WebSocket", "BinaryType", "MessageEvent", "CloseEvent", "CustomEvent", "CustomEventInit", "Navigator", "Gamepad", "GamepadButton", "GamepadMappingType"] }
 js-sys = "0.3"
 console_error_panic_hook = "0.1"
 

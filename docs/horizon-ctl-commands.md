@@ -28,7 +28,7 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | `events [--since SEQ]` | `events` | What happened since SEQ, oldest first: screens, chat, deaths, respawns, items gained or lost, dimensions, worlds | `--since` (integer): only events after this seq |
 | `state` | `state` | Player, world, screen and crosshair target in one reply | none |
 | `looking-at` | `looking_at` | The block or entity under the crosshair | none |
-| `entities [RADIUS] [TYPE]` | `entities` | Mobs, dropped items and experience orbs near the player, nearest first | `radius` (number): search radius in blocks (default 32)<br>`type` (string): entity type filter |
+| `entities [RADIUS] [TYPE]` | `entities` | Mobs, dropped items, experience orbs and other entities near the player, nearest first | `radius` (number): search radius in blocks (default 32)<br>`type` (string): entity type filter |
 | `block X Y Z` | `block` | The block state at a position | `x` (integer, required): block X<br>`y` (integer, required): block Y<br>`z` (integer, required): block Z |
 | `light X1 Y1 Z1 X2 Y2 Z2` | `light` | The stored sky and block light of a box | `x1` (integer, required): corner X<br>`y1` (integer, required): corner Y<br>`z1` (integer, required): corner Z<br>`x2` (integer, required): opposite X<br>`y2` (integer, required): opposite Y<br>`z2` (integer, required): opposite Z |
 | `blocks X1 Y1 Z1 X2 Y2 Z2` | `blocks` | The non-air blocks of a box, with counts per block | `x1` (integer, required): corner X<br>`y1` (integer, required): corner Y<br>`z1` (integer, required): corner Z<br>`x2` (integer, required): opposite X<br>`y2` (integer, required): opposite Y<br>`z2` (integer, required): opposite Z |
@@ -94,7 +94,7 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | `respawn` | `respawn` | Respawn from the death screen | none |
 | `pause` | `pause` | Open the pause menu | none |
 | `resume` | `resume` | Leave the pause menu | none |
-| `options [PAGE]` | `options` | Open the options screen, or one of its pages (Horizon's too) | `page` (main, video, sound, controls, keybinds, controller, controller-binds, mouse, chat, accessibility, language, font, packs, mods, graphics, graphics-advanced, extras, horizon, agent): the page (default: the main options) |
+| `options [PAGE]` | `options` | Open the options screen, or one of its pages (Horizon's too) | `page` (main, video, sound, controls, keybinds, controller, controller-binds, mouse, chat, accessibility, language, font, packs, mods, graphics, graphics-advanced, extras, horizon, agent, shaderpacks, shaderpack-settings, shaderpack-report): the page (default: the main options) |
 | `book [next\|back\|take\|done]` | `book` | The open book or lectern: its page text, or press one of its buttons | `action` (next, back, take, done): a button to press |
 | `signedit X Y Z [front\|back]` | `signedit` | Open the sign editor of the sign at X Y Z (then type and close) | `x` (integer, required): block X<br>`y` (integer, required): block Y<br>`z` (integer, required): block Z<br>`side` (front, back): which side |
 | `mount-menu` | `mount_menu` | Open the inventory of the horse, donkey, mule or llama being ridden | none |

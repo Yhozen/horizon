@@ -19,7 +19,7 @@ export const Phase = defineTaggedUnion({
   Menu: {},
   Loading: { step: Schema.String, index: Schema.Number },
   Playing: {},
-  Failed: { error: Schema.String },
+  Failed: { error: Schema.String, reload: Schema.Boolean },
 });
 export type Phase = typeof Phase.Type;
 
@@ -63,7 +63,7 @@ export const Message = defineMessageUnion({
   ClickedCancel: {},
   AdvancedLoading: { step: Schema.String, index: Schema.Number },
   StartedGame: {},
-  FailedGame: { error: Schema.String },
+  FailedGame: { error: Schema.String, reload: Schema.Boolean },
   GotWorlds: { worlds: Schema.Array(WorldId) },
   ToggledChoice: { choice: Choice, on: Schema.Boolean },
   SucceededFetchCredits: { lines: Schema.Array(CreditLine) },
@@ -175,6 +175,14 @@ const FocusGame = Command.define("FocusGame", {
   }),
 });
 
+const ReloadPage = Command.define("ReloadPage", {
+  messages: [Message.CompletedSideEffect],
+  execute: Effect.sync(() => {
+    location.reload();
+    return Message.CompletedSideEffect();
+  }),
+});
+
 /** The open edition's credits (its art is CC BY-SA and CC0), as plain lines with links. */
 const FetchCredits = Command.define("FetchCredits", {
   messages: [Message.SucceededFetchCredits, Message.FailedFetchCredits],
@@ -233,18 +241,20 @@ export const update = (model: Model, message: Message): Return =>
     ChangedFullscreen: ({ on }) => ({ model: modifyFields(model, { fullscreen: () => on }) }),
     SubmittedPlay: () => {
       if (Phase.guards.Loading(model.phase) || Phase.guards.Playing(model.phase)) return { model };
+      if (Phase.guards.Failed(model.phase) && model.phase.reload) return { model, commands: [ReloadPage()] };
       if (!nameOk(model.name) || !isAvailable(model, model.world)) return { model };
       return startLoading(model);
     },
     ChangedPad: ({ pad }) => ({ model: modifyFields(model, { pad: () => pad }) }),
-    // ○ / B closes How to play, or cancels a download that hasn't started the game.
+    // ○ / B closes How to play, or cancels a download as Cancel does.
     PressedPadBack: () => model.sheet ? { model: modifyFields(model, { sheet: () => false }) }
-      : Phase.guards.Loading(model.phase) ? { model: modifyFields(model, { phase: () => Phase.Menu() }) } : { model },
-    ClickedCancel: () => ({ model: modifyFields(model, { phase: () => Phase.Menu() }) }),
+      : update(model, Message.ClickedCancel()),
+    ClickedCancel: () => Phase.guards.Loading(model.phase) && model.phase.index < STEPS - 1
+      ? { model: modifyFields(model, { phase: () => Phase.Menu() }) } : { model },
     AdvancedLoading: ({ step, index }) => Phase.guards.Loading(model.phase)
       ? { model: modifyFields(model, { phase: () => Phase.Loading({ step, index }) }) } : { model },
     StartedGame: () => ({ model: modifyFields(model, { phase: () => Phase.Playing() }), commands: [FocusGame()] }),
-    FailedGame: ({ error }) => ({ model: modifyFields(model, { phase: () => Phase.Failed({ error }) }) }),
+    FailedGame: ({ error, reload }) => ({ model: modifyFields(model, { phase: () => Phase.Failed({ error, reload }) }) }),
     GotWorlds: ({ worlds }) => {
       const next = modifyFields(model, { available: () => worlds, checkedWorlds: () => true });
       // A remembered choice this deployment doesn't serve falls back to the first world it does.
@@ -292,7 +302,7 @@ const toMessage = (progress: Progress): Message => {
   switch (progress._tag) {
     case "Step": return Message.AdvancedLoading({ step: progress.step, index: progress.index });
     case "Started": return Message.StartedGame();
-    case "Failed": return Message.FailedGame({ error: progress.error });
+    case "Failed": return Message.FailedGame({ error: progress.error, reload: progress.reload });
   }
 };
 
@@ -301,16 +311,16 @@ const padMessage = (event: PadEvent): Message => event._tag === "Changed"
   : event.button === "confirm" ? Message.SubmittedPlay() : Message.PressedPadBack();
 
 export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
-  // The game loads while the Model says so; Cancel ends the stream before the game starts.
+  // Keep the subscription alive through play to receive fatal renderer errors.
   game: entry(
-    { loading: Schema.Boolean, edition: EditionId, world: WorldId, name: Schema.String, custom: Schema.String },
+    { active: Schema.Boolean, edition: EditionId, world: WorldId, name: Schema.String, custom: Schema.String },
     {
-      modelToDependencies: (model) => ({ loading: Phase.guards.Loading(model.phase), edition: model.edition,
+      modelToDependencies: (model) => ({ active: Phase.guards.Loading(model.phase) || Phase.guards.Playing(model.phase), edition: model.edition,
         world: model.world, name: model.name, custom: model.custom }),
-      dependenciesToStream: ({ loading, edition, world, name, custom }) => loading
+      dependenciesToStream: ({ active, edition, world, name, custom }) => active
         ? Stream.fromAsyncIterable(boot(EDITIONS[edition], world, name, custom || undefined), String).pipe(
           Stream.map(toMessage),
-          Stream.orElseSucceed((error) => Message.FailedGame({ error })))
+          Stream.orElseSucceed((error) => Message.FailedGame({ error, reload: true })))
         : Stream.empty,
     },
   ),
@@ -382,9 +392,12 @@ function menu(model: Model, h: HtmlBuilder<Message>): Html {
         nameField(model, h),
         worldCards(model, h),
         ...(world.caveat ? [h.p([h.Class("caveat")], [world.caveat])] : []),
+        ...(!loading ? [h.p([h.Class("touch-controls")], [
+          "Connect a keyboard and mouse to play. Use WASD to move and the arrow keys to look around.",
+        ])] : []),
         actions(model, h),
         ...(Phase.guards.Failed(model.phase)
-          ? [h.p([h.Class("error"), h.Role("alert")], [`Couldn't start: ${model.phase.error}`])] : []),
+          ? [h.p([h.Class("error"), h.Role("alert")], [model.phase.error])] : []),
       ]),
     ]),
     sheet(model, h, loading),
@@ -430,9 +443,12 @@ function actions(model: Model, h: HtmlBuilder<Message>): Html {
         h.AriaValuenow(index + 1), h.AriaValuetext(step), h.Style({ "--p": String((index + 1) / STEPS) })], [
         h.span([h.Class("fill")], []),
         h.span([h.Class("what")], [step]),
-        h.button([h.Class("btn cancel"), h.Type("button"), h.OnClick(Message.ClickedCancel())], ["Cancel"]),
+        ...(index < STEPS - 1 ? [h.button([h.Class("btn cancel"), h.Type("button"), h.OnClick(Message.ClickedCancel())], ["Cancel"])] : []),
       ]),
     ]);
+  }
+  if (Phase.guards.Failed(model.phase) && model.phase.reload) {
+    return h.div([h.Class("go")], [h.button([h.Class("btn primary big"), h.Type("submit")], ["Reload page"])]);
   }
   const ready = nameOk(model.name) && isAvailable(model, model.world);
   return h.div([h.Class("go")], [

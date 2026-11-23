@@ -2,6 +2,7 @@ import datetime as dt
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tools import release_train as train
 
@@ -163,8 +164,9 @@ class ReleaseTrainTests(unittest.TestCase):
         self.assertNotIn("beta", body.lower())
         self.assertNotIn("Stable", body)
 
+    @patch.object(train, "REPO", "example/horizon")
     def test_notes(self):
-        prs = [pr(5, "Nether portals: vanilla timing and linking (fixes #94)", issues=[94]),
+        prs = [pr(5, "Nether portals: vanilla timing and linking (fixes #94)", issues=[94], author="example"),
                pr(6, "Controllers: gilrs input layer and gameplay", labels=["feature"], author="cosmic"),
                pr(7, "Release folder in Rust", labels=["skip-release"]),
                pr(8, "Website footer", paths=[])]

@@ -21,7 +21,7 @@ pub enum Precipitation {
     Rain,
     Snow,
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BiomeTemperatureSettings {
     pub base_temperature: f32,
     pub modifier: TemperatureModifier,
@@ -108,6 +108,17 @@ impl BiomeTemperatureSettings {
             base - ((variation + position.y as f32 - start as f32) * 0.05 / 40.0)
         } else {
             base
+        }
+    }
+
+    /// `Biome.getPrecipitationAt` for queries outside the worldgen cache.
+    pub fn precipitation_at(self, position: BlockPos, sea_level: i32) -> Precipitation {
+        if !self.has_precipitation {
+            Precipitation::None
+        } else if self.height_adjusted(position, sea_level) >= 0.15 {
+            Precipitation::Rain
+        } else {
+            Precipitation::Snow
         }
     }
 }

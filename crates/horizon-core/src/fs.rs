@@ -115,7 +115,10 @@ mod web {
 
     fn key(path: &Path) -> String {
         let mut parts: Vec<String> = Vec::new();
-        if path.is_relative() {
+        // Not `is_relative`: on wasm32-unknown-unknown std counts `/horizon/x` as
+        // relative (only unix and wasi paths are absolute without a prefix), which
+        // put the game's absolute paths under `/horizon/horizon`.
+        if !path.has_root() {
             parts.extend(
                 CURRENT_DIR
                     .split('/')

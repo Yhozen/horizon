@@ -178,6 +178,7 @@ its `r2.dev` URL remain private, and Worker version preview URLs are disabled. T
 `X-Horizon-Asset-Cache` response header reports the internal entrypoint's cache status.
 
 The browser verifies SHA-256 and size before storing the WASM and resource archive in Cache Storage.
+A gzip archive (the open bundle's) is stored as downloaded and inflated (`inflateArchive`) before the game mounts it.
 Hashes depend on each file's bytes, independently: changing game code does not change the resource
 URL. Successful startup retains the current and previous release's browser entries. Quota failures
 fall back to normal downloads; clearing browser data or storage eviction can require downloading
@@ -218,8 +219,9 @@ takes the browser's `/connect` there. Both sites' players must number blocks and
 this page plays multiplayer on the open bundle, which the release carries as `sharedResources`
 (`horizon-open-data.bin`, packed from `web/.build-open/horizon-data.bin`: run `pnpm package:open`
 before `pnpm build`), wearing this preview's own art: `start_overlaid` (`crates/horizon-client/src/web.rs`)
-lays every texture the open bundle also has, and the English text, over it, tinting vanilla's grey
-grass and foliage with plains colours. Single player is unchanged. Deploy the open site first when
+lays every texture the open bundle also has (the grass and foliage colormaps too), and the English
+text, over it. Vanilla's grey grass and foliage stay grey: the open bundle's models tint them, as
+vanilla's do. Single player is unchanged. Deploy the open site first when
 the open bundle changes, so the server and both pages share it (an open player or server with other
 content refuses the join by brand).
 
@@ -376,6 +378,40 @@ scene that repeats exactly, fix the spawn, view and time:
 --spawn-radius 0 --look 30,15 --time 6000      # --time 0 for dawn, the time a new world starts at
 --world-frames 18446744073709551615 --timeout-seconds 1000000000
 ```
+
+The PR benchmark builds Open Creative in separate Cargo target directories for the PR and its base.
+On repeat runs with the same base commit and toolchain, CI can reuse the packaged base site and skip
+its checkout and compilation. It still measures both builds on the same runner; FPS is never cached.
+Both run with clear weather and the same Chromium and SwiftShader settings. `--strict` rejects game
+stops, uncaught page errors and unsettled samples. CI uses `--expect-chunks 81`, which also enables
+strict checks, so both builds must load this scene's 81 chunks at render distance 4 before FPS counts.
+
+### Boat benchmark runners
+
+The benchmark uses `boat-large/from=horizon-ci-v1`. To rebuild the runner, authenticate the Boat CLI
+in the same paid account or organization as the GitHub CI installation, then run from a trusted commit
+with a new versioned name:
+
+```sh
+tools/ci/boat/create-snapshot.sh horizon-ci-v2 HEAD
+```
+
+The script sends only the provisioning recipe and dependency manifests to a temporary `--no-env`
+sandbox. It waits for the snapshot to be ready and deletes the builder. Do not put credentials,
+source builds, or Minecraft data in the snapshot. CI still installs from the checked-out lockfiles
+and downloads Chromium or `wasm-bindgen` if the needed version isn't already present.
+
+Before updating the workflow, start a clean `boat new --no-env --type large --from horizon-ci-v2`
+sandbox and smoke-test `pnpm build:open` and `pnpm bench --site open` with the saved tools:
+prepend `/opt/horizon-ci/bin` to `PATH`, set `RUSTUP_TOOLCHAIN` from `/opt/horizon-ci/rust-version`,
+and set `PLAYWRIGHT_BROWSERS_PATH=/opt/horizon-ci/browsers`. From `web/`, use
+`CHROME_PATH` set to Playwright's `chromium.executablePath()` and the scene above. Delete the test
+sandbox afterward.
+Compare setup and total times of passing CI runs on the same revisions before and after the change.
+Set the GitHub Actions repository variable `HORIZON_BOAT_RUNNER` to `boat-large` to roll back or
+use an account without the snapshot. This does not change the `verify` or parity runners.
+
+### Previous measurements
 
 What limited the frame rate, measured on a 4-vCPU VM with SwiftShader (frames a second over 30 s,
 the original build and this one run alternately):

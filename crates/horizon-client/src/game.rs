@@ -59,6 +59,7 @@ mod game_mode;
 mod game_rules_screen;
 mod gamemode_switcher;
 mod ghasts;
+mod glsl_pack;
 mod golems;
 mod growth;
 mod hand;
@@ -141,6 +142,7 @@ mod screens;
 mod sculk;
 mod sculk_fixture;
 mod server_travel;
+mod shader_packs;
 mod shield;
 mod sign_edit;
 mod sniffers;
@@ -242,15 +244,25 @@ use winit::{
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
-    window::{CursorGrabMode, Window, WindowId},
+    window::{Window, WindowId},
 };
 
-/// The browser build's command line, from the page (web.rs).
+/// The page added shader packs to the `shaderpacks` folder.
 #[cfg(target_arch = "wasm32")]
-static WEB_ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+pub fn shader_packs_changed() {
+    shader_packs::RESCAN.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A line from the page for the player (a pack it could not store or load).
 #[cfg(target_arch = "wasm32")]
-pub fn set_web_args(args: Vec<String>) {
-    let _ = WEB_ARGS.set(args);
+pub fn shader_pack_notice(line: String) {
+    shader_packs::notice(line);
+}
+
+/// Whether the Shader Packs page shows, where dropped files are packs.
+#[cfg(target_arch = "wasm32")]
+pub fn shader_pack_page_open() -> bool {
+    shader_packs::PAGE_OPEN.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// The event loop's flow between frames. The desktop polls; in the browser the
@@ -329,7 +341,7 @@ impl Options {
             )
         })
     }
-    fn read() -> Result<Option<Self>> {
+    fn read(mut args: impl Iterator<Item = String>) -> Result<Option<(Self, glsl_pack::Args)>> {
         let sibling = horizon_core::fs::current_exe()?
             .parent()
             .ok_or("missing executable directory")?
@@ -380,15 +392,12 @@ impl Options {
             profile: Default::default(),
         };
         let mut session_file = std::env::var("HORIZON_SESSION_FILE").ok();
-        #[cfg(target_arch = "wasm32")]
-        let mut args = WEB_ARGS.get().cloned().unwrap_or_default().into_iter();
-        #[cfg(not(target_arch = "wasm32"))]
-        let mut args = std::env::args().skip(1);
+        let mut shader_pack = glsl_pack::Args::default();
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--help" | "-h" => {
                     println!(
-                        "Horizon — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (horizon-prepare)\n  --render-distance N     Chunks, 2..64 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain), write its report to benchmarks/ and quit\n  --control               Accept horizon-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/horizon-control.sock)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --name NAME             Player name for multiplayer (default: generated once, kept in horizon-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --dev-mod PATH          A Horizon mod (.hmod or folder) to develop: always on, reloaded when rebuilt\n  --in-frame              Run single player's world in the frame, not on its server thread\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
+                        "Horizon — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (horizon-prepare)\n  --render-distance N     Chunks, 2..64 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain), write its report to benchmarks/ and quit\n  --control               Accept horizon-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/horizon-control.sock)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --name NAME             Player name for multiplayer (default: generated once, kept in horizon-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --dev-mod PATH          A Horizon mod (.hmod or folder) to develop: always on, reloaded when rebuilt\n  --in-frame              Run single player's world in the frame, not on its server thread\n  --shader-pack PATH      Draw the overworld with an OptiFine-format shader pack (zip or folder; experimental)\n  --shader-pack-option NAME=VALUE  Set one of the pack's options (repeatable)\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
                         horizon_core::VANILLA_VERSION
                     );
                     return Ok(None);
@@ -441,6 +450,11 @@ impl Options {
                         "--height" => o.window_size[1] = value.parse::<u32>()?.max(1),
                         "--world" => o.world = Some(value),
                         "--dev-mod" => o.dev_mods.push(std::path::absolute(&value)?),
+                        // An OptiFine-format shader pack (game/glsl_pack.rs).
+                        "--shader-pack" => {
+                            shader_pack.path.get_or_insert(value.into());
+                        }
+                        "--shader-pack-option" => shader_pack.overrides.push(value),
                         "--benchmark" => {
                             if horizon_client::benchmark::scenes(&value).is_none() {
                                 return Err(format!(
@@ -485,7 +499,7 @@ impl Options {
             }
         }
         open_profile::apply(&mut o)?;
-        Ok(Some(o))
+        Ok(Some((o, shader_pack)))
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -563,6 +577,7 @@ struct GameLevel<'w> {
     /// The other entities that keep blocks from being placed into them.
     blockers: Blockers<'w>,
     biomes: &'w Biomes,
+    open_content: bool,
     seed: i64,
     behaviours: &'w Behaviours,
     items: &'w Items,
@@ -717,6 +732,16 @@ impl LevelAccess for GameLevel<'_> {
     fn biome_name(&self, pos: BlockPos) -> Option<&str> {
         let chunk = self.world.chunks.get(&(pos.x >> 4, pos.z >> 4))?;
         Some(&self.biomes.get(chunk.biome(pos.x, pos.y, pos.z)).name)
+    }
+    fn biome_temperature(
+        &self,
+        pos: BlockPos,
+    ) -> Option<horizon_world::worldgen::biome_temperature::BiomeTemperatureSettings> {
+        if !self.open_content {
+            return None;
+        }
+        let chunk = self.world.chunks.get(&(pos.x >> 4, pos.z >> 4))?;
+        Some(self.biomes.get(chunk.biome(pos.x, pos.y, pos.z)).climate())
     }
     fn world_seed(&self) -> i64 {
         self.seed
@@ -1117,6 +1142,7 @@ impl PackResources {
                 tables,
                 biomes,
                 light,
+                pack: None,
             }),
             assets,
             render,
@@ -1257,6 +1283,8 @@ struct Game<'a> {
     /// item glows (built the first time the extra is on).
     dynamic_lights: Vec<[f32; 4]>,
     luminance: Option<horizon_client::dynamic_light::Luminance>,
+    /// The shader-pack manager (game/shader_packs.rs).
+    shader_packs: shader_packs::ShaderPacks,
     /// Name tags drawn over everything (`RenderPipelines.TEXT_SEE_THROUGH`).
     see_through_vertices: Vec<Vertex>,
     started: Instant,
@@ -2447,6 +2475,7 @@ impl Game<'_> {
             guest_boxes,
             player_collision,
             biomes: self.res.biomes(),
+            open_content: self.options.profile.is_open(),
             seed: self.level.seed,
             behaviours: self.res.behaviours(),
             items: self.res.items(),
@@ -2647,19 +2676,14 @@ impl Game<'_> {
             if !self.with_level(|b, level, ticks| b.scheduled_begin(level, ticks, fluids)) {
                 continue;
             }
-            // Horizon Open Creative's water is fixed scenery: due fluid ticks
-            // are taken and dropped, so nothing flows.
-            let fixed = fluids && self.options.profile.is_open();
-            if !fixed {
-                loop {
-                    let more =
-                        self.with_level(|b, level, ticks| b.scheduled_step(level, ticks, fluids));
-                    if !self.level_events.is_empty() {
-                        self.process_level_events()?;
-                    }
-                    if !more {
-                        break;
-                    }
+            loop {
+                let more =
+                    self.with_level(|b, level, ticks| b.scheduled_step(level, ticks, fluids));
+                if !self.level_events.is_empty() {
+                    self.process_level_events()?;
+                }
+                if !more {
+                    break;
                 }
             }
             self.with_level(|b, _, ticks| b.scheduled_finish(ticks, fluids));
@@ -4601,6 +4625,58 @@ impl Game<'_> {
             self.pitch = rotation.x_rot;
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn grab_cursor(window: &Window, capture: bool) -> bool {
+        use winit::window::CursorGrabMode;
+        if capture {
+            window
+                .set_cursor_grab(CursorGrabMode::Locked)
+                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+                .is_ok()
+        } else {
+            window.set_cursor_grab(CursorGrabMode::None).is_ok()
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn grab_cursor(window: &Window, capture: bool) -> bool {
+        use wasm_bindgen::JsCast;
+        use winit::platform::web::WindowExtWebSys;
+
+        // winit calls these optional DOM methods unconditionally. A JS exception
+        // during the first grab interrupts the frame that places the player.
+        let Some(canvas) = window.canvas() else {
+            return false;
+        };
+        let Some(document) = canvas.owner_document() else {
+            return false;
+        };
+        let (target, method) = if capture {
+            (canvas.as_ref(), "requestPointerLock")
+        } else {
+            if document.pointer_lock_element().is_none() {
+                return true;
+            }
+            (document.as_ref(), "exitPointerLock")
+        };
+        let Ok(function) = js_sys::Reflect::get(target, &method.into())
+            .and_then(|v| v.dyn_into::<js_sys::Function>())
+        else {
+            return false;
+        };
+        let Ok(value) = function.call0(target) else {
+            return false;
+        };
+        // A supported browser may still require a click. sync_web_pointer_lock
+        // observes the actual lock state and allows a subsequent click to retry.
+        if let Ok(promise) = value.dyn_into::<js_sys::Promise>() {
+            wasm_bindgen_futures::spawn_local(async move {
+                let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+            });
+        }
+        true
+    }
+
     /// `Minecraft.pause`: a single-player game with a pausing screen open.
     fn pauses_game(&self) -> bool {
         self.has_singleplayer_server()
@@ -4664,10 +4740,7 @@ impl Game<'_> {
             // so everywhere else warp after grabbing.
             #[cfg(target_os = "macos")]
             warp(window);
-            self.captured = window
-                .set_cursor_grab(CursorGrabMode::Locked)
-                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
-                .is_ok();
+            self.captured = Self::grab_cursor(window, true);
             #[cfg(not(target_os = "macos"))]
             if self.captured && self.focused {
                 warp(window);
@@ -4682,14 +4755,14 @@ impl Game<'_> {
                 if self.focused {
                     warp(window);
                 }
-                let _ = window.set_cursor_grab(CursorGrabMode::None);
+                Self::grab_cursor(window, false);
                 if self.focused {
                     warp(window);
                 }
                 let scale = HudBatch::new(size).scale;
                 self.cursor = (size[0] as f32 / 2.0 / scale, size[1] as f32 / 2.0 / scale);
             } else {
-                let _ = window.set_cursor_grab(CursorGrabMode::None);
+                Self::grab_cursor(window, false);
             }
             self.captured = false;
         }
@@ -4735,7 +4808,7 @@ impl Game<'_> {
             GRAB.set((None, false));
             self.captured = false;
             if let Some(window) = &self.window {
-                let _ = window.set_cursor_grab(CursorGrabMode::None);
+                Self::grab_cursor(window, false);
                 window.set_cursor_visible(true);
             }
         } else {
@@ -5293,6 +5366,9 @@ impl Game<'_> {
         }
     }
     fn craft_result(&self) -> Option<ItemStack> {
+        if let Some(result) = self.server_craft_result() {
+            return result;
+        }
         self.craft_recipe().map(|(_, result)| result)
     }
     /// The recipe id and result of the crafting grid.
@@ -5954,6 +6030,11 @@ impl Game<'_> {
             .collect();
         let carried = self.carried.clone();
         let creative = self.creative;
+        let server_result = if plain_map.is_some() {
+            self.server_craft_result()
+        } else {
+            None
+        };
         // CreativeModeInventoryScreen clicks the menu itself and sends every
         // changed slot, which the server sets by player.
         let equipment_before = (self.screen == Screen::Creative).then(|| self.player_equipment());
@@ -6034,6 +6115,11 @@ impl Game<'_> {
             menu.set_player_item(40, self.offhand.clone());
         }
         menu.settle(&env);
+        if let Some(result) = server_result {
+            // The click is predicted on the server's result (taking it
+            // empties the slot until the server sends the next).
+            menu.set_slot(&env, 0, result);
+        }
         if kind == Kind::Loom
             && let Some((selected, patterns)) = station_menu
         {
@@ -9299,21 +9385,6 @@ impl Game<'_> {
             }
         }
     }
-    /// Whether precipitation at a column is snow (Biome.coldEnoughToSnow:
-    /// base temperature lowered above y 80) or none (no precipitation).
-    fn precipitation(&self, x: i32, y: i32, z: i32) -> Option<bool> {
-        let chunk = self.world.chunks.get(&(x >> 4, z >> 4))?;
-        let b = self.res.biomes().get(chunk.biome(x, y, z));
-        if !b.precipitation {
-            return None;
-        }
-        let t = if y > 80 {
-            b.temperature - (y - 80) as f32 * 0.05 / 40.0
-        } else {
-            b.temperature
-        };
-        Some(t < 0.15)
-    }
     /// `getHeight(Heightmap.Types.MOTION_BLOCKING, x, z)`: one above the
     /// highest block in `blocks_motion_in_heightmap` or holding a fluid.
     fn rain_height(&self, x: i32, z: i32) -> i32 {
@@ -9324,6 +9395,7 @@ impl Game<'_> {
         })
     }
     fn tick_weather_effects(&mut self) {
+        use horizon_world::worldgen::biome_temperature::Precipitation;
         if self.flash > 0 {
             self.flash -= 1;
         }
@@ -9340,7 +9412,8 @@ impl Game<'_> {
             );
             let (x, z) = (eye[0].floor() as i32 + dx, eye[2].floor() as i32 + dz);
             let top = self.rain_height(x, z);
-            if self.precipitation(x, top, z) == Some(false)
+            if render_tick::precipitation_at(&self.world, self.res.biomes(), &[], x, top, z)
+                == Precipitation::Rain
                 && (top - eye[1] as i32).abs() < 10
                 && self.world.random.next_int_bound(5).unwrap_or(1) == 0
             {
@@ -9366,6 +9439,7 @@ impl Game<'_> {
         alpha: f64,
     ) -> Vec<horizon_client::weather::Vertex> {
         use horizon_client::weather;
+        use horizon_world::worldgen::biome_temperature::Precipitation;
         let (intensity, _) = self.world.weather.levels(alpha as f32);
         if intensity <= 0.0 {
             return Vec::new();
@@ -9385,6 +9459,8 @@ impl Game<'_> {
         // The 32x32 direction table supports at most a 15-block radius.
         let radius = self.settings.weather_radius.clamp(0, 15);
         let eye = camera.to_array();
+        let biomes = self.res.biomes();
+        let server_biomes = self.remote.as_ref().map_or(&[][..], |r| &r.server_biomes);
         let mut rain = Vec::new();
         let mut snow_vertices = Vec::new();
         // Saturation keeps extreme camera coordinates from overflowing the loop.
@@ -9396,8 +9472,17 @@ impl Game<'_> {
                 if y1 == y0 {
                     continue;
                 }
-                let Some(snow) = self.precipitation(x, cy, z) else {
-                    continue;
+                let snow = match render_tick::precipitation_at(
+                    &self.world,
+                    biomes,
+                    server_biomes,
+                    x,
+                    cy,
+                    z,
+                ) {
+                    Precipitation::None => continue,
+                    Precipitation::Rain => false,
+                    Precipitation::Snow => true,
                 };
                 let parameters = self.weather_parameters.get(x, z);
                 let light = self.world.light(x, top.max(cy), z);
@@ -10067,9 +10152,14 @@ impl Game<'_> {
                     .map_or(plains, |c| c.biome(qx * 4, qy * 4, qz * 4))
             })
         };
-        let blend = |pick: fn(&horizon_client::biome::BiomeInfo) -> Option<u32>, base: [f32; 3]| {
+        // A server's biomes the resources lack (all but plains for the open
+        // bundle) take the server's colours.
+        let server_biomes = self.remote.as_ref().map_or(&[][..], |r| &r.server_biomes);
+        let blend = |pick: fn(horizon_client::biome::ServerBiome) -> Option<u32>,
+                     base: [f32; 3]| {
             horizon_client::biome::blend_rgb(&weights, |b| {
-                pick(biomes.get(b)).map_or(base, horizon_client::biome::rgb)
+                pick(biomes.server_colours(b, server_biomes))
+                    .map_or(base, horizon_client::biome::rgb)
             })
         };
         let biome_sky = blend(
@@ -10250,7 +10340,9 @@ impl Game<'_> {
         } else {
             self.gather_dynamic_lights(camera, alpha);
         }
+        self.prepare_pack_frame(title);
         let frame = Frame {
+            shader_pack: self.pack_frame(camera.to_array(), title),
             weather: &weather,
             weather_time: horizon_client::weather::Time::new(self.world.game_time, alpha as f32),
             nether_lighting: self.dim == Dim::Nether,
@@ -11025,6 +11117,13 @@ impl ApplicationHandler for Game<'_> {
             self.perf.cancel_world_opening();
             return;
         }
+        if let WindowEvent::DroppedFile(path) = &event {
+            // Only the Shader Packs page takes files, as Iris's shader screen does.
+            if self.shader_pack_page_open() {
+                self.shader_pack_dropped(path);
+            }
+            return;
+        }
         if (self.pending_entry.is_some() || self.world_loader.is_some())
             && !matches!(
                 &event,
@@ -11748,6 +11847,11 @@ impl ApplicationHandler for Game<'_> {
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         #[cfg(target_arch = "wasm32")]
+        if horizon_client::gfx::web_gpu::failed() {
+            event_loop.exit();
+            return;
+        }
+        #[cfg(target_arch = "wasm32")]
         self.sync_web_pointer_lock();
         if self.pending_save.is_some() {
             match self.poll_closing_save() {
@@ -11805,6 +11909,7 @@ impl ApplicationHandler for Game<'_> {
         #[cfg(target_arch = "wasm32")]
         if let Some(e) = &self.error {
             log::error!("Horizon: the game stopped: {e}");
+            horizon_client::gfx::web_gpu::report_error(&e.to_string());
         }
         self.pad_close_output();
         if let Err(e) = self.save_for_exit() {
@@ -12009,6 +12114,7 @@ impl<'a> Game<'a> {
             entity_vertices: Vec::new(),
             dynamic_lights: Vec::new(),
             luminance: None,
+            shader_packs: shader_packs::ShaderPacks::default(),
             see_through_vertices: Vec::new(),
             health_hud: hud_layout::HealthHud::default(),
             started: now,
@@ -12858,6 +12964,7 @@ fn build_renderer(
         prepared,
         previous,
         api,
+        glsl_pack::requested(),
     ))?;
     renderer.hud.fire_animations = atlas
         .fire_animations
@@ -12904,6 +13011,7 @@ fn loading_renderer(
         None,
         previous,
         api,
+        glsl_pack::requested(),
     ))?;
     if let Some(atlas) = atlas {
         renderer.hud.fire_animations = atlas
@@ -12918,6 +13026,7 @@ fn loading_renderer(
 /// A title-shaped frame: black clear and panorama, only the HUD is drawn.
 fn loading_frame(hud: &HudBatch) -> Frame<'_> {
     Frame {
+        shader_pack: None,
         weather: &[],
         weather_time: horizon_client::weather::Time::new(0, 0.0),
         camera: glam::DVec3::new(0.5, 100.0, 0.5),
@@ -13531,10 +13640,31 @@ fn run_loading(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run() -> Result<()> {
-    let Some(mut options) = Options::read()? else {
+    let Some((options, shader_pack)) = Options::read(std::env::args().skip(1))? else {
         return Ok(());
     };
+    shader_pack.apply();
+    run_with_options(options)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn run_web(args: Vec<String>) -> std::result::Result<(), wasm_bindgen::JsValue> {
+    use wasm_bindgen::JsValue;
+    let game_error = |e: Box<dyn std::error::Error>| JsValue::from_str(&format!("Horizon: {e}"));
+    let Some((options, shader_pack)) = Options::read(args.into_iter()).map_err(game_error)? else {
+        return Ok(());
+    };
+    // The renderer reuses this device, so parse the opt-in before opening it.
+    shader_pack.apply();
+    horizon_client::gfx::open_web_gpu(glsl_pack::requested())
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    run_with_options(options).map_err(game_error)
+}
+
+fn run_with_options(mut options: Options) -> Result<()> {
     if options.dedicated.is_some() && !dedicated::preflight(&mut options)? {
         return Ok(());
     }
