@@ -61,6 +61,27 @@ export function shaderPackPath(url: string, base?: string) {
 /** The page hooks of the last boot: a retry replaces them instead of adding a second set. */
 let hooks: ReturnType<typeof installHooks> | undefined;
 
+/** The shader pack this release ships (web/shaderpacks), put in the game's `shaderpacks`
+ * folder each visit, off until the player chooses it. It stays in memory only, so a new
+ * release brings its own; a pack the player stored under the same name wins. Never throws:
+ * the game starts without it. */
+export async function installBundledPack(asset: { url: string } | undefined, stored: readonly string[],
+  installFile: (path: string, bytes: Uint8Array) => void) {
+  if (!asset) return;
+  const path = bundledPackPath(asset.url);
+  if (stored.includes(path)) return;
+  try {
+    installFile(path, new Uint8Array(await loadAsset(asset)));
+  } catch (error) {
+    console.warn(`The bundled shader pack ${path} could not be loaded`, error);
+  }
+}
+
+/** Where a bundled pack goes: `shaderpacks/` and the file name of its asset URL. */
+export function bundledPackPath(url: string) {
+  return `${PACKS}/${packNameFromUrl(url)}`;
+}
+
 const message = (error: unknown) => String((error as Error)?.message ?? error);
 
 /** Start the watchdog at handoff and stop counting while the tab is hidden. */
@@ -135,6 +156,7 @@ export async function* boot(edition: Edition, world: WorldId, name: string, cust
       yield step(2, "Loading your shader packs");
       await mirrorAtBoot(installFile, stored, (path) => emptied.push(path));
     }
+    await installBundledPack(release.assets.shaderPack, stored, installFile);
     hooks?.dispose();
     hooks = installHooks({
       installFile,

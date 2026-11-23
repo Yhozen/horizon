@@ -63,6 +63,8 @@ export async function packageRelease(webRoot, archive = join(webRoot, ".build/ho
     [name, spec, name === "resources" ? archive : join(webRoot, "dist", spec[0])]);
   if (shared && existsSync(shared)) inputs.push(["sharedResources", optionalFilenames.sharedResources, shared]);
   else console.warn("No open bundle archive (pnpm package:open): multiplayer will be unavailable in this release");
+  // The shader pack players find already in the Shader Packs list (web/shaderpacks/README.md).
+  inputs.push(["shaderPack", optionalFilenames.shaderPack, join(webRoot, "shaderpacks", optionalFilenames.shaderPack[0])]);
   for (const [name, [filename, contentType], input] of inputs) {
     const digest = await fingerprint(input);
     if (!digest.size || digest.size > 300_000_000) throw new Error(`${filename}: expected a file of 1–300 MB for the R2 upload API`);

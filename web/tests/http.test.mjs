@@ -169,3 +169,11 @@ test("unavailable identity and internal cache fail closed without caching errors
   assert.equal(response.status, 503);
   assert.equal(response.headers.get("Cache-Control"), "no-store");
 });
+
+test("the Worker serves every file a release can name", async () => {
+  const { assetPath } = await import("../src/http.ts");
+  const { filenames, optionalFilenames } = await import("../release.js");
+  for (const [filename] of [...Object.values(filenames), ...Object.values(optionalFilenames)]) {
+    assert.match(`/assets/${"a".repeat(64)}/${filename}`, assetPath, filename);
+  }
+});
