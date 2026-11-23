@@ -14,6 +14,8 @@ async function fixture(t) {
   for (const file of ["index.html", "cache.js", "release.js"]) await writeFile(join(root, file), "fixture");
   await writeFile(join(root, "dist/horizon-client.js"), "export default () => {};");
   await writeFile(join(root, "dist/horizon-client_bg.wasm"), Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]));
+  await mkdir(join(root, "shaderpacks"));
+  await writeFile(join(root, "shaderpacks/miniature-shader-2.19.zip"), "synthetic shader pack");
   const archive = join(root, "archive.bin");
   await writeFile(archive, "synthetic test resources");
   return { root, archive };
@@ -32,6 +34,10 @@ test("file hashes survive rebuilds and code-only releases; data changes invalida
   const data = await packageRelease(root, archive);
   assert.notEqual(data.assets.resources.url, code.assets.resources.url);
   assert.equal(data.assets.javascript.url, code.assets.javascript.url);
+  // The bundled shader pack is its own immutable asset: code and data changes leave it alone.
+  assert.match(data.assets.shaderPack.url, /^\/assets\/[a-f0-9]{64}\/miniature-shader-2\.19\.zip$/);
+  assert.equal(data.assets.shaderPack.contentType, "application/zip");
+  assert.equal(data.assets.shaderPack.url, initial.assets.shaderPack.url);
   assert.throws(() => validateRelease({ ...data, assets: { ...data.assets, resources: {
     ...data.assets.resources, url: "https://elsewhere.test/archive.bin",
   } } }));
@@ -86,9 +92,9 @@ test("immutable uploads are verified and reused; corruption and changed build fi
   const { files } = JSON.parse(await readFile(join(root, ".build/upload.json")));
   const r2 = fakeR2();
   await uploadAssets(r2.request, "bucket", files);
-  assert.equal(r2.puts(), 3);
+  assert.equal(r2.puts(), 4);
   await uploadAssets(r2.request, "bucket", files);
-  assert.equal(r2.puts(), 3);
+  assert.equal(r2.puts(), 4);
   r2.objects.get(files[0].key).etag = "wrong";
   await assert.rejects(uploadAssets(r2.request, "bucket", files), /Immutable object/);
   r2.objects.get(files[0].key).etag = files[0].md5;

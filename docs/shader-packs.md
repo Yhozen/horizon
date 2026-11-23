@@ -49,6 +49,12 @@ pack to the folder and chooses it. A pack whose shaders the browser's own compil
 during its first frames, and its report gives the browser's message; other programs of the pack fall back
 when they can.
 
+horizon.rccpr.tech ships one pack, [Miniature Shader](https://modrinth.com/shader/miniature-shader) 2.19
+(MIT; `web/shaderpacks/`), as part of each release (the `shaderPack` asset, cached like the game). The page
+puts it in the folder every visit, off until the player chooses it; it is not written to the browser's
+storage, so a later release replaces it, and removing it lasts until the next visit. A pack the player
+added under the same file name is used instead.
+
 ### From the command line
 
 ```sh

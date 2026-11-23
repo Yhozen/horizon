@@ -8,6 +8,8 @@ export const filenames = {
  * its players wear their own art over on the shared server (docs/open-creative.md). */
 export const optionalFilenames = {
   sharedResources: ["horizon-open-data.bin", "application/octet-stream"],
+  /** A shader pack the page puts in the game's `shaderpacks` folder (web/shaderpacks). */
+  shaderPack: ["miniature-shader-2.19.zip", "application/zip"],
 };
 
 function checkAsset(release, name, filename, contentType) {

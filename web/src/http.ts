@@ -1,5 +1,5 @@
 export const YEAR = 31536000;
-export const assetPath = /^\/assets\/[a-f0-9]{64}\/(horizon-data\.bin|horizon-open-data\.bin|horizon-client_bg\.wasm|horizon-client\.js)$/;
+export const assetPath = /^\/assets\/[a-f0-9]{64}\/(horizon-data\.bin|horizon-open-data\.bin|horizon-client_bg\.wasm|horizon-client\.js|miniature-shader-2\.19\.zip)$/;
 export type Shell = Readonly<Record<string, { readonly body: string; readonly contentType: string }>>;
 
 /** The worlds the page's menu may offer: the deployment's configuration, never a guess. */
