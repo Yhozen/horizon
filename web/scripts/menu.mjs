@@ -9,7 +9,7 @@ import { build } from "rolldown";
 const web = fileURLToPath(new URL("..", import.meta.url));
 const repo = join(web, "..");
 /** The menu's icon names, and the theme's pixel icons they use. */
-const ICONS = { info: "info-box", monitor: "monitor", user: "user", play: "play", globe: "globe", bug: "bug", heart: "heart" };
+const ICONS = { info: "info-box", monitor: "monitor", user: "user", play: "play", globe: "globe", bug: "bug", heart: "heart", gamepad: "gamepad" };
 const FONTS = [["Geist-Regular.woff2", 400], ["Geist-Medium.woff2", 500]];
 /** Each site's pictures: the private one may show Minecraft's look, the open one never. */
 export const ART = {

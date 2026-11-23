@@ -41,6 +41,22 @@ loop iteration next to winit's events.
 - `horizon-ctl pad ...` injects a virtual pad (buttons, sticks, triggers) into
   a running game, for tests without hardware.
 
+### In the browser
+
+gilrs has no WebAssembly backend, so the browser build (WEB.md) reads the
+page's Gamepad API instead (`game/pad/browser.rs`): `navigator.getGamepads()`
+once per frame, in the standard mapping, which is already positional (buttons
+0–3 South/East/West/North, 4/5 bumpers, 6/7 analog triggers, 8/9 Select/Start,
+10/11 stick clicks, 12–15 D-pad; axes 0–3 the sticks, down positive).
+`gamepad::standard_state` turns that into the same pad state gilrs fills, so the
+layout, bindings, deadzones, look curve and glyphs are the desktop's. The glyph
+family comes from the vendor in `Gamepad.id` (`gamepad::browser_ids`). A pad
+without the standard mapping is listed in `pad status` but not read. Browsers
+show a pad to the page only after one of its buttons is pressed.
+
+The landing menu (`web/menu/pad.ts`) reads the same API until the game starts:
+it shows the connected pad, ✕ / A presses Play and ○ / B closes How to play.
+
 ## Default mapping
 
 | Action | Xbox | PlayStation | Mapping |
@@ -248,7 +264,9 @@ of undying. Short, low-intensity pulses, as on Bedrock. A DualSense gets them
 shaped, through its own output report (below), on every OS. Other pads go through
 gilrs force feedback: Linux (evdev force feedback, including Steam Input's
 virtual pad) and Windows support it; macOS gilrs has no force feedback, so it
-is silently skipped there.
+is silently skipped there. In the browser, `vibrationActuator.playEffect("dual-rumble")`
+plays the pulse where the browser has it (Chrome, Edge); a DualSense's adaptive
+triggers, lightbar and HD haptics would need WebHID and are off there.
 
 ## DualSense output
 
