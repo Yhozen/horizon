@@ -448,6 +448,29 @@ impl Renderer {
         }
     }
 
+    /// The light's sections, `count` draws from `first`. In the browser each is
+    /// its own draw call: Chrome on a Galaxy S23+ (Adreno 740) loses the device a
+    /// few seconds into a shadow pass drawn with `multi_draw_indexed_indirect`,
+    /// even in runs of 32, and keeps drawing when the same draws go one by one.
+    /// The camera's passes keep the indirect draws. A shadow map holds a few
+    /// dozen sections, so the extra calls cost little.
+    fn shadow_sections(&self, pass: &mut wgpu::RenderPass<'_>, first: u32, count: u32) {
+        if !cfg!(target_arch = "wasm32") || !self.multi_draw {
+            self.draw_sections(pass, &self.indirect, 0, first, count);
+            return;
+        }
+        for i in first as usize..(first + count) as usize {
+            let (page, _) = self.draw_pages[i];
+            let d = self.draws[i];
+            pass.set_vertex_buffer(0, self.arena.buffer(page).slice(..));
+            if let Some(extra) = self.arena.extra_buffer(page) {
+                pass.set_vertex_buffer(2, extra.slice(..));
+            }
+            pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(d[2]..d[2] + d[0], d[3] as i32, d[4]..d[4] + 1);
+        }
+    }
+
     fn pack_shadow(
         &self,
         pack: &PackRenderer,
@@ -520,13 +543,7 @@ impl Renderer {
             pass.set_pipeline(&terrain.pipeline);
             self.bind_geometry(&mut pass, Geometry::Terrain, false);
             pass.set_bind_group(1, &group, &[]);
-            self.draw_sections(
-                &mut pass,
-                &self.indirect,
-                0,
-                counts.shadow_first,
-                counts.shadow_solid,
-            );
+            self.shadow_sections(&mut pass, counts.shadow_first, counts.shadow_solid);
         }
         // Its own pass: the entities program may draw other buffers.
         if let Some(entities) = pack.programs.get(&ProgramKind::ShadowEntities)
@@ -546,10 +563,8 @@ impl Renderer {
             pass.set_pipeline(&terrain.pipeline);
             self.bind_geometry(&mut pass, Geometry::Terrain, false);
             pass.set_bind_group(1, &group, &[]);
-            self.draw_sections(
+            self.shadow_sections(
                 &mut pass,
-                &self.indirect,
-                0,
                 counts.shadow_first + counts.shadow_solid,
                 counts.shadow_translucent,
             );
