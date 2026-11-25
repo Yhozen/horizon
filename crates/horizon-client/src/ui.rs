@@ -286,18 +286,28 @@ pub fn centered_text(
     if width <= w {
         batch.text_styled(atlas, text, x + ((w - width) / 2.0).floor(), y, color, true);
     } else {
-        // Clip by characters (vanilla scrolls; we show the part that fits).
-        let mut shown = Text::empty();
-        let mut used = 0.0;
-        for (i, (c, s)) in text.chars().enumerate() {
-            used += atlas.font.advance(c, s);
-            if used > w - 2.0 {
-                break;
-            }
-            shown.push(text.slice(i, i + 1));
-        }
-        batch.text_styled(atlas, &shown, x + 1.0, y, color, true);
+        // Swings between both ends, so the end (a slider's value) shows too.
+        static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        let seconds = START.get_or_init(Instant::now).elapsed().as_secs_f64();
+        let offset = scroll_offset(width - w, seconds);
+        let start = batch.vertices.len();
+        batch.text_styled(atlas, text, x - offset, y, color, true);
+        // The scissor: the widget's text area (the shadow reaches one pixel lower).
+        batch.clip_since(start, x, y - 2.0, x + w, y + 11.0);
     }
+}
+
+/// How far `renderScrollingString` has scrolled text `overflow` pixels too
+/// wide, `seconds` into the run: eased from 0 to `overflow` and back, over
+/// at least 3 seconds (half a second per pixel of overflow).
+fn scroll_offset(overflow: f32, seconds: f64) -> f32 {
+    let overflow = f64::from(overflow.max(0.0));
+    let period = (overflow * 0.5).max(3.0);
+    let phase = (std::f64::consts::FRAC_PI_2 * (std::f64::consts::TAU * seconds / period).cos())
+        .sin()
+        / 2.0
+        + 0.5;
+    (phase * overflow).trunc() as f32
 }
 /// Button (AbstractButton): nine-slice sprite plus the centred label.
 pub fn button(
@@ -1188,6 +1198,18 @@ impl EditBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_labels_scroll_to_their_end_and_back() {
+        // Starts at the end (a slider's value), reaches the start half a period
+        // later: half a second per pixel of overflow, at least 3 seconds.
+        assert_eq!(scroll_offset(40.0, 0.0), 40.0);
+        assert_eq!(scroll_offset(40.0, 10.0), 0.0);
+        assert!(scroll_offset(40.0, 20.0) >= 39.0);
+        assert_eq!(scroll_offset(4.0, 1.5), 0.0);
+        let mid = scroll_offset(40.0, 5.0);
+        assert!(mid > 0.0 && mid < 40.0, "{mid}");
+    }
 
     /// The quads' destination rectangles and their UVs.
     fn quads(batch: &HudBatch) -> Vec<([f32; 4], [f32; 4])> {
