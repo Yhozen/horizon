@@ -1,6 +1,6 @@
 //! The shader pack's per-frame inputs, and `--shader-pack PATH` /
-//! `--shader-pack-option NAME=VALUE` (a pack for this run, not saved; the
-//! manager is `game/shader_packs.rs`).
+//! `--shader-pack-option NAME=VALUE` / `--shader-pack-skip PROGRAM,...` (a pack
+//! for this run, not saved; the manager is `game/shader_packs.rs`).
 
 use super::Game;
 use horizon_client::gfx::PackFrame;
@@ -11,11 +11,41 @@ use std::sync::OnceLock;
 static PATH: OnceLock<PathBuf> = OnceLock::new();
 /// `--shader-pack-option NAME=VALUE` (repeatable), in order.
 static OPTIONS: std::sync::Mutex<Vec<(String, Option<String>)>> = std::sync::Mutex::new(Vec::new());
+/// `--shader-pack-skip`: program slots never drawn, whatever pack runs.
+static SKIP: OnceLock<Vec<horizon_glsl_pack::ProgramKind>> = OnceLock::new();
 
 #[derive(Default)]
 pub(super) struct Args {
     pub path: Option<PathBuf>,
     pub overrides: Vec<String>,
+    pub skip: Vec<horizon_glsl_pack::ProgramKind>,
+}
+
+/// `--shader-pack-skip`'s value: program slot names (`shadow`,
+/// `gbuffers_water`, `composite2`), separated by commas.
+pub(super) fn parse_skip(value: &str) -> Result<Vec<horizon_glsl_pack::ProgramKind>, String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| {
+            horizon_glsl_pack::ProgramKind::from_name(name)
+                .ok_or_else(|| format!("--shader-pack-skip: no program slot {name}"))
+        })
+        .collect()
+}
+
+/// The slots `--shader-pack-skip` leaves out, plus the shadow pass when
+/// `HORIZON_SHADER_PACK_SHADOWS=0` (natively; the browser has no environment).
+pub(super) fn skipped() -> Vec<horizon_glsl_pack::ProgramKind> {
+    let mut kinds = SKIP.get().cloned().unwrap_or_default();
+    if std::env::var("HORIZON_SHADER_PACK_SHADOWS").is_ok_and(|v| v == "0") {
+        kinds.extend([
+            horizon_glsl_pack::ProgramKind::Shadow,
+            horizon_glsl_pack::ProgramKind::ShadowEntities,
+        ]);
+    }
+    kinds
 }
 
 impl Args {
@@ -26,6 +56,7 @@ impl Args {
         for arg in self.overrides {
             add_option(&arg);
         }
+        let _ = SKIP.set(self.skip);
     }
 }
 
@@ -183,5 +214,20 @@ impl Game<'_> {
                 self.pack.assets.registry,
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horizon_glsl_pack::ProgramKind;
+
+    #[test]
+    fn skip_names_program_slots_and_refuses_unknown_ones() {
+        assert_eq!(
+            parse_skip("shadow, gbuffers_water,,final").unwrap(),
+            [ProgramKind::Shadow, ProgramKind::Water, ProgramKind::Final]
+        );
+        assert!(parse_skip("shadows").unwrap_err().contains("shadows"));
     }
 }
