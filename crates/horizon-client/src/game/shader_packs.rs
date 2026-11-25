@@ -1152,14 +1152,9 @@ impl Game<'_> {
             return Err("no renderer".into());
         };
         let mut compiled_ref = (**compiled).clone();
-        if std::env::var("HORIZON_SHADER_PACK_SHADOWS").is_ok_and(|v| v == "0") {
-            for kind in [
-                horizon_glsl_pack::ProgramKind::Shadow,
-                horizon_glsl_pack::ProgramKind::ShadowEntities,
-            ] {
-                compiled_ref.programs.remove(&kind);
-                compiled_ref.plan.programs.remove(&kind);
-            }
+        for kind in super::glsl_pack::skipped() {
+            compiled_ref.programs.remove(&kind);
+            compiled_ref.plan.programs.remove(&kind);
         }
         // The pack's `minecraft:textures/…` textures come from the game's own assets.
         let root = self.options.resources.clone();

@@ -64,6 +64,10 @@ horizon-client … --shader-pack pack.zip --shader-pack-option TAA_ENABLED=false
 
 `--shader-pack-option NAME=VALUE` (repeatable) changes one of the pack's options on top of its saved ones:
 `true`/`false` for a `#define` toggle, a value for `#define NAME value` and for the `const` options.
+`--shader-pack-skip PROGRAM,...` (repeatable) never draws those program slots (`shadow`, `gbuffers_water`,
+`final`, `composite2`), whatever the pack's options say: a pack's own "shadows off" option often keeps its
+`shadow` program, so the shadow pass still runs. In the browser, pass the game's arguments with `?args=`
+(they replace the page's defaults), for finding the program a phone's GPU fails on.
 
 The code is a clean-room rewrite: it is written from the pack format, its public documentation and the packs
 themselves, not from Iris, OptiFine, or the shader-pack code Horizon removed in `4e7c25bb`. What a pack
@@ -193,7 +197,7 @@ pack's `oldLighting` and `ambientOcclusionLevel`; without a pack the vertex is u
 
 `HORIZON_SHADER_PACK_DEBUG=colortex4` (or `depth`, `shadow`, `shadowcolor0`) shows one of the pack's
 textures instead of its image, after the frame's passes: enough to bisect a pack's passes without a GPU
-debugger. `HORIZON_SHADER_PACK_SHADOWS=0` runs the pack without its shadow program. Programs that do not
+debugger. `HORIZON_SHADER_PACK_SHADOWS=0` (or `--shader-pack-skip shadow,shadow_entities`) runs the pack without its shadow program. Programs that do not
 compile are logged and their slots skipped.
 
 ## Limits
